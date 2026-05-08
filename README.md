@@ -86,7 +86,7 @@ Output
 
 POST /nlp/lemmas
 
-Returns only lemmas, in order.
+Returns lightweight lemma data in two shapes: `tokens` for detailed clients and `lemmas` for simple clients.
 
 Intended use
 
@@ -107,6 +107,12 @@ Input
 Output
 
 {
+  "tokens": [
+    {"text": "Lev", "lemma": "Lev"},
+    {"text": "je", "lemma": "biti"},
+    {"text": "moj", "lemma": "moj"},
+    {"text": "sinček", "lemma": "sinček"}
+  ],
   "lemmas": ["Lev", "biti", "moj", "sinček"]
 }
 
@@ -144,6 +150,18 @@ Output
       "payload": {
         "suggestion": "primernejši izraz"
       }
+    }
+  ],
+  "spans": [
+    {
+      "type": "multiword_rule",
+      "rule_id": "slogovni_z otroci",
+      "match_on": "surface",
+      "trigger": "z otroci",
+      "start": 0,
+      "end": 8,
+      "token_indexes": [0, 1],
+      "surface": "z otroci"
     }
   ]
 }
@@ -190,8 +208,9 @@ Collocations are precomputed, stored in XML shards, and eager-loaded at startup.
 Collocations are descriptive evidence, not hard rules.
 
 GET /collocations/by-lemma
+GET /collocations
 
-Returns collocations for a single lemma.
+Returns collocations for a single lemma. `/collocations/by-lemma` is the clearer documented alias; `/collocations` remains backward-compatible.
 
 Intended use
 
@@ -250,13 +269,21 @@ Input
 Output
 
 {
-  "input": "shakespeareova tragedija",
-  "lemmas": ["shakespearov", "tragedija"],
+  "input_text": "Shakespeareova tragedija",
+  "lang": "sl",
+  "tokens": [...],
+  "phrase_surface_norm": "shakespeareova tragedija",
+  "phrase_lemma_sequence": ["shakespearov", "tragedija"],
+  "phrase_lemma_norm": "shakespearov tragedija",
   "matches": [
     {
-      "phrase": "shakespearova tragedija",
+      "surface": "shakespearova tragedija",
       "frequency": 364,
-      "rank": 1
+      "rank": 1,
+      "match_type": "lemma_sequence",
+      "matched_by": ["lemma_sequence"],
+      "lexical_unit_id": 12345,
+      "component_lemmas": ["shakespearov", "tragedija"]
     }
   ]
 }
@@ -298,7 +325,10 @@ Input
 Output
 
 {
-  "lemmas": ["shakespearov", "tragedija"],
+  "input_text": "Prebral sem Shakespeareovo tragedijo.",
+  "lang": "sl",
+  "tokens": [...],
+  "lemmas_used": ["shakespearov", "tragedija"],
   "collocations": {
     "shakespearov": [...],
     "tragedija": [...]
@@ -331,3 +361,31 @@ Smarter multi-word handling
 Chatbot tool bindings
 
 Usage-aware ranking
+
+MWU / multi-word-unit note
+
+The LORIS path now has a span layer. `POST /nlp/loris-check` still returns `tokens` and `issues`, but also returns `spans` for multi-word rules and token-aware `surface_name` matches. Frontends that highlight text can keep using `issues[*].start` and `issues[*].end`; frontends that need phrase-level UI should read `spans[*].token_indexes`, `spans[*].match_on`, and `spans[*].trigger`.
+
+The collocation phrase endpoint now checks both normalized surface form and lemma sequence. This means an inflected input phrase can match a stored collocation when the XML component lemmas match the input lemma sequence. See `MWU_CHANGES.md` for the Slovenian and English migration notes.
+
+---
+
+## MWU / span-layer update
+
+See `MWU_FRONTEND_NOTES.md` for the full bilingual Slovene/English description of the multi-word-unit changes.
+
+Important new/changed endpoints:
+
+- `POST /nlp/analyze-full` returns `{tokens, spans}`.
+- `POST /nlp/loris-check` still returns `{tokens, issues}`, but now also includes `spans`.
+- `POST /nlp/lemmas` now returns both `tokens` and a plain `lemmas` list.
+- `GET /collocations/by-lemma` is now available as an alias for `GET /collocations`.
+- `POST /collocations/phrase` now matches both normalized surface forms and lemma sequences.
+
+Frontend catch point for MWUs:
+
+```js
+const spans = response.spans ?? [];
+```
+
+Use `span.start` / `span.end` for text highlighting and `span.token_indexes` or `span.token_start` / `span.token_end` for token anchoring.

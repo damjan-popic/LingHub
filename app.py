@@ -7,7 +7,7 @@ from core.collocations import load_collocations
 app = FastAPI(
     title="LingHub",
     description="Hub service for Slovene/Italian NLP, thesaurus, collocations, and other language resources.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 

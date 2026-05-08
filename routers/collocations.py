@@ -12,11 +12,21 @@ router = APIRouter()
 
 def _norm(s: str) -> str:
     # normalize whitespace + robust lowercase for user input
-    return " ".join(s.strip().split()).casefold()
+    return " ".join((s or "").strip().split()).casefold()
 
 
 def _is_content_pos(pos: str, allowed: Set[str]) -> bool:
     return pos in allowed
+
+
+def _is_lexical_token(t: Dict[str, Any]) -> bool:
+    """
+    Keep phrase lemma matching focused on lexical tokens.
+    Punctuation and spacing should not block a collocation match.
+    """
+    pos = (t.get("pos") or "").strip().upper()
+    lemma = (t.get("lemma") or "").strip()
+    return bool(lemma) and pos not in {"PUNCT", "SPACE", "SYM"}
 
 
 def _extract_content_lemmas(tokens: List[Dict[str, Any]], allowed_pos: Set[str]) -> List[str]:
@@ -44,10 +54,22 @@ def _extract_content_lemmas(tokens: List[Dict[str, Any]], allowed_pos: Set[str])
     return out
 
 
+def _all_lemma_sequence(tokens: List[Dict[str, Any]]) -> List[str]:
+    """Normalized lemma sequence for the full input phrase, excluding punctuation."""
+    out: List[str] = []
+    for t in tokens:
+        if not _is_lexical_token(t):
+            continue
+        lemma = _norm(t.get("lemma") or "")
+        if lemma:
+            out.append(lemma)
+    return out
+
+
 def _surface_from_tokens(tokens: List[Dict[str, Any]]) -> str:
     """
     Build a normalized surface string from token texts.
-    For phrases, we keep it simple: join token texts with single spaces.
+    For phrases, we keep it simple: join non-empty token texts with single spaces.
     """
     parts = []
     for t in tokens:
@@ -56,6 +78,54 @@ def _surface_from_tokens(tokens: List[Dict[str, Any]]) -> str:
             continue
         parts.append(txt)
     return _norm(" ".join(parts))
+
+
+def _component_lemma_sequence(collocation: Dict[str, Any]) -> List[str]:
+    """Normalized lemma sequence from XML collocation components."""
+    out: List[str] = []
+    for comp in collocation.get("components", []) or []:
+        lemma = _norm(comp.get("lemma") or "")
+        if lemma:
+            out.append(lemma)
+    return out
+
+
+def _component_surface_norm(collocation: Dict[str, Any]) -> str:
+    """Normalized surface reconstructed from XML collocation components."""
+    parts: List[str] = []
+    for comp in collocation.get("components", []) or []:
+        text = (comp.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return _norm(" ".join(parts))
+
+
+def _match_types_for_collocation(
+    *,
+    phrase_surface: str,
+    phrase_lemma_sequence: List[str],
+    collocation: Dict[str, Any],
+) -> List[str]:
+    """
+    Decide whether the input phrase matches a collocation by surface, by lemma
+    sequence, or both. Lemma-sequence matching lets inflected user input match
+    stored canonical/component lemmas.
+    """
+    matched_by: List[str] = []
+
+    surface_candidates = {
+        _norm(collocation.get("surface") or ""),
+        _component_surface_norm(collocation),
+    }
+    surface_candidates.discard("")
+    if phrase_surface and phrase_surface in surface_candidates:
+        matched_by.append("surface")
+
+    comp_lemmas = _component_lemma_sequence(collocation)
+    if phrase_lemma_sequence and comp_lemmas and phrase_lemma_sequence == comp_lemmas:
+        matched_by.append("lemma_sequence")
+
+    return matched_by
 
 
 # ---------- Request models ----------
@@ -106,6 +176,7 @@ class PhraseRequest(TextRequest):
 
 # ---------- Existing endpoint (lemma lookup) ----------
 
+@router.get("/collocations/by-lemma")
 @router.get("/collocations")
 async def collocations_by_lemma(
     lemma: str = Query(..., description="Headword lemma (case-insensitive)"),
@@ -173,6 +244,7 @@ async def collocations_from_text(req: FromTextRequest) -> Dict[str, Any]:
     return {
         "input_text": text,
         "lang": lang,
+        "tokens": tokens,
         "lemmas_used": lemmas,
         "collocations": results,
         "note": "Exploratory helper endpoint. Not a full-text validator.",
@@ -196,6 +268,8 @@ async def collocations_phrase(req: PhraseRequest) -> Dict[str, Any]:
 
     allowed_pos = set(req.allowed_pos)
     phrase_surface = _surface_from_tokens(tokens)
+    phrase_lemma_sequence = _all_lemma_sequence(tokens)
+    phrase_lemma_norm = " ".join(phrase_lemma_sequence)
 
     # Candidate lemmas from the phrase
     extracted = _extract_content_lemmas(tokens, allowed_pos)
@@ -211,19 +285,16 @@ async def collocations_phrase(req: PhraseRequest) -> Dict[str, Any]:
         # fallback: if nothing content-like, try using all lemmas
         all_lemmas = []
         seen = set()
-        for t in tokens:
-            lemma = (t.get("lemma") or "").strip()
-            if not lemma:
+        for lemma in phrase_lemma_sequence:
+            if lemma in seen:
                 continue
-            k = _norm(lemma)
-            if k in seen:
-                continue
-            seen.add(k)
-            all_lemmas.append(k)
+            seen.add(lemma)
+            all_lemmas.append(lemma)
         headwords = all_lemmas[:1]  # keep it cheap
 
     matches: List[Dict[str, Any]] = []
     evidence: Dict[str, Any] = {}
+    seen_matches: Set[str] = set()
 
     # 2) For each candidate headword: retrieve top collocations and check if phrase matches any
     for hw in headwords:
@@ -246,32 +317,62 @@ async def collocations_phrase(req: PhraseRequest) -> Dict[str, Any]:
             "top": collocs,  # full structured evidence (frontend/chatbot can pick what it wants)
         }
 
-        # Build match list + rank
+        # Build match list + rank. Matching is now both surface-aware and lemma-sequence-aware.
         for i, c in enumerate(collocs, start=1):
-            surf = _norm(c.get("surface", ""))
-            if surf and surf == phrase_surface:
-                matches.append(
-                    {
-                        "headword": hw,
-                        "rank": i,
-                        "frequency": c.get("frequency"),
-                        "logDice": c.get("logDice"),
-                        "structure_id": c.get("structure_id"),
-                        "lexical_unit_id": c.get("lexical_unit_id"),
-                        "surface": c.get("surface"),
-                    }
-                )
+            matched_by = _match_types_for_collocation(
+                phrase_surface=phrase_surface,
+                phrase_lemma_sequence=phrase_lemma_sequence,
+                collocation=c,
+            )
+            if not matched_by:
+                continue
+
+            match_key = "|".join(
+                [
+                    str(hw),
+                    str(c.get("lexical_unit_id")),
+                    str(c.get("structure_id")),
+                    _norm(c.get("surface") or ""),
+                    ",".join(matched_by),
+                ]
+            )
+            if match_key in seen_matches:
+                continue
+            seen_matches.add(match_key)
+
+            match_type = "surface_and_lemma_sequence" if len(matched_by) > 1 else matched_by[0]
+            matches.append(
+                {
+                    "headword": hw,
+                    "rank": i,
+                    "match_type": match_type,
+                    "matched_by": matched_by,
+                    "frequency": c.get("frequency"),
+                    "logDice": c.get("logDice"),
+                    "structure_id": c.get("structure_id"),
+                    "lexical_unit_id": c.get("lexical_unit_id"),
+                    "surface": c.get("surface"),
+                    "surface_norm": _norm(c.get("surface") or ""),
+                    "component_lemmas": _component_lemma_sequence(c),
+                    "components": c.get("components", []),
+                }
+            )
 
     return {
         "input_text": text,
         "lang": lang,
+        "tokens": tokens,
         "phrase_surface_norm": phrase_surface,
+        "phrase_lemma_sequence": phrase_lemma_sequence,
+        "phrase_lemma_norm": phrase_lemma_norm,
         "lemmas_extracted": extracted,
         "headwords_checked": headwords,
         "matches": matches,
         "evidence": evidence,
         "interpretation_hint": (
             "If matches is non-empty, the phrase exists among top collocations for at least one headword lemma. "
+            "match_type='surface' means the surface form matched exactly after normalization; "
+            "match_type='lemma_sequence' means an inflected user phrase matched the collocation component lemmas. "
             "If empty, it may still be valid; use evidence lists to suggest more typical alternatives."
         ),
     }

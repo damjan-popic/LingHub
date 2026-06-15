@@ -1,5 +1,10 @@
 # MWU and frontend data-catch changes
 
+> Update after the LORIS approved-entry import: `response.spans` now covers single-token LORIS rules as `type: "token_rule"` and multi-word rules as `type: "multiword_rule"`. Frontends can prefer `spans` and use `issues` as a backward-compatible fallback.
+
+> Posodobitev po uvozu potrjenih LORIS vnosov: `response.spans` zdaj pokriva enobesedna LORIS pravila kot `type: "token_rule"` in večbesedna pravila kot `type: "multiword_rule"`. Frontend lahko prednostno uporablja `spans`, `issues` pa kot varnostni fallback.
+
+
 ## Slovensko
 
 LingHub je zdaj pripravljen na to, da lematizator vrača poleg tokenov tudi razpone (`spans`). Glavna sprememba je, da večbesedne enote niso več skrite kot “leme s presledki” ali kot posebni primeri v posameznih modulih, ampak se lahko prek API-ja prenesejo kot samostojni razponi čez tokenizirano besedilo.

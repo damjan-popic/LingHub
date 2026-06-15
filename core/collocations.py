@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict, Literal, Any
 import xml.etree.ElementTree as ET
+from .config import LINGHUB_ENABLE_COLLOCATIONS
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -75,6 +76,13 @@ def load_collocations() -> None:
     """
     global _LOADED, _INDEX, _CANONICAL
     if _LOADED:
+        return
+
+    if not LINGHUB_ENABLE_COLLOCATIONS:
+        print("[LingHub] Collocations disabled; set LINGHUB_ENABLE_COLLOCATIONS=1 to load XML shards.")
+        _INDEX = {}
+        _CANONICAL = {}
+        _LOADED = True
         return
 
     print(f"[LingHub] Loading collocations from: {COLLOC_DIR}")

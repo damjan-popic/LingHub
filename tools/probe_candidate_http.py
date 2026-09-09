@@ -17,6 +17,7 @@ def main():
     p.add_argument('--port', type=int, required=True)
     p.add_argument('--pid', type=int, required=True)
     p.add_argument('--report', type=Path, required=True)
+    p.add_argument('--expect-local-persistent', action='store_true')
     args = p.parse_args()
     base = f'http://127.0.0.1:{args.port}'
     proc = Path('/proc') / str(args.pid)
@@ -56,7 +57,7 @@ def main():
 
     try:
         health = get('/health')
-        assert health['status'] == 'ok' and not health['operational_activation']
+        assert health['status'] == 'ok' and health['operational_activation'] == args.expect_local_persistent
         assert health['resources']['thesaurus']['available'] and health['resources']['collocations']['usable']
         assert health['resources']['morphology']['release_fingerprint'] == 'fa2fe5c58891375b9953ed868812d3489192602aab97fd2c2a288f9fc0c8db0b'
         report['resource_readiness'] = health

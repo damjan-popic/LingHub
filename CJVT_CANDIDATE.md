@@ -1,5 +1,9 @@
 # CJVT resource candidate on ALDHI
 
+This retained guide describes the Part A parent commit. The separate Core
+activation extension and current contracts are documented in
+[CORE_ACTIVATION.md](CORE_ACTIVATION.md).
+
 This branch adds streaming source converters, read-only SQLite adapters and an
 opt-in dictionary API. Canonical `app.py` and contextual NLP are unchanged.
 The authoritative acquisition/build/runtime evidence is linked from

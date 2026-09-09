@@ -11,8 +11,11 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from core.contextual import router as contextual_router, configured_lemmatizer_url, upstream_health
 
 EXPECTED_MORPHOLOGY = 'fa2fe5c58891375b9953ed868812d3489192602aab97fd2c2a288f9fc0c8db0b'
+EXPECTED_SYNONYMS = 'de2195bde050500bce48de068f968395d5d68d75634942ef7f33dc692d007849'
+EXPECTED_COLLOCATIONS = '25fd5882cde3b326208050bb6bfbd3901895a83ac6633b209e081fde0bf8f63c'
 
 
 def configured_path(name):
@@ -48,6 +51,8 @@ async def lifespan(app):
         close = getattr(collocations, 'close', None)
         if close:
             cleanup.callback(close)
+        if synonyms.manifest['fingerprint'] != EXPECTED_SYNONYMS or collocations.manifest['build_id'] != EXPECTED_COLLOCATIONS:
+            raise RuntimeError('Dictionary identities differ from the verified Part A releases')
         morphology = MorphologyService(morphology_root, required=True)
         cleanup.callback(morphology.close)
         release = morphology.load_release()
@@ -61,6 +66,13 @@ async def lifespan(app):
         observed_paths += [collocation_root / name for name in (*resource_evidence, 'collocations.sqlite')]
         observed_paths += [morphology_root / name for name in ('release-manifest.json','sl/lexicon.sqlite','it/lexicon.sqlite')]
         app.state.resource_files = {path: file_identity(path) for path in observed_paths}
+        app.state.lemmatizer_url = configured_lemmatizer_url()
+        scope = os.environ.get('LINGHUB_DEPLOYMENT_SCOPE', 'candidate')
+        if scope not in ('candidate', 'local_persistent'):
+            raise RuntimeError('Unknown LingHub deployment scope')
+        if scope == 'local_persistent' and app.state.lemmatizer_url is None:
+            raise RuntimeError('Persistent local Core requires explicit MY_LEMMATIZER_URL')
+        app.state.deployment_scope = scope
         yield
     finally:
         # Also unwind partial startup and cancellation; ExitStack attempts every
@@ -77,17 +89,29 @@ def require_resources_unchanged(request: Request):
         raise HTTPException(503, 'Candidate resource files changed or became unavailable; restart validation is required.')
 
 
-app = FastAPI(title='LingHub CJVT resource candidate', version='0.1.0', lifespan=lifespan,
+app = FastAPI(title='LingHub local Core candidate', version='0.2.0', lifespan=lifespan,
               dependencies=[Depends(require_resources_unchanged)])
+app.include_router(contextual_router)
 
 
-@app.get('/health')
 @app.get('/v1/resources/health')
-def health(request: Request):
-    return {'status': 'ok', 'service': 'LingHub-CJVT-candidate', 'operational_activation': False,
+def resource_health(request: Request):
+    scope = getattr(request.app.state, 'deployment_scope', 'candidate')
+    return {'status': 'ok', 'service': 'LingHub-CJVT-candidate', 'operational_activation': scope == 'local_persistent',
+            'deployment_scope': scope,
             'resources': request.app.state.resource_readiness,
             'contextual_nlp': {'status': 'NOT_ACTIVATED', 'required_for_dictionary_lookup': False},
             'classla_adapter': 'NOT_STARTED'}
+
+
+@app.get('/health')
+async def health(request: Request):
+    result = resource_health(request)
+    if getattr(request.app.state, 'lemmatizer_url', None):
+        await upstream_health(request)
+        result.update(service='LingHub-Core-local', contextual_nlp={'status': 'READY_LOCAL',
+            'backend': 'my_lemmatizer', 'production_parity': 'PENDING', 'required_for_dictionary_lookup': False})
+    return result
 
 
 def clean_lemma(value):

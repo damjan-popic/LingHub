@@ -139,3 +139,56 @@ grammatical combinations, original offsets and both engines. Its
 an unused loopback upstream; never break a persistent service for that test.
 Existing `tools/probe_core_http.py` and the corrected infrastructure resource
 probe remain the legacy regression gates.
+
+## Browser workbench and repeatable acceptance
+
+Open `/workbench/` on the same LingHub origin. The Slovene interface offers
+Slovene/Italian analysis, visible LORIS rule advice, original-text selection,
+source-grouped dictionary evidence, native MSD inflections and explicit Slovene
+spaCy/CLASSLA comparison. UTF-16 browser selections are translated to Unicode
+code-point offsets without normalizing the source text. The dictionary tools
+explain Italian's unsupported dictionary coverage. Engine availability and the
+Italian model's noncommercial licence are visible in the current catalogue.
+
+Terminology searches and the separate KLIKai text-check button use fixed,
+bounded same-origin forwarding routes. Terminology returns the existing real
+citation IDs. KLIKai text checks show its actual LingHub trace and source-policy
+filtered LORIS rule metadata; KLIKai's linked-only advice restriction is retained.
+The KLIKai-specific text bound is 5,000 code points, compared with 10,000 for
+direct LingHub analysis. An unavailable KLIKai does not disable direct tools.
+
+The workbench writes no localStorage/sessionStorage, calls no external service,
+and persists no pasted text. JSON and token TSV downloads require explicit
+buttons. Responses and text are rendered with textContent, including dictionary
+records and LORIS advice. Its CSP permits only same-origin assets and requests.
+Loopback on a shared computer remains local research access, not authentication.
+
+Run the real browser probe as an unprivileged operator with an existing private
+report parent. The installed local Chrome/Playwright runtime is used without
+installing dependencies or contacting public sites:
+
+```text
+/usr/bin/node tools/probe_workbench.cjs --base-url http://127.0.0.1:8010 --report /PRIVATE/EXISTING/browser.json
+```
+
+The probe checks real analysis/advice, repeated Unicode selection, single-analysis
+exploration, comparison, native MSDs, dictionary groups/no-hit, Italian behavior,
+explicit exports and empty browser storage. The XSS and unavailable-engine UI
+checks alone use declared fault fixtures; all other backend calls are real.
+Before an isolated KLIKai candidate exists, explicitly adding `--skip-klikai`
+produces `PASS_WITH_KLIKAI_PENDING` with two SKIPs. It never represents complete
+platform acceptance. Full mode requires real KLIKai citations and a real
+KLIKai→LingHub trace with source rights preserved.
+
+Run the reusable real JSONL acceptance with a *new* private directory:
+
+```text
+/data/envs/lingstack/linghub/bin/python -B tools/probe_batch_client.py --base-url http://127.0.0.1:8010 --report-dir /PRIVATE/NEW/batch-probe
+```
+
+Its 20 synthetic documents exercise actual CLASSLA HTTP, a controlled CLI SIGINT,
+ordered resume, unchanged reuse and changed-input/engine recomputation. The final
+phase supplies a deliberately stale historical cache identity and proves all
+items are recomputed against real HTTP; it never alters current resources,
+models or defaults. It verifies 0700 directories, 0600 files and a manifest with
+no raw text. The report describes this cache fixture explicitly.

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LingStack · Jezikovna delavnica</title>
+  <link rel="stylesheet" href="/workbench-static/style.css">
+  <script type="module" src="/workbench-static/app.js"></script>
+</head>
+<body>
+  <header><div><span class="eyebrow">LINGSTACK · ALDHI</span><h1>Jezikovna delavnica</h1></div><span class="local">Lokalna raziskovalna različica</span></header>
+  <main>
+    <section class="editor card" aria-labelledby="text-title">
+      <div class="section-head"><h2 id="text-title">Pregled besedila</h2><button id="examples" class="quiet">Primeri</button></div>
+      <div id="example-list" class="examples" hidden></div>
+      <div class="settings"><label>Jezik <select id="lang"><option value="sl">Slovenščina</option><option value="it">Italijanščina</option></select></label><label>Analizator <select id="engine"><option value="default">Privzeti · spaCy</option><option value="spacy">spaCy</option><option value="classla">CLASSLA · poskusno, sl</option></select></label></div>
+      <label class="sr-only" for="text">Besedilo za analizo</label><textarea id="text" maxlength="20000" rows="7" spellcheck="false" placeholder="Prilepite besedilo. Za raziskovanje označite besedo ali besedno zvezo.">Na občnem zboru smo pravilnik pripravili na štiri roke.</textarea>
+      <div class="selection"><span id="selection-label">Brez izbranega odseka</span><span id="length">0 / 10.000</span></div>
+      <div class="actions"><button id="analyze" class="primary">Analiziraj besedilo</button><button id="explore">Razišči izbor</button><button id="compare">Primerjava analizatorjev</button></div>
+      <p class="hint">LORIS daje nasvete na podlagi pravil. Odsotnost zadetkov ne pomeni, da je besedilo brez slovničnih, pravopisnih ali slogovnih težav.</p>
+      <div id="status" role="status" aria-live="polite">Pripravljeno.</div>
+    </section>
+    <section class="card sources" aria-labelledby="source-title"><div class="section-head"><h2 id="source-title">Viri in zmožnosti</h2><button id="refresh" class="quiet">Osveži</button></div><div id="capabilities">Preverjanje lokalnih storitev …</div><details><summary>Identitete in licence</summary><div id="catalogue"></div></details></section>
+    <section class="card results" aria-labelledby="analysis-title"><div class="section-head"><h2 id="analysis-title">Analiza in nasveti</h2><div><button id="export-json" class="quiet" disabled>Izvozi JSON</button><button id="export-tsv" class="quiet" disabled>Izvozi TSV</button></div></div><div id="analysis"><p class="empty">Začnite z analizo. Besedilo in rezultati ostanejo v pomnilniku te strani.</p></div><div id="comparison"></div></section>
+    <section class="card lexical" aria-labelledby="lexical-title"><h2 id="lexical-title">Leksikalni dokazi</h2><label for="lemma">Beseda ali lema</label><div class="input-row"><input id="lemma" value="otrok" maxlength="256"><button id="synonyms">Sopomenke</button><button id="collocations">Kolokacije</button><button id="inflect">Oblikoslovje</button></div><p class="hint">Slovarski kandidati niso kontekstualna napoved. Pogostnost in podobna lema ne določata ustreznega pomena ali najboljše zamenjave.</p><div id="lexical-results"><p class="empty">Izberite odsek ali poiščite lemo.</p></div></section>
+    <section class="card terminology" aria-labelledby="term-title"><h2 id="term-title">Terminologija · KLIKai</h2><label for="term-query">Terminološka poizvedba</label><div class="input-row"><input id="term-query" value="BES" maxlength="256"><button id="term-search" class="primary">Poišči s citati</button></div><div class="tool-check"><button id="klikai-check">Preveri besedilo prek KLIKai</button><span>Ločen preizkus poti KLIKai → LingHub; ne neposredna analiza LingHub.</span></div><div id="term-results"></div></section>
+  </main>
+  <footer>Brez samodejnega shranjevanja ali zunanjih storitev. Izvoz sprožite sami. Lokalni naslov na skupnem računalniku ni uporabniška prijava. Privzeti analizator ostaja spaCy; jezikoslovna presoja CLASSLA je odprta.</footer>
+</body>
+</html>

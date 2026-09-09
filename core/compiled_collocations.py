@@ -54,12 +54,18 @@ class CompiledCollocations:
 
     def get_collocations_for_lemma(self, lemma: str, *, min_freq: int | None = 1,
             min_logdice: float | None = None, structure_id: int | None = None,
-            status: str | None = None, limit: int = 50, sort: str = 'freq', order: str = 'desc') -> dict:
+            status: str | None = None, limit: int = 50, sort: str = 'freq', order: str = 'desc',
+            kind: str = 'collocation') -> dict:
         if sort not in ('freq', 'logdice') or order not in ('asc', 'desc'):
             raise ValueError('Invalid collocation ordering')
         key = normalize(lemma)
         limit = min(500, max(1, int(limit)))
-        clauses, params = ['o.headword_key=?', "o.kind='collocation'"], [key]
+        if kind not in ('collocation', 'grammaticalCombination', 'all'):
+            raise ValueError('Invalid source occurrence kind')
+        clauses, params = ['o.headword_key=?'], [key]
+        if kind != 'all':
+            clauses.append('o.kind=?')
+            params.append(kind)
         effective_frequency = None if min_freq is None else max(1, int(min_freq))
         if effective_frequency is not None:
             clauses.append('o.frequency>=?')
@@ -82,7 +88,8 @@ class CompiledCollocations:
                    JOIN shards sh ON sh.id=e.shard_id WHERE ''' + ' AND '.join(clauses)
         query += f' ORDER BY {first} {direction}, {second} {direction}, o.surface {direction}, o.id ASC LIMIT ?'
         with closing(self.connect()) as db:
-            total = db.execute("SELECT count(*) FROM occurrences WHERE headword_key=? AND kind='collocation'", (key,)).fetchone()[0]
+            total = db.execute('SELECT count(*) FROM occurrences WHERE headword_key=?' + (' AND kind=?' if kind != 'all' else ''),
+                (key, kind) if kind != 'all' else (key,)).fetchone()[0]
             head = db.execute('SELECT headword FROM entries WHERE headword_key=? ORDER BY id LIMIT 1', (key,)).fetchone()
             rows = db.execute(query, [*params, limit]).fetchall()
             components = defaultdict(list)
@@ -99,6 +106,7 @@ class CompiledCollocations:
         records = []
         for r in rows:
             records.append({'headword': r['headword'], 'headword_key': r['headword_key'],
+                'kind': r['kind'],
                 'sense_id': r['source_sense_id'], 'lexical_unit_id': r['lexical_unit_id'],
                 'collocation_id': r['source_collocation_id'], 'structure_id': r['structure_id'],
                 'status': r['status'], 'frequency': r['frequency'], 'logDice': r['logdice'],
@@ -116,6 +124,7 @@ class CompiledCollocations:
                     'status': status, 'limit': limit, 'sort': sort, 'order': order},
                 'collocations': records, 'resource': {'build_id': self.manifest['build_id'],
                     'frequency_null_policy': 'Excluded by numeric min_freq; min_freq=null retains missing values',
-                    'component_order': 'XML document order; @num preserved separately', 'deduplicated': False}}
+                    'component_order': 'XML document order; @num preserved separately', 'deduplicated': False,
+                    'kind_filter': kind}}
 
     lookup = get_collocations_for_lemma

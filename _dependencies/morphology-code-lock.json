@@ -1,0 +1,18 @@
+{
+  "origin": "KLIKai",
+  "git_sha": "d71ac7f980b68bdf81cb1770e9ddf9ad4da50f85",
+  "source_scope": "pure morphology service and schema package",
+  "license": "No explicit repository code licence found; local owner-authorized reuse only. Source resource licences remain separate.",
+  "files_sha256": {
+    "apps/api/klikai_api/__init__.py": "c3c221b11d1ed2bbb2e30ca5302596c7106501bdf5c4f9fc848f3a5289af5aa4",
+    "apps/api/klikai_api/schemas/__init__.py": "560e039d447c77f3e96cdc87e4f3aabf8abd52d6b25ede718ff5806bebe3e1dd",
+    "apps/api/klikai_api/schemas/source.py": "43afbe9a34a03dd873610e330a1b50597062a0ee9712b617a45a848010bfb0e7",
+    "apps/api/klikai_api/schemas/morphology.py": "6e29f6e370c06ac42af17f4bd98fc9c7eae3d9e099a0274ebc77403195ae17ac",
+    "apps/api/klikai_api/schemas/terminology.py": "7dd82cc09647cf757b0c0cb5ddcb2ab0cc55729eabd6a7fb36490c9279ff766b",
+    "apps/api/klikai_api/schemas/chat.py": "e80588beae202dcdc71b07bc2b468f555066b984f7153059365295cb3efee9aa",
+    "apps/api/klikai_api/schemas/feedback.py": "7610651880cdc9b0b70458288b81d498581c5e548243122a95b3b575bb208314",
+    "apps/api/klikai_api/schemas/search.py": "160b283fd6c4c59db24bb40182bae0dc39e773efa8f95d331141289c22de2eba",
+    "apps/api/klikai_api/services/__init__.py": "88b23e193d9561c480c34035d800f5dd03510d2c8cd5940915b9111bea58005c",
+    "apps/api/klikai_api/services/morphology.py": "b533191dba3d7c884d0d99c32542bb18322915a0d745274068afbc170ac0ae60"
+  }
+}

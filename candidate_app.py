@@ -12,6 +12,10 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from core.contextual import router as contextual_router, configured_lemmatizer_url, upstream_health
+from core.platform_api import router as platform_router, PARTIAL_PATHS, public, bounded_thesaurus
+from core.request_limits import RequestBodyLimit
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.staticfiles import StaticFiles
 
 EXPECTED_MORPHOLOGY = 'fa2fe5c58891375b9953ed868812d3489192602aab97fd2c2a288f9fc0c8db0b'
 EXPECTED_SYNONYMS = 'de2195bde050500bce48de068f968395d5d68d75634942ef7f33dc692d007849'
@@ -66,6 +70,11 @@ async def lifespan(app):
         observed_paths += [collocation_root / name for name in (*resource_evidence, 'collocations.sqlite')]
         observed_paths += [morphology_root / name for name in ('release-manifest.json','sl/lexicon.sqlite','it/lexicon.sqlite')]
         app.state.resource_files = {path: file_identity(path) for path in observed_paths}
+        app.state.resource_files_by_kind = {
+            'synonyms': {p:app.state.resource_files[p] for p in observed_paths[:5]},
+            'collocations': {p:app.state.resource_files[p] for p in observed_paths[5:10]},
+            'morphology': {p:app.state.resource_files[p] for p in observed_paths[10:]}}
+        app.state.morphology_release = release
         app.state.lemmatizer_url = configured_lemmatizer_url()
         scope = os.environ.get('LINGHUB_DEPLOYMENT_SCOPE', 'candidate')
         if scope not in ('candidate', 'local_persistent'):
@@ -81,6 +90,8 @@ async def lifespan(app):
 
 
 def require_resources_unchanged(request: Request):
+    if request.url.path in PARTIAL_PATHS or request.url.path.startswith(('/workbench','/workbench-api','/workbench-static')):
+        return
     try:
         unchanged = all(file_identity(path) == identity for path, identity in request.app.state.resource_files.items())
     except OSError:
@@ -92,6 +103,13 @@ def require_resources_unchanged(request: Request):
 app = FastAPI(title='LingHub local Core candidate', version='0.2.0', lifespan=lifespan,
               dependencies=[Depends(require_resources_unchanged)])
 app.include_router(contextual_router)
+app.include_router(platform_router)
+app.add_middleware(RequestBodyLimit,limit=131072)
+app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost','testserver'])
+if Path(__file__).with_name('workbench_routes.py').is_file():
+    from workbench_routes import router as workbench_router
+    app.include_router(workbench_router)
+    app.mount('/workbench-static',StaticFiles(directory=Path(__file__).with_name('workbench')),name='workbench-static')
 
 
 @app.get('/v1/resources/health')
@@ -99,9 +117,11 @@ def resource_health(request: Request):
     scope = getattr(request.app.state, 'deployment_scope', 'candidate')
     return {'status': 'ok', 'service': 'LingHub-CJVT-candidate', 'operational_activation': scope == 'local_persistent',
             'deployment_scope': scope,
-            'resources': request.app.state.resource_readiness,
+            'resources': public(request.app.state.resource_readiness),
             'contextual_nlp': {'status': 'NOT_ACTIVATED', 'required_for_dictionary_lookup': False},
-            'classla_adapter': 'NOT_STARTED'}
+            'classla_adapter': 'NOT_STARTED',
+            'versioned_analyzer_capabilities': '/v1/capabilities',
+            'legacy_analyzer_scope': 'Legacy contextual routes remain spaCy; selectable engine readiness is versioned separately.'}
 
 
 @app.get('/health')
@@ -132,7 +152,9 @@ def legacy_synonyms(request: Request, lemma: str = Query(..., max_length=256)):
 
 
 @app.get('/v1/resources/thesaurus')
-def thesaurus_evidence(request: Request, lemma: str = Query(..., max_length=256)):
+def thesaurus_evidence(request: Request, lemma: str = Query(..., max_length=256), limit: int | None = Query(None,ge=1,le=20)):
+    if limit is not None:
+        return bounded_thesaurus(request.app.state.synonyms,clean_lemma(lemma),limit,normalized=False)
     return request.app.state.synonyms.lookup_evidence(clean_lemma(lemma))
 
 
@@ -159,9 +181,10 @@ def collocation_evidence(request: Request, lemma: str = Query(..., max_length=25
                          min_freq: int | None = Query(None, ge=1), min_logdice: float | None = Query(None, allow_inf_nan=False),
                          structure_id: int | None = None, status: str | None = Query(None, max_length=64),
                          limit: int = Query(20, ge=1, le=500), sort: Literal['freq','logdice'] = 'freq',
-                         order: Literal['desc','asc'] = 'desc'):
+                         order: Literal['desc','asc'] = 'desc',
+                         kind: Literal['collocation','grammaticalCombination','all'] = 'collocation'):
     return collocation_lookup(request, lemma, min_freq=min_freq, min_logdice=min_logdice,
-                               structure_id=structure_id, status=status, limit=limit, sort=sort, order=order)
+                               structure_id=structure_id, status=status, limit=limit, sort=sort, order=order, kind=kind)
 
 
 class InflectedLookup(BaseModel):

@@ -143,13 +143,20 @@ def resource_catalogue(request):
     return resources
 
 
-async def capabilities_data(request):
-    resources=resource_catalogue(request)
+async def analyzer_capabilities(request):
+    """One bounded observation shared by catalogue and current health responses."""
     try:
         backend=await analyzer_request(request,'/v1/capabilities',timeout=2)
-        reachable=True
+        if not isinstance(backend.get('engines'),dict) or not isinstance(backend.get('defaults'),dict):
+            raise AnalyzerFailure('error','Analyzer capability shape is invalid.')
+        return backend,True
     except AnalyzerFailure:
-        backend={'defaults':{'sl':'spacy','it':'spacy'},'engines':{},'status':'unavailable'}; reachable=False
+        return {'defaults':{'sl':'spacy','it':'spacy'},'engines':{},'status':'unavailable'},False
+
+
+async def capabilities_data(request):
+    resources=resource_catalogue(request)
+    backend,reachable=await analyzer_capabilities(request)
     identity={'resources':[{k:r.get(k) for k in ('id','version','fingerprint')} for r in resources],
               'analyzers':backend.get('identity',backend.get('engines',{})),
               'defaults':backend.get('defaults',{'sl':'spacy','it':'spacy'}),

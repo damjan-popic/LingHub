@@ -132,4 +132,49 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(result['synonyms']['data']['lookups'][0]['evidence']['entries'][0]['senses'][0]['namespaced_id'],'cjvt-thesaurus:2.2:sense1')
 
 
+class CurrentAnalyzerHealthTests(unittest.TestCase):
+    def setUp(self):
+        old=dict(candidate_app.app.state._state)
+        self.addCleanup(lambda:(candidate_app.app.state._state.clear(),candidate_app.app.state._state.update(old)))
+        candidate_app.app.state.resource_files={}
+        candidate_app.app.state.resource_readiness={}
+        candidate_app.app.state.lemmatizer_url='http://127.0.0.1:19999'
+        self.client=TestClient(candidate_app.app);self.addCleanup(self.client.close)
+        self.backend={'defaults':{'sl':'spacy','it':'spacy'},'engines':{
+            'spacy':{'available':True,'languages':['sl','it']},
+            'classla':{'available':True,'languages':['sl'],'experimental':True,
+                      'model':{'fingerprint':'current-model-id','device':'cpu','path':'/data/private/model'}}}}
+
+    def test_both_health_routes_report_live_opt_in_model_and_spacy_defaults(self):
+        for route in ('/health','/v1/resources/health'):
+            with self.subTest(route=route),patch.object(api,'analyzer_request',AsyncMock(return_value=self.backend))as observe,patch.object(candidate_app,'upstream_health',AsyncMock(return_value={'status':'ok'})):
+                result=self.client.get(route)
+                self.assertEqual(result.status_code,200)
+                data=result.json();self.assertEqual(data['classla_adapter'],'AVAILABLE_OPT_IN')
+                self.assertTrue(data['classla']['available']);self.assertTrue(data['classla']['opt_in_required'])
+                self.assertEqual(data['classla']['model'],{'fingerprint':'current-model-id','device':'cpu'})
+                self.assertEqual(data['analyzer_defaults'],{'sl':'spacy','it':'spacy'})
+                self.assertEqual(data['contextual_nlp']['status'],'READY_LOCAL')
+                observe.assert_awaited_once();self.assertEqual(observe.call_args.kwargs,{'timeout':2})
+                self.assertEqual(observe.call_args.args[1],'/v1/capabilities')
+
+    def test_optional_worker_unavailable_keeps_resource_health_available(self):
+        self.backend['engines']['classla']['available']=False
+        with patch.object(api,'analyzer_request',AsyncMock(return_value=self.backend)):
+            result=self.client.get('/v1/resources/health')
+        self.assertEqual(result.status_code,200);self.assertEqual(result.json()['classla_adapter'],'UNAVAILABLE')
+        self.assertFalse(result.json()['classla']['available'])
+        self.assertEqual(result.json()['contextual_nlp']['status'],'READY_LOCAL')
+
+    def test_unreachable_or_invalid_capabilities_never_claim_ready(self):
+        for observation in (AsyncMock(side_effect=api.AnalyzerFailure('unavailable','timeout')),
+                            AsyncMock(return_value={'engines':[], 'defaults':{}})):
+            with patch.object(api,'analyzer_request',observation):
+                result=self.client.get('/v1/resources/health')
+            self.assertEqual(result.status_code,200);self.assertEqual(result.json()['classla_adapter'],'UNAVAILABLE')
+            self.assertFalse(result.json()['analyzer_service_reachable'])
+            self.assertFalse(result.json()['classla']['available'])
+            self.assertEqual(result.json()['analyzer_defaults'],{'sl':'spacy','it':'spacy'})
+
+
 if __name__=='__main__':unittest.main()

@@ -141,7 +141,7 @@ class CandidateAPITests(unittest.TestCase):
         response = self.client.get('/health')
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()['operational_activation'])
-        self.assertEqual(response.json()['classla_adapter'], 'NOT_STARTED')
+        self.assertEqual(response.json()['classla_adapter'], 'NOT_CONFIGURED')
         routes = ['/health', '/v1/resources/health', '/thesaurus/synonyms', '/v1/resources/thesaurus',
                   '/collocations', '/collocations/by-lemma', '/v1/resources/collocations']
         for mutation in ('changed', 'missing'):

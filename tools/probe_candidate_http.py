@@ -28,7 +28,7 @@ def main():
               'working_directory': str(proc.joinpath('cwd').resolve()),
               'candidate_app_sha256': hashlib.sha256(Path('candidate_app.py').read_bytes()).hexdigest(),
               'probe_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-              'checks': [], 'operational_activation': False, 'classla_adapter': 'NOT_STARTED'}
+              'checks': [], 'operational_activation': False, 'classla_adapter': None}
 
     def request(path, query=None, payload=None, expected=200, record=True):
         route = path + ('?' + urlencode(query) if query else '')
@@ -61,6 +61,8 @@ def main():
         assert health['resources']['thesaurus']['available'] and health['resources']['collocations']['usable']
         assert health['resources']['morphology']['release_fingerprint'] == 'fa2fe5c58891375b9953ed868812d3489192602aab97fd2c2a288f9fc0c8db0b'
         report['resource_readiness'] = health
+        report['classla_adapter'] = health['classla_adapter']
+        report['operational_activation'] = health['operational_activation']
         syn = get('/v1/resources/thesaurus', lemma='otrok')
         assert syn['count_senses'] == 5 and {r['synonym_type'] for r in relations(syn)} >= {'core', 'near', None}
         assert len({s['sense_id'] for e in syn['entries'] for s in e['senses']}) == 5

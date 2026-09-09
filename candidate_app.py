@@ -12,7 +12,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from core.contextual import router as contextual_router, configured_lemmatizer_url, upstream_health
-from core.platform_api import router as platform_router, PARTIAL_PATHS, public, bounded_thesaurus
+from core.platform_api import router as platform_router, PARTIAL_PATHS, public, bounded_thesaurus, analyzer_capabilities
 from core.request_limits import RequestBodyLimit
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
@@ -113,20 +113,34 @@ if Path(__file__).with_name('workbench_routes.py').is_file():
 
 
 @app.get('/v1/resources/health')
-def resource_health(request: Request):
+async def resource_health(request: Request):
     scope = getattr(request.app.state, 'deployment_scope', 'candidate')
+    configured = bool(getattr(request.app.state, 'lemmatizer_url', None))
+    backend, reachable = await analyzer_capabilities(request)
+    classla = backend['engines'].get('classla', {})
+    if not isinstance(classla, dict):
+        classla = {}
+    available = reachable and classla.get('available') is True
+    status = 'AVAILABLE_OPT_IN' if available else 'UNAVAILABLE' if configured else 'NOT_CONFIGURED'
+    spacy = backend['engines'].get('spacy', {})
+    contextual_available = reachable and isinstance(spacy, dict) and spacy.get('available') is True
     return {'status': 'ok', 'service': 'LingHub-CJVT-candidate', 'operational_activation': scope == 'local_persistent',
             'deployment_scope': scope,
             'resources': public(request.app.state.resource_readiness),
-            'contextual_nlp': {'status': 'NOT_ACTIVATED', 'required_for_dictionary_lookup': False},
-            'classla_adapter': 'NOT_STARTED',
+            'contextual_nlp': {'status': 'READY_LOCAL' if contextual_available else 'UNAVAILABLE' if configured else 'NOT_CONFIGURED',
+                               'backend': 'my_lemmatizer', 'required_for_dictionary_lookup': False},
+            'classla_adapter': status,
+            'classla': {'status': status, 'available': available, 'experimental': True, 'opt_in_required': True,
+                        'languages': classla.get('languages', []), 'model': public(classla.get('model'))},
+            'analyzer_defaults': backend['defaults'],
+            'analyzer_service_reachable': reachable,
             'versioned_analyzer_capabilities': '/v1/capabilities',
-            'legacy_analyzer_scope': 'Legacy contextual routes remain spaCy; selectable engine readiness is versioned separately.'}
+            'legacy_analyzer_scope': 'Legacy contextual routes remain spaCy; CLASSLA requires explicit versioned selection.'}
 
 
 @app.get('/health')
 async def health(request: Request):
-    result = resource_health(request)
+    result = await resource_health(request)
     if getattr(request.app.state, 'lemmatizer_url', None):
         await upstream_health(request)
         result.update(service='LingHub-Core-local', contextual_nlp={'status': 'READY_LOCAL',

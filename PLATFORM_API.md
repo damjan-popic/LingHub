@@ -192,3 +192,11 @@ phase supplies a deliberately stale historical cache identity and proves all
 items are recomputed against real HTTP; it never alters current resources,
 models or defaults. It verifies 0700 directories, 0600 files and a manifest with
 no raw text. The report describes this cache fixture explicitly.
+
+Current `/health` and `/v1/resources/health` share the bounded two-second analyzer
+capability observation. `classla_adapter` is `AVAILABLE_OPT_IN`, `UNAVAILABLE` or
+`NOT_CONFIGURED`; the accompanying `classla` object includes availability, model
+identity and the explicit opt-in requirement. `analyzer_defaults` reports the
+current defaults. Required resource changes still return503 before health or
+resource access; an optional CLASSLA outage does not mark validated dictionaries
+unavailable. `/health` retains the existing legacy lemmatizer health check.

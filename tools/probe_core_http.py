@@ -21,7 +21,7 @@ def main():
     report = {'status': 'RUNNING', 'at': datetime.now(timezone.utc).isoformat(),
         'base_url': f'http://127.0.0.1:{args.port}', 'checks': [], 'examples': {},
         'probe_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'production_parity': 'PENDING', 'classla_adapter': 'NOT_STARTED'}
+        'production_parity': 'PENDING', 'classla_adapter': None}
 
     def call(route, payload=None, expected=200, params=None):
         url = report['base_url'] + route + ('?' + urlencode(params) if params else '')
@@ -46,6 +46,9 @@ def main():
         assert resources['resources']['collocations']['build_id'] == '25fd5882cde3b326208050bb6bfbd3901895a83ac6633b209e081fde0bf8f63c'
         assert resources['resources']['morphology']['release_fingerprint'] == 'fa2fe5c58891375b9953ed868812d3489192602aab97fd2c2a288f9fc0c8db0b'
         report['resource_identity'] = resources['resources']
+        report['classla_adapter'] = resources['classla_adapter']
+        report['classla'] = resources['classla']
+        report['analyzer_defaults'] = resources['analyzer_defaults']
         if args.expect_missing_lemmatizer:
             call('/health', expected=502)
             for route in ('/nlp/analyze', '/nlp/analyze-full', '/nlp/lemmas', '/nlp/loris-check', '/collocations/phrase', '/collocations/from-text'):

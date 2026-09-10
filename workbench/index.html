@@ -5,10 +5,27 @@
   <title>LingStack · Jezikovna delavnica</title>
   <link rel="stylesheet" href="/workbench-static/style.css">
   <script type="module" src="/workbench-static/app.js"></script>
+  <script type="module" src="/workbench-static/references.js"></script>
 </head>
 <body>
   <header><div><span class="eyebrow">LINGSTACK · ALDHI</span><h1>Jezikovna delavnica</h1></div><span class="local">Lokalna raziskovalna različica</span></header>
   <main>
+    <section class="card references" aria-labelledby="reference-title">
+      <div class="section-head"><div><span class="eyebrow">JEZIKOVNA SVETOVALNICA · ePRAVOPIS 2025</span><h2 id="reference-title">Vprašajte vire</h2></div><span id="reference-ready" role="status">Preverjanje …</span></div>
+      <p class="hint">Odgovor lokalnega modela preverite ob izvirnih odlomkih. ePravopis 2025 je letni prirastek; predlogi niso samodejno veljavna pravila.</p>
+      <label for="reference-question">Jezikovno vprašanje</label>
+      <textarea id="reference-question" rows="3" maxlength="5000">Kako sklanjamo slovensko ime Hugo in francoski priimek Hugo?</textarea>
+      <div class="settings">
+        <label>Vir <select id="reference-source"><option value="all">Oba vira</option><option value="jezikovna_svetovalnica">Jezikovna svetovalnica</option><option value="epravopis">ePravopis 2025 · letni prirastek</option></select></label>
+        <label>Iskanje <select id="reference-retrieval"><option value="hybrid_rerank">Hibridno + razvrščanje</option><option value="hybrid">Hibridno</option><option value="lexical">Besedilno</option></select></label>
+        <label>Odgovor <select id="reference-language"><option value="sl">Slovenščina</option><option value="it">Italiano</option></select></label>
+        <label>Model <select id="reference-model"><option value="primary">Qwen · privzeti</option><option value="challenger" disabled>Gemma · primerjava, trenutno ni naložen</option></select></label>
+      </div>
+      <div class="actions"><button id="reference-ask" class="primary">Vprašaj vire</button><button id="reference-search">Samo poišči odlomke</button></div>
+      <div id="reference-status" role="status" aria-live="polite"></div>
+      <div id="reference-answer"></div><div id="reference-passages"></div>
+      <details><summary>Pokritost, model in pot dokazov</summary><pre id="reference-diagnostics"></pre></details>
+    </section>
     <section class="editor card" aria-labelledby="text-title">
       <div class="section-head"><h2 id="text-title">Pregled besedila</h2><button id="examples" class="quiet">Primeri</button></div>
       <div id="example-list" class="examples" hidden></div>

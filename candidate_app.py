@@ -90,7 +90,7 @@ async def lifespan(app):
 
 
 def require_resources_unchanged(request: Request):
-    if request.url.path in PARTIAL_PATHS or request.url.path.startswith(('/workbench','/workbench-api','/workbench-static')):
+    if request.url.path in PARTIAL_PATHS or request.url.path.startswith(('/workbench','/workbench-api','/workbench-static','/v1/references/')):
         return
     try:
         unchanged = all(file_identity(path) == identity for path, identity in request.app.state.resource_files.items())
@@ -104,6 +104,8 @@ app = FastAPI(title='LingHub local Core candidate', version='0.2.0', lifespan=li
               dependencies=[Depends(require_resources_unchanged)])
 app.include_router(contextual_router)
 app.include_router(platform_router)
+from reference_routes import router as reference_router
+app.include_router(reference_router)
 app.add_middleware(RequestBodyLimit,limit=131072)
 app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost','testserver'])
 if Path(__file__).with_name('workbench_routes.py').is_file():

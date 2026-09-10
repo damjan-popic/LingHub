@@ -22,6 +22,14 @@ class ClientError(Exception):
     def __init__(self,message,status=None): self.status=status;super().__init__(message)
 
 
+def reference_version(health):
+    """Stable pins only: runtime counters must not invalidate resumable work."""
+    return {'snapshot_id':health['snapshot_id'],'collection':health.get('collection'),
+        'retrieval':{key:health.get('retrieval',{}).get(key) for key in ('embedding','reranker')},
+        'models':{key:[{'id':model.get('id'),'root':model.get('root')} for model in value.get('data',[])]
+                  for key,value in health.get('models',{}).items()}}
+
+
 class LingHubClient:
     def __init__(self,base_url='http://127.0.0.1:8010',timeout=35,retries=2):
         u=urlsplit(base_url)
@@ -41,7 +49,9 @@ class LingHubClient:
                 with self.opener.open(request,timeout=self.timeout) as response:
                     raw=response.read(2097153)
                 if len(raw)>2097152: raise ClientError('Response exceeds2MiB limit.')
-                return json.loads(raw)
+                result=json.loads(raw)
+                if not isinstance(result,dict):raise ClientError('LingHub response must be an object.')
+                return result
             except HTTPError as error:
                 if error.code not in (429,502,503,504) or attempt==self.retries:
                     raise ClientError('LingHub returned HTTP'+str(error.code),error.code) from None
@@ -66,6 +76,11 @@ class LingHubClient:
     def dictionary(self,kind,lemma,limit=20):
         if kind not in ('synonyms','collocations'):raise ValueError('Unknown dictionary task.')
         return self.request('/v1/resources/thesaurus' if kind=='synonyms' else '/v1/resources/collocations',query={'lemma':lemma,'limit':limit})
+
+    def reference(self,question,*,answer=True,language='sl',sources=None,retrieval='hybrid_rerank',model='primary',limit=8):
+        return self.request('/v1/references/'+('answer' if answer else 'search'),{
+            'question':question,'answer_language':language,'sources':sources or ['jezikovna_svetovalnica','epravopis'],
+            'retrieval':retrieval,'model':model,'limit':limit})
 
 
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
@@ -98,6 +113,9 @@ def execute_record(client,record):
     task=record['task'];lang=record['lang'];text=record['text'];engine=record['engine']
     if len(text)>10000 or not text.strip(): raise ValueError('Text must contain1..10000characters; automatic chunking is not performed.')
     if lang not in ('sl','it') or engine not in ('default','spacy','classla'): raise ValueError('Unsupported language or engine.')
+    if task in ('reference','reference-search'):
+        return client.reference(text,answer=task=='reference',language=lang,sources=record.get('sources'),
+            retrieval=record.get('retrieval','hybrid_rerank'),model=record.get('model','primary'),limit=record.get('limit',8))
     if task=='analyze':return client.analyze(lang,text,engine)
     if task=='explore':return client.explore(lang,text,record.get('selection'),engine,record.get('include'))
     if task=='lemmatize':return client.lemmatize(lang,record.get('tokens',text.split()),record.get('limit',4))
@@ -133,6 +151,11 @@ def process_jsonl(client,input_path,output_dir,resume=False):
             ids.add(value['id']);records.append(value)
             if len(records)>500:raise ValueError('At most500documents per bounded batch.')
         capabilities=client.request('/v1/capabilities');identity=capabilities['identity']
+        reference_identity=None
+        if any(r['task'] in ('reference','reference-search') for r in records):
+            rh=client.request('/v1/references/health')
+            reference_identity=reference_version(rh)
+            identity=digest({'deterministic':identity,'references':reference_identity})
         manifest_path=output_dir/'progress.json';slots=output_dir/'items';private_directory(slots)
         previous={}
         if manifest_path.exists():
@@ -160,7 +183,13 @@ def process_jsonl(client,input_path,output_dir,resume=False):
                 if result is None:
                     try:
                         data=execute_record(client,record)
-                        if client.request('/v1/capabilities')['identity']!=identity:
+                        if not isinstance(data,dict):raise ClientError('LingHub result must be an object.')
+                        observed=client.request('/v1/capabilities')['identity']
+                        if reference_identity is not None:
+                            rh=client.request('/v1/references/health')
+                            ri=reference_version(rh)
+                            observed=digest({'deterministic':observed,'references':ri})
+                        if observed!=identity:
                             raise ClientError('Resource or analyzer identity changed during batch; resume with the current identity.')
                         status=data.get('status','ok')
                         result={'id':record['id'],'status':status,'task':record['task'],'engine':record['engine'],
@@ -192,19 +221,23 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url',default='http://127.0.0.1:8010')
     sub=parser.add_subparsers(dest='command',required=True)
-    for name in ('analyze','explore','lemmatize','inflect','signatures','synonyms','collocations'):
+    for name in ('analyze','explore','lemmatize','inflect','signatures','synonyms','collocations','reference','reference-search'):
         p=sub.add_parser(name);p.add_argument('text');p.add_argument('--lang',choices=['sl','it'],default='sl')
         p.add_argument('--engine',choices=['default','spacy','classla'],default='default')
         p.add_argument('--start',type=int);p.add_argument('--end',type=int)
         p.add_argument('--limit',type=int);p.add_argument('--msd')
+        p.add_argument('--model',choices=['primary','challenger'],default='primary')
+        p.add_argument('--retrieval',choices=['lexical','hybrid','hybrid_rerank'],default='hybrid_rerank')
+        p.add_argument('--source',choices=['jezikovna_svetovalnica','epravopis'],action='append')
     p=sub.add_parser('batch');p.add_argument('input',type=Path);p.add_argument('output_dir',type=Path);p.add_argument('--resume',action='store_true')
-    args=parser.parse_args(argv);client=LingHubClient(args.base_url)
+    args=parser.parse_args(argv);client=LingHubClient(args.base_url,timeout=120,retries=0)
     try:
         if args.command=='batch':
             result=process_jsonl(client,args.input,args.output_dir,args.resume)
             print(json.dumps({'status':result['status'],'completed':len(result['completed']),'reused':result['reused'],'failed_ids':result['failed_ids']},ensure_ascii=False))
             return 1 if result['failed_ids'] else 0
         record={'id':'single','lang':args.lang,'text':args.text,'task':args.command,'engine':args.engine}
+        record.update(model=args.model,retrieval=args.retrieval,sources=args.source)
         if args.limit is not None:record['limit']=args.limit
         if args.msd is not None:record['msd']=args.msd
         if args.start is not None or args.end is not None:

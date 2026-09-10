@@ -218,5 +218,12 @@
   "admin_failed": "Preizkus ni uspel.",
   "admin_pending": "Preverjanje še poteka.",
   "other_used_passages": "Drugi uporabljeni odlomki",
-  "long_correction_notice": "Razširjena razlaga predlaga popravek kratkega odgovora. Izvirni odgovor in njegovi odzivi ostajajo ohranjeni."
+  "long_correction_notice": "Razširjena razlaga predlaga popravek kratkega odgovora. Izvirni odgovor in njegovi odzivi ostajajo ohranjeni.",
+  "terminology": "Terminologija",
+  "deterministic_task_note": "Neposreden pregled virov, brez jezikovnega modela.",
+  "text_language": "Jezik besedila",
+  "select_text_language": "Izberite jezik besedila",
+  "text_language_hint": "Jezik pregledanega besedila je lahko drugačen od jezika vmesnika in pojasnil.",
+  "input_language_required": "Za pregled izberite jezik besedila.",
+  "deterministic_working": "Preverjam vire …"
 }

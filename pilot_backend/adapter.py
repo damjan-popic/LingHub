@@ -1,9 +1,10 @@
 """Bounded private HTTP adapter. No browser-supplied URL, bundle or secret."""
 import json
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,urlencode
 import httpx
 from .security import Failure
 from .store import digest
+from . import terminology
 
 
 def private_url(url):
@@ -12,12 +13,12 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None):
-        self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None
+    def __init__(self,url,token,linghub_url=None,klikai_url=None):
+        self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
-            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(240,connect=5))as client:
+            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 240,connect=5))as client:
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None else{})as response:
                     if response.status_code!=200:raise Failure('answer_unavailable',503)
                     content=bytearray()
@@ -29,14 +30,22 @@ class Gateway:
                     return data
         except (httpx.HTTPError,ValueError,TypeError):raise Failure('answer_unavailable',503)from None
     def freeze(self,family,policy):
+        if family['task']=='terminology':
+            if not self.klikai_url:raise Failure('task_unavailable',503)
+            query=family['question']
+            if not 2<=len(query)<=500:raise Failure('invalid_request')
+            path='/api/terminology/lookup?'+urlencode({'q':query,'allow_partial':'false','include_prose':'false','use_morphology':'true','limit':20})
+            return terminology.freeze_lookup(self.request(path,None,self.klikai_url),query,family['locale'])
         if family['task']=='text_check':
             if not self.linghub_url:raise Failure('task_unavailable',503)
+            if family.get('input_language')not in {'sl','it'}:raise Failure('input_language_required')
             capabilities=self.request('/v1/capabilities',None,self.linghub_url)
             if not capabilities.get('identity')or not capabilities.get('analyzer_service_reachable'):raise Failure('task_unavailable',503)
             identity={k:capabilities[k]for k in ('identity','resources','models','defaults')if k in capabilities}
-            return {'bundle':{'text':family['question'],'lang':family['locale'],'task':'text_check','capabilities_identity':capabilities['identity']},'identity':identity}
+            return {'bundle':{'text':family['question'],'lang':family['input_language'],'output_locale':family['locale'],'task':'text_check','capabilities_identity':capabilities['identity']},'identity':identity}
         return self.request('/internal/pilot/freeze',{'question':family['question'],'context':family['context'],'locale':family['locale'],'task':family['task'],'policy':policy})
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
         if bundle.get('task')=='text_check':
             if not self.linghub_url:raise Failure('task_unavailable',503)
             before=self.request('/v1/capabilities',None,self.linghub_url)
@@ -45,9 +54,11 @@ class Gateway:
             after=self.request('/v1/capabilities',None,self.linghub_url)
             expected=before['defaults'].get(bundle['lang'])
             if after.get('identity')!=bundle['capabilities_identity']or data.get('text')!=bundle['text']or data.get('lang')!=bundle['lang']or data.get('engine_used')!=expected or data.get('offset_convention')!='unicode_codepoint_half_open':raise Failure('resource_changed',503)
-            return deterministic_answer(data,bundle['lang'])
+            return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
-    def source(self,bundle,evidence_id,tier):return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
+    def source(self,bundle,evidence_id,tier):
+        if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
+        return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
 
 
 def deterministic_answer(data,locale):

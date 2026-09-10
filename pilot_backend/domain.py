@@ -47,7 +47,7 @@ class Domain:
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
-        job_model='cpu'if task in {'source_search','text_check'}else model
+        job_model='cpu'if task in {'source_search','text_check','terminology'}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         return {'run_id':rid,'job_id':jid}
     def select_policy(self,db,owner,comparison=False):
@@ -63,9 +63,11 @@ class Domain:
         locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model','qwen')
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
         if not q or locale not in {'sl','it'}or interface not in {'sl','it'}or input_language not in {'sl','it','mixed','und'}or task not in self.tasks or model not in self.models:raise Failure('invalid_request')
+        if task=='text_check'and input_language not in {'sl','it'}:raise Failure('input_language_required')
+        if task=='terminology'and not 2<=len(q)<=500:raise Failure('invalid_request')
         with self.store.tx()as db:
             def action():
-                self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)
+                self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 r=self.new_run(db,fid,owner,'short',model);return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
@@ -94,7 +96,7 @@ class Domain:
         return out
     def family(self,owner,fid):
         with self.store.connect()as db:
-            f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
+            f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             for r in db.execute('SELECT * FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision',(fid,)):out[r['tier']]=self.tier(db,r)
             return out
     def families(self,owner):

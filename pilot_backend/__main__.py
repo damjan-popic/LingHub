@@ -12,14 +12,22 @@ def protected_json(path):
     if p.is_symlink()or p.stat().st_mode&0o077 or p.stat().st_uid!=os.geteuid():raise ValueError('Input must be a protected0600 file')
     return json.loads(p.read_text())
 
+def replay_gateway(config_path):
+    from .replay import read_private
+    from .adapter import Gateway
+    config=read_private(config_path);secret=Path(config['gateway_token_file'])
+    if secret.is_symlink()or secret.stat().st_mode&0o077:raise ValueError('Private gateway token file required')
+    return Gateway(config['gateway_url'],secret.read_text().strip())
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--store',type=Path);sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('init')
     invite=sub.add_parser('invite-admin');invite.add_argument('--username',required=True);invite.add_argument('--password-file',type=Path,required=True);invite.add_argument('--bootstrap-id')
     status=sub.add_parser('bootstrap-status');status.add_argument('--bootstrap-id',required=True)
     a=sub.add_parser('analysis');a.add_argument('--output-dir',type=Path)
-    a=sub.add_parser('adaptation');a.add_argument('--candidates',type=Path);a.add_argument('--validation',type=Path)
-    sub.add_parser('retention');sub.add_parser('monitor-canary');sub.add_parser('revert')
+    a=sub.add_parser('adaptation');a.add_argument('--candidates',type=Path);a.add_argument('--validation',type=Path);a.add_argument('--config',type=Path);a.add_argument('--cases',type=Path);a.add_argument('--cases-sha256')
+    replay=sub.add_parser('replay');replay.add_argument('--config',type=Path,required=True);replay.add_argument('--cases',type=Path,required=True);replay.add_argument('--cases-sha256',required=True);replay.add_argument('--max-cases',type=int,default=4);replay.add_argument('--force-test',action='store_true')
+    sub.add_parser('retention');sub.add_parser('monitor-canary').add_argument('--config',type=Path);sub.add_parser('revert')
     b=sub.add_parser('backup');b.add_argument('--archive',type=Path,required=True)
     r=sub.add_parser('restore');r.add_argument('--archive',type=Path,required=True);r.add_argument('--destination',type=Path,required=True);r.add_argument('--current-deletions',type=Path,required=True);r.add_argument('--sha256',required=True)
     verify=sub.add_parser('verify-backup');verify.add_argument('--archive',type=Path,required=True)
@@ -58,9 +66,15 @@ def main():
                 if not args.bootstrap_id and db.execute("SELECT 1 FROM accounts WHERE role='admin'AND enabled=1").fetchone():raise ValueError('Bootstrap already completed; use authenticated account administration')
             account=Auth(store).create(args.username,password,'admin',must_change=True,bootstrap_id=args.bootstrap_id);result={'account_id':account,'status':'invited','must_change_password':True}
         elif args.command=='analysis':result=analyse(store,args.output_dir)
-        elif args.command=='adaptation':result=adapt(store,protected_json(args.candidates)if args.candidates else None,protected_json(args.validation)if args.validation else None)
+        elif args.command=='adaptation':
+            if (args.cases is None)!=(args.cases_sha256 is None):p.error('--cases and --cases-sha256 must be supplied together')
+            result=adapt(store,protected_json(args.candidates)if args.candidates else None,protected_json(args.validation)if args.validation else None,replay_gateway=replay_gateway(args.config)if args.config else None,replay_cases=(args.cases,args.cases_sha256)if args.cases else None)
+        elif args.command=='replay':
+            from .replay import run
+            os.nice(10)
+            result=run(store,replay_gateway(args.config),args.cases,args.cases_sha256,max_cases=args.max_cases,force_test=args.force_test)
         elif args.command=='retention':result=store.retention()
-        elif args.command=='monitor-canary':result=monitor_canary(store)
+        elif args.command=='monitor-canary':result=monitor_canary(store,gateway=replay_gateway(args.config)if args.config else None)
         elif args.command=='revert':result=revert_policy(store)
         elif args.command=='backup':result=backup(store,args.archive)
     # Report paths/counts/hashes; no passwords, feedback bodies or signed answer packets.

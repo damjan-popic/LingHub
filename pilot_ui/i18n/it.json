@@ -218,5 +218,12 @@
   "admin_failed": "Il test non è riuscito.",
   "admin_pending": "Verifica in corso.",
   "other_used_passages": "Altri passaggi utilizzati",
-  "long_correction_notice": "La spiegazione estesa propone una correzione della risposta breve. La risposta originale e le relative valutazioni rimangono conservate."
+  "long_correction_notice": "La spiegazione estesa propone una correzione della risposta breve. La risposta originale e le relative valutazioni rimangono conservate.",
+  "terminology": "Terminologia",
+  "deterministic_task_note": "Consultazione diretta delle risorse, senza modello linguistico.",
+  "text_language": "Lingua del testo",
+  "select_text_language": "Scegli la lingua del testo",
+  "text_language_hint": "La lingua del testo da controllare può essere diversa dalla lingua dell’interfaccia e delle spiegazioni.",
+  "input_language_required": "Scegli la lingua del testo da controllare.",
+  "deterministic_working": "Consultazione delle risorse…"
 }

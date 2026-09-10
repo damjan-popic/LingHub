@@ -32,7 +32,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);domain=Domain(store,config['tasks'],config['models']);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'));jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);domain=Domain(store,config['tasks'],config['models']);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'));jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
     @asynccontextmanager
     async def lifespan(app):

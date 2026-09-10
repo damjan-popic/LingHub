@@ -2,13 +2,29 @@
 from __future__ import annotations
 from collections import Counter,defaultdict
 from contextlib import contextmanager
-import fcntl,json,math,os
+import fcntl,json,math,os,re
 from pathlib import Path
 from .store import canonical,digest,stamp,BASE_POLICY
 from .security import Failure
 
-VERSION='pilot-analysis-v1'
+VERSION='pilot-analysis-v2'
 ALLOWLIST={'rerank_policy':('always_for_answers','conditional_for_answers'),'short_style_preset':('direct_qualified_v1','direct_examples_v1'),'long_style_preset':('explanation_examples_v1','explanation_comparison_v1')}
+COMMENT_SIGNALS={
+    'accent':r'\b(?:naglas\w*|accent\w*)\b',
+    'inflection':r'\b(?:sklanj\w*|spreg\w*|declina\w*|flession\w*|coniug\w*)\b',
+    'exception':r'\b(?:izjem\w*|eccezion\w*)\b',
+    'context':r'\b(?:kontekst\w*|sobesedil\w*|contest\w*)\b',
+    'source_support':r'\b(?:vir[aioue]?|dokaz\w*|fonte|fonti|support\w*|citazion\w*)\b',
+    'language':r'\b(?:jezik\w*|sloven\w*|italijan\w*|lingua|italian\w*)\b',
+    'clarity':r'\b(?:nerazum\w*|nejas\w*|zmed\w*|incomprens\w*|confus\w*|chiarezz\w*)\b'}
+
+def comment_summary(row):
+    text=row.get('comment','')+'\n'+row.get('correction','')
+    signals=[name for name,pattern in COMMENT_SIGNALS.items()if re.search(pattern,text,re.I)][:7]
+    return {'feedback_event_id':row['id'],'feedback_id':row['feedback_id'],'revision':row['revision'],
+            'comment_mentions':signals,'free_text_present':bool(text.strip()),'proposed_correction_present':bool(row.get('correction','').strip()),
+            'unclassified_free_text_requires_reviewer':bool(text.strip())and not signals,
+            'summary_method':'bounded_controlled_phrase_extraction','original_text_copied':False,'claims_verified':False}
 
 @contextmanager
 def cycle_lock(store):
@@ -83,8 +99,8 @@ def analyse(store,output_dir=None):
         for row in rows:
             key=canonical([row['origin'],row['locale'],row['task'],row['model'],row['tier']]);groups[key]['feedback']+=1;groups[key][row['rating']or'issue_only']+=1
             for tag in json.loads(row['tags']):groups[key]['tag:'+tag]+=1
-            if row['rating']!='useful'or row['tags']!='[]':
-                issues.append({'triage_id':digest([row['feedback_id'],row['revision']])[:24],'feedback_id':row['feedback_id'],'revision':row['revision'],'origin':row['origin'],'locale':row['locale'],'task':row['task'],'tier':row['tier'],'tags':json.loads(row['tags']),'target':json.loads(row['target']),'comment_is_untrusted_data':True})
+            if row['rating']!='useful'or row['tags']!='[]'or row['comment']or row['correction']:
+                issues.append({'triage_id':digest([row['feedback_id'],row['revision']])[:24],'feedback_id':row['feedback_id'],'revision':row['revision'],'origin':row['origin'],'locale':row['locale'],'task':row['task'],'tier':row['tier'],'tags':json.loads(row['tags']),'target':json.loads(row['target']),'comment_summary':comment_summary(row),'comment_is_untrusted_data':True})
         latencies=[];failures=0;delivered=0
         for row in runs:
             if row['origin']!='human':continue
@@ -101,7 +117,12 @@ def analyse(store,output_dir=None):
             for source in sources:
                 key=canonical([row['origin'],source,row['locale'],row['task'],row['model'],row['tier']]);source_groups[key]['feedback']+=1;source_groups[key][row['rating']or'issue_only']+=1
         counts={'vote_groups':dict(vote_groups),'human_votes':sum(v['origin']=='human'for v in votes),'source_groups':dict(source_groups),'feedback_by_origin':dict(by_origin),'human_feedback':len(human),'human_participants':len({r['owner']for r in human}),'human_cases':len({r['family_id']for r in human}),'human_runs':sum(r['origin']=='human'for r in runs),'human_delivered_runs':delivered,'human_technical_failures':failures,'human_p95_seconds':percentile(latencies),'groups':dict(groups)}
+        mentions=Counter(signal for issue in issues if issue['origin']=='human'for signal in issue['comment_summary']['comment_mentions'])
+        counts['human_comment_mentions']=dict(mentions)
         report={'schema':'klikai.pilot.analysis.v1','cycle_id':cid,'cutoff':cutoff,'policy_id':policy,'analyser_revision':VERSION,'status':'ANALYSIS_COMPLETE','input_hash':digest([{k:r[k]for k in ('id','revision','seq')}for r in rows]),'counts':counts,'issues':issues,'candidate_suggestions':suggestions(rows,json.loads(next(iter_policy(store,policy)))),'environment_pin':environment_pin(human),'development_source_groups':sorted(development_groups(human)),'reports':{'sl':f"Pilot: {len(human)} povratnih informacij ljudi; {delivered} prikazanih odgovorov. Sintetični podatki so ločeni. Samodejna sprememba zahteva neodvisno preverjanje.",'it':f"Pilot: {len(human)} riscontri umani; {delivered} risposte mostrate. Dati sintetici separati. Le modifiche automatiche richiedono una verifica indipendente."},'comments_sent_to_model':False}
+        labels={'sl':dict(zip(COMMENT_SIGNALS,('naglas','pregibanje','izjeme','sobesedilo','opora v virih','jezik','jasnost'))),'it':dict(zip(COMMENT_SIGNALS,('accento','flessione','eccezioni','contesto','supporto nelle fonti','lingua','chiarezza')))}
+        for locale in('sl','it'):
+            if mentions:report['reports'][locale]+=(' Omenjene teme komentarjev (navedbe niso preverjene): 'if locale=='sl'else' Temi menzionati nei commenti (segnalazioni non verificate): ')+', '.join(labels[locale][key]+' '+str(value)for key,value in sorted(mentions.items()))+'.'
         with store.tx()as db:db.execute('INSERT INTO cycles VALUES(?,?,?,?,?,?,?,?,?)',(cid,'analysis',cutoff,0,report['input_hash'],report['status'],canonical(report),stamp(),stamp()))
         if output_dir:write_analysis(report,output_dir)
         return report
@@ -157,15 +178,11 @@ def independent_gate(validation,baseline,candidate,development_families,expected
     if critical or gain<.02-1e-12 or ratio>1.1:return False,'validation_gate_failed',metrics
     return True,'validated',metrics
 
-def adapt(store,candidates=None,validations=None,implemented=None):
+def adapt(store,candidates=None,validations=None,implemented=None,replay_gateway=None,replay_cases=None):
     with cycle_lock(store):
         with store.connect()as db:
-            previous=db.execute("SELECT coalesce(max(cutoff),0)FROM cycles WHERE kind='adaptation'").fetchone()[0];base_id=store.meta('active_policy',db=db);base=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(base_id,)).fetchone()[0])
-        cutoff,rows,runs=snapshot(store,previous);human=[r for r in rows if r['origin']=='human'and r['task']=='reference'];input_hash=digest([{k:r[k]for k in ('id','revision','seq')}for r in human]);cid=digest({'kind':'adaptation','cutoff':cutoff,'base':base_id,'analyser':VERSION})
-        with store.connect()as db:old=db.execute('SELECT report FROM cycles WHERE id=?',(cid,)).fetchone()
-        if old:return json.loads(old[0])
-        report={'schema':'klikai.pilot.adaptation.v1','cycle_id':cid,'cutoff':cutoff,'previous_cutoff':previous,'input_hash':input_hash,'status':'ANALYSIS_ONLY_NO_VALIDATED_PROMOTION','human_events':len(human),'all_new_human_events':sum(r['origin']=='human'for r in rows),'eligible_task':'reference','participants':len({r['owner']for r in human}),'cases':len({r['family_id']for r in human}),'candidates':[],'baseline_policy_id':base_id}
-        report['source_model_profile_cohort_pin']=environment_pin(human)
+            previous=db.execute("SELECT coalesce(max(cutoff),0)FROM cycles WHERE kind='adaptation'AND status='CANARY_PENDING'").fetchone()[0];base_id=store.meta('active_policy',db=db);base=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(base_id,)).fetchone()[0])
+        cutoff,rows,runs=snapshot(store,previous);human=[r for r in rows if r['origin']=='human'and r['task']=='reference'];input_hash=digest([{k:r[k]for k in ('id','revision','seq')}for r in human])
         if candidates is None:candidates=suggestions(human,base)
         if validations is None:
             validations={}
@@ -174,6 +191,13 @@ def adapt(store,candidates=None,validations=None,implemented=None):
                 if path.exists():
                     if path.is_symlink()or path.stat().st_mode&0o077 or path.stat().st_uid!=os.geteuid():raise Failure('validation_input_not_private')
                     validations[pid]=json.loads(path.read_text())
+        replay_index=store.path.parent/'replay/latest.json'
+        from .replay import file_sha,gate as replay_gate
+        cid=digest({'kind':'adaptation','cutoff':cutoff,'base':base_id,'analyser':VERSION,'candidates':candidates,'validation_hash':digest(validations or{}),'replay_index_sha256':file_sha(replay_index)if replay_index.is_file()else None})
+        with store.connect()as db:old=db.execute('SELECT report FROM cycles WHERE id=?',(cid,)).fetchone()
+        if old:return json.loads(old[0])
+        report={'schema':'klikai.pilot.adaptation.v1','cycle_id':cid,'cutoff':cutoff,'previous_cutoff':previous,'input_hash':input_hash,'status':'ANALYSIS_ONLY_NO_VALIDATED_PROMOTION','human_events':len(human),'all_new_human_events':sum(r['origin']=='human'for r in rows),'eligible_task':'reference','participants':len({r['owner']for r in human}),'cases':len({r['family_id']for r in human}),'candidates':[],'baseline_policy_id':base_id}
+        report['source_model_profile_cohort_pin']=environment_pin(human)
         ready=len(human)>=20 and report['participants']>=3 and report['cases']>=10
         if store.meta('adaptation_paused','0')=='1':report['reason']='paused'
         elif not ready:report.update(reason='insufficient_new_human_data',status='INSUFFICIENT_DATA',promotion_status='ANALYSIS_ONLY_NO_VALIDATED_PROMOTION')
@@ -191,6 +215,17 @@ def adapt(store,candidates=None,validations=None,implemented=None):
                 item['policy_id']=pid
                 if target and target not in eligible:item['reason']='target_slice_insufficient';report['candidates'].append(item);continue
                 valid,reason,metrics=independent_gate((validations or{}).get(pid),base_id,pid,{r['family_id']for r in human},environment_pin(human),development_groups(human));item.update(reason=reason,metrics=metrics);report['candidates'].append(item)
+                supplied=(validations or{}).get(pid)
+                if isinstance(supplied,dict):
+                    headers=('reviewer_kind','reviewer_id','baseline_policy_id','candidate_policy_id','source_model_profile_cohort_pin','replay_run_id','source_reviewed','independent_of_development','deterministic_gate_passed','regression_replay_passed','development_replay_passed')
+                    pair_keys=('case_id','family_id','source_group','origin','source_review_hash','baseline_score','candidate_score','baseline_seconds','candidate_seconds','critical_regression')
+                    item['independent_review_receipt']={**{k:supplied[k]for k in headers if k in supplied},'input_sha256':digest(supplied),'pairs':[{k:p[k]for k in pair_keys if k in p}for p in supplied.get('pairs',[])if isinstance(p,dict)]}
+                if valid:
+                    replay_ok,replay_reason,replay_meta=replay_gate(store,base_id,pid,gateway=replay_gateway,cases_path=replay_cases[0]if replay_cases else None,cases_sha=replay_cases[1]if replay_cases else None)
+                    item['actual_replay']=replay_meta
+                    if not replay_ok:valid=False;item['reason']=replay_reason
+                    elif (validations or{}).get(pid,{}).get('replay_run_id')!=replay_meta['run_id']:valid=False;item['reason']='independent_review_replay_pin_mismatch'
+                    elif set(replay_meta.get('source_groups',[]))&{p['source_group']for p in (validations or{})[pid]['pairs']}:valid=False;item['reason']='replay_holdout_source_overlap'
                 if valid and not report.get('candidate_policy_id'):
                     report.update(candidate_policy_id=pid,candidate_config=params,status='CANARY_PENDING',reason='independent_validation_passed');item['status']='selected'
         with store.tx()as db:
@@ -199,22 +234,60 @@ def adapt(store,candidates=None,validations=None,implemented=None):
             db.execute('INSERT INTO cycles VALUES(?,?,?,?,?,?,?,?,?)',(cid,'adaptation',cutoff,previous,input_hash,report['status'],canonical(report),stamp(),stamp()))
             if report.get('candidate_policy_id'):
                 pid=report['candidate_policy_id'];db.execute('INSERT OR IGNORE INTO policies VALUES(?,?,?,?,?)',(pid,canonical(report['candidate_config']),base_id,stamp(),'candidate'))
-                human_runs=[r for r in runs if r['origin']=='human'];baseline_error=sum(technical_failure(r)for r in human_runs)/max(1,len(human_runs))
+                human_runs=[r for r in runs if r['origin']=='human'and r['task']=='reference'and r['state']in{'complete','failed'}];baseline_error=sum(technical_failure(r)for r in human_runs)/max(1,len(human_runs))
                 db.execute('INSERT INTO canaries VALUES(?,?,?,?,?,?,?,?,?,?)',(digest([cid,pid]),cid,base_id,pid,'running',stamp(),stamp()+48*3600,0,baseline_error,0))
         return report
 
-def monitor_canary(store):
-    with cycle_lock(store),store.tx()as db:
-        row=db.execute("SELECT *FROM canaries WHERE state='running'ORDER BY created DESC LIMIT 1").fetchone()
-        if not row:return {'status':'no_active_canary'}
-        runs=list(db.execute('SELECT r.*,f.owner FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner WHERE f.policy_id=?AND r.assignment_id IS NULL AND a.origin=\'human\'AND r.created>=?',(row['candidate'],row['created'])))
-        done=[r for r in runs if r['state']in {'complete','failed'}];critical=any(json.loads(r['result']or'{}').get('critical_safety_or_provenance_error')for r in done);error_rate=sum(technical_failure(dict(r))for r in done)/max(1,len(done));state='running'
-        if critical or(done and error_rate-row['baseline_error']>.02):state='rolled_back'
-        elif len(done)>=20:state='promoted';db.execute('UPDATE meta SET value=?WHERE key=?',(row['candidate'],'active_policy'));db.execute("UPDATE policies SET status='promoted'WHERE id=?",(row['candidate'],))
-        elif stamp()>=row['expires']:state='insufficient_traffic'
-        db.execute('UPDATE canaries SET state=?,completed_runs=?,critical_failure=?WHERE id=?',(state,len(done),int(critical),row['id']))
-        store.audit('canary_observation',detail={'id':row['id'],'state':state,'completed':len(done),'technical_error_rate':error_rate},db=db)
-        return {'status':state,'completed_runs':len(done),'baseline_kept':state!='promoted','technical_error_rate':error_rate}
+def canary_identity_matches(identity,pin,params):
+    try:
+        identity=json.loads(identity or '{}');expected=pin['source_model_profile_pin']
+        profiles=json.loads(canonical(identity['profiles']))
+        for tier in profiles.values():
+            for profile in tier.values():profile.pop('profile_id',None);profile.pop('policy',None)
+        return (identity['source_snapshot_ids']==[expected['snapshot_id']]and identity['vector_snapshot_id']==expected['collection_id']
+                and identity['policy_version']==digest({'base':expected['base_policy_version'],'parameters':params})
+                and identity['models']==expected['models']and profiles==expected['profiles'])
+    except (ValueError,KeyError,TypeError):return False
+
+def monitor_canary(store,gateway=None):
+    with cycle_lock(store):
+        sql="SELECT r.*,f.owner,f.identity AS family_identity FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner WHERE f.policy_id=?AND f.task='reference'AND r.assignment_id IS NULL AND a.origin='human'AND r.created>=?"
+        with store.connect()as db:
+            row=db.execute("SELECT *FROM canaries WHERE state='running'ORDER BY created DESC LIMIT 1").fetchone()
+            if not row:return {'status':'no_active_canary'}
+            row=dict(row);runs=[dict(r)for r in db.execute(sql,(row['candidate'],row['created']))]
+            selected=json.loads(db.execute('SELECT report FROM cycles WHERE id=?',(row['cycle_id'],)).fetchone()[0])
+            params=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(row['candidate'],)).fetchone()[0])
+        closed=[r for r in runs if r['state']in {'complete','failed'}]
+        done=[r for r in closed if r['finished']is not None and row['created']<=r['finished']<=row['expires']]
+        critical=any(json.loads(r['result']or'{}').get('critical_safety_or_provenance_error')for r in closed)
+        error_rate=sum(technical_failure(r)for r in closed)/max(1,len(closed));state='running';reason=None
+        proof=next((x.get('actual_replay',{})for x in selected['candidates']if x.get('policy_id')==row['candidate']),{})
+        pin=proof.get('current_runtime_pin')
+        drift=bool(closed)and(not pin or any(not canary_identity_matches(r['family_identity'],pin,params)for r in closed if r['state']=='complete'and not technical_failure(r)))
+        if critical or(closed and error_rate-row['baseline_error']>.02):state='rolled_back';reason='technical_failure'
+        elif drift:state='rolled_back';reason='candidate_family_runtime_drift'
+        elif stamp()>=row['expires']and len(done)<20:state='insufficient_traffic'
+        elif len(done)>=20 and store.meta('adaptation_paused','0')=='1':reason='adaptation_paused'
+        elif len(done)>=20:
+            # Observe outside the SQLite write transaction: model health probes
+            # must never block participant feedback writes.
+            try:
+                from .replay import current_pin
+                if current_pin(gateway)!=pin:state='rolled_back';reason='current_runtime_drift'
+                else:state='promoted'
+            except Exception:reason='current_runtime_observation_unavailable'
+        with store.tx()as db:
+            current=db.execute("SELECT state FROM canaries WHERE id=?",(row['id'],)).fetchone()
+            latest=[dict(r)for r in db.execute(sql,(row['candidate'],row['created']))]
+            token=lambda values:digest([{k:r[k]for k in ('id','state','finished','result','family_identity')}for r in sorted(values,key=lambda r:r['id'])])
+            if not current or current[0]!='running'or token(latest)!=token(runs):return {'status':'running','reason':'concurrent_canary_observation_changed','baseline_kept':True}
+            if state=='promoted'and store.meta('adaptation_paused','0',db=db)=='1':state='running';reason='adaptation_paused'
+            if state=='promoted':
+                db.execute('UPDATE meta SET value=?WHERE key=?',(row['candidate'],'active_policy'));db.execute("UPDATE policies SET status='promoted'WHERE id=?",(row['candidate'],))
+            db.execute('UPDATE canaries SET state=?,completed_runs=?,critical_failure=?WHERE id=?',(state,len(done),int(critical),row['id']))
+            store.audit('canary_observation',detail={'id':row['id'],'state':state,'reason':reason,'completed':len(done),'technical_error_rate':error_rate},db=db)
+        return {'status':state,'reason':reason,'completed_runs':len(done),'baseline_kept':state!='promoted','technical_error_rate':error_rate}
 
 def revert_policy(store,actor=None):
     with cycle_lock(store),store.tx()as db:

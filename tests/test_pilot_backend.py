@@ -195,7 +195,7 @@ def test_source_search_requires_no_selected_generator_with_real_adapter_mock():
             if path=='/v1/capabilities':return {'identity':'pin','analyzer_service_reachable':True,'defaults':{'sl':'spacy'},'resources':[],'models':[]}
             if path=='/v1/analyze':return {'text':payload['text'],'lang':'sl','engine_used':'spacy','offset_convention':'unicode_codepoint_half_open','issues':[{'rule_id':'fixture','start':0,'end':1,'payload':{'SteMislili':'izvirna možnost'}}],'spans':[]}
             raise AssertionError('Generator called')
-    adapter=Private();f=adapter.freeze({'task':'text_check','question':'ž','locale':'sl'},{})
+    adapter=Private();f=adapter.freeze({'task':'text_check','question':'ž','locale':'sl','input_language':'sl'},{})
     result=adapter.generate(f['bundle'],'short','qwen');assert result['answer_kind']=='deterministic';assert'izvirna možnost'in result['answer_md'];assert'{'not in result['answer_md'];assert all('internal/pilot'not in path for path,_ in adapter.calls)
 
 def test_readonly_bootstrap_status_and_password_file_cli(tmp_path):

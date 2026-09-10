@@ -15,12 +15,15 @@ class ReferenceFixtureClient:
         self.snapshot = 'fixture-snapshot-one'
         self.model_root = '/fixed/models/fixture-revision-one'
         self.retrieval_revision = 'fixture-reranker-revision-one'
+        self.implementation = {'generation':'fixture-protocol-one'}
+        self.allowed_sources = ['epravopis','jezikovna_svetovalnica']
         self.effect = None
 
     def request(self, path):
         if path == '/v1/capabilities': return {'identity': 'accepted-deterministic-fixture'}
         assert path == '/v1/references/health'
         return {'snapshot_id': self.snapshot, 'collection': {'contract_id': 'fixture-1024'},
+                'implementation':self.implementation,'allowed_sources':self.allowed_sources,
                 'retrieval': {'embedding': {'revision': 'fixture-embedding-one', 'dimension': 1024},
                               'reranker': {'revision': self.retrieval_revision}},
                 'models': {'primary': {'data': [{'id': 'fixture-primary', 'root': self.model_root}]}}}
@@ -67,6 +70,7 @@ def test_reference_client_fixed_versioned_route(answer, route):
     assert path == '/v1/references/' + route
     assert payload['question'] == 'Théophile' and payload['sources'] == ['epravopis']
     assert payload['answer_language'] == 'it' and payload['model'] == 'challenger'
+    assert payload['retrieval']==('hybrid_rerank' if answer else 'lexical')
 
 
 @pytest.mark.parametrize('task', ['reference', 'reference-search'])
@@ -102,7 +106,7 @@ def test_interrupted_reference_batch_resumes_ids_order_and_private_receipts(batc
     assert records[0]['text'] not in (output / 'progress.json').read_text()
 
 
-@pytest.mark.parametrize('identity', ['snapshot', 'model_root', 'retrieval_revision'])
+@pytest.mark.parametrize('identity', ['snapshot', 'model_root', 'retrieval_revision','implementation','allowed_sources'])
 def test_snapshot_or_model_pin_change_invalidates_all_cached_successes(batch, identity):
     client, path, output, records = batch
     first = process_jsonl(client, path, output)

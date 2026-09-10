@@ -40,14 +40,15 @@ function render(result){
     let url=p.url;const page=p.span?.page_index??p.span?.anchors?.[0]?.page_index;
     if(p.source_slug==='epravopis'&&Number.isInteger(page))url='https://omp.zrc-sazu.si/zalozba/catalog/download/2271/9156/3323#page='+(page+1);
     section.append(safeLink(url,'Odpri izvirni vir'),document.createTextNode(' '));
-    const button=text('button','Prikaži celoten odgovor ali stran','quiet');button.addEventListener('click',()=>expand(p,section,button));section.append(button);
+    const button=text('button',p.source_slug==='epravopis'?'Prikaži vse odlomke s te strani':'Prikaži celoten odgovor','quiet');button.addEventListener('click',()=>expand(p,section,button));section.append(button);
     for(const warning of p.warnings??[])section.append(text('p',warning,'hint'));passages.append(section);
   });
   $('reference-diagnostics').textContent=JSON.stringify({status:result.status,snapshot:result.snapshot_id,model:result.model,via:result.via,degraded:result.degraded,diagnostics:result.diagnostics,coverage:health?.coverage,sources:health?.sources},null,2);
 }
 async function run(answer){
   const question=$('reference-question').value.trim();if(!question)return;
-  const source=$('reference-source').value;const payload={question,sources:source==='all'?['jezikovna_svetovalnica','epravopis']:[source],retrieval:$('reference-retrieval').value,answer_language:$('reference-language').value,model:$('reference-model').value,limit:8};
+  const source=$('reference-source').value;const selected=$('reference-retrieval').value;const retrieval=selected==='auto'?(answer?'hybrid_rerank':'lexical'):selected;
+  const payload={question,sources:source==='all'?['jezikovna_svetovalnica','epravopis']:[source],retrieval,answer_language:$('reference-language').value,model:$('reference-model').value,limit:8};
   $('reference-ask').disabled=$('reference-search').disabled=true;$('reference-status').textContent=answer?'Iskanje dokazov in priprava odgovora …':'Iskanje izvirnih odlomkov …';
   try{const result=await request('/v1/references/'+(answer?'answer':'search'),payload);render(result);$('reference-status').textContent=(result.degraded?.length?'Delno delovanje · ':'')+`${result.passages?.length??0} odlomkov`;}
   catch(e){$('reference-status').textContent=e.message;}

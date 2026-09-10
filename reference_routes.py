@@ -28,6 +28,10 @@ class ReferenceRequest(BaseModel):
         return self
 
 
+class ReferenceSearchRequest(ReferenceRequest):
+    retrieval:Literal['lexical','hybrid','hybrid_rerank']='lexical'
+
+
 async def forward(route,payload=None,params=None,klikai=False):
     origin=os.environ.get('KLIKAI_REFERENCE_URL','http://127.0.0.1:8000') if klikai else os.environ.get('ZRC_REFERENCE_URL','http://127.0.0.1:8020')
     try:
@@ -57,7 +61,7 @@ async def health():
 
 
 @router.post('/v1/references/search')
-async def search(payload:ReferenceRequest):
+async def search(payload:ReferenceSearchRequest):
     return await forward('search',payload.model_dump())
 
 

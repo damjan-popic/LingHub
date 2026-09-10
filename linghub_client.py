@@ -24,7 +24,8 @@ class ClientError(Exception):
 
 def reference_version(health):
     """Stable pins only: runtime counters must not invalidate resumable work."""
-    return {'snapshot_id':health['snapshot_id'],'collection':health.get('collection'),
+    return {'snapshot_id':health['snapshot_id'],'collection':health.get('collection'),'implementation':health.get('implementation'),
+        'allowed_sources':health.get('allowed_sources'),
         'retrieval':{key:health.get('retrieval',{}).get(key) for key in ('embedding','reranker')},
         'models':{key:[{'id':model.get('id'),'root':model.get('root')} for model in value.get('data',[])]
                   for key,value in health.get('models',{}).items()}}
@@ -77,10 +78,10 @@ class LingHubClient:
         if kind not in ('synonyms','collocations'):raise ValueError('Unknown dictionary task.')
         return self.request('/v1/resources/thesaurus' if kind=='synonyms' else '/v1/resources/collocations',query={'lemma':lemma,'limit':limit})
 
-    def reference(self,question,*,answer=True,language='sl',sources=None,retrieval='hybrid_rerank',model='primary',limit=8):
+    def reference(self,question,*,answer=True,language='sl',sources=None,retrieval=None,model='primary',limit=8):
         return self.request('/v1/references/'+('answer' if answer else 'search'),{
-            'question':question,'answer_language':language,'sources':sources or ['jezikovna_svetovalnica','epravopis'],
-            'retrieval':retrieval,'model':model,'limit':limit})
+            'question':question,'answer_language':language,'sources':sources if sources is not None else ['jezikovna_svetovalnica','epravopis'],
+            'retrieval':retrieval or ('hybrid_rerank' if answer else 'lexical'),'model':model,'limit':limit})
 
 
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
@@ -115,7 +116,7 @@ def execute_record(client,record):
     if lang not in ('sl','it') or engine not in ('default','spacy','classla'): raise ValueError('Unsupported language or engine.')
     if task in ('reference','reference-search'):
         return client.reference(text,answer=task=='reference',language=lang,sources=record.get('sources'),
-            retrieval=record.get('retrieval','hybrid_rerank'),model=record.get('model','primary'),limit=record.get('limit',8))
+            retrieval=record.get('retrieval') or ('hybrid_rerank' if task=='reference' else 'lexical'),model=record.get('model','primary'),limit=record.get('limit',8))
     if task=='analyze':return client.analyze(lang,text,engine)
     if task=='explore':return client.explore(lang,text,record.get('selection'),engine,record.get('include'))
     if task=='lemmatize':return client.lemmatize(lang,record.get('tokens',text.split()),record.get('limit',4))
@@ -227,7 +228,7 @@ def main(argv=None):
         p.add_argument('--start',type=int);p.add_argument('--end',type=int)
         p.add_argument('--limit',type=int);p.add_argument('--msd')
         p.add_argument('--model',choices=['primary','challenger'],default='primary')
-        p.add_argument('--retrieval',choices=['lexical','hybrid','hybrid_rerank'],default='hybrid_rerank')
+        p.add_argument('--retrieval',choices=['lexical','hybrid','hybrid_rerank'],default=None)
         p.add_argument('--source',choices=['jezikovna_svetovalnica','epravopis'],action='append')
     p=sub.add_parser('batch');p.add_argument('input',type=Path);p.add_argument('output_dir',type=Path);p.add_argument('--resume',action='store_true')
     args=parser.parse_args(argv);client=LingHubClient(args.base_url,timeout=120,retries=0)

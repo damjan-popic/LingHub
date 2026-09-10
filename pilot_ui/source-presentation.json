@@ -1,0 +1,179 @@
+{
+  "schema": "klikai.source-presentation.v2",
+  "note": "Presentation mapping only; resolve actual source slugs from accepted registry. Do not rename stored identities. None of these initials claims to be an official logo.",
+  "defaults": {
+    "visual_height_px": 26,
+    "hit_area_min_px": 44,
+    "max_visible_badges": 4,
+    "author_bylines": false,
+    "icon_only_requires_tooltip_and_accessible_name": true,
+    "show_only_used_sources": true
+  },
+  "sources": [
+    {
+      "suggested_key": "jezikovna_svetovalnica",
+      "badge_default": "Svetovalnica",
+      "initials_fallback": "JS",
+      "labels": {
+        "sl": "Jezikovna svetovalnica",
+        "it": "Jezikovna svetovalnica"
+      },
+      "kind": "advisory",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "epravopis",
+      "badge_default": "ePravopis",
+      "initials_fallback": "eP",
+      "labels": {
+        "sl": "ePravopis",
+        "it": "ePravopis"
+      },
+      "kind": "orthographic",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "sloleks",
+      "badge_default": "Sloleks",
+      "initials_fallback": "Sl",
+      "labels": {
+        "sl": "Sloleks",
+        "it": "Sloleks"
+      },
+      "kind": "morphology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "morph_it",
+      "badge_default": "Morph-it!",
+      "initials_fallback": "Mi",
+      "labels": {
+        "sl": "Morph-it!",
+        "it": "Morph-it!"
+      },
+      "kind": "morphology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "synonyms",
+      "badge_default": "Sopomenke",
+      "initials_fallback": "So",
+      "labels": {
+        "sl": "Sopomenke",
+        "it": "Sinonimi"
+      },
+      "kind": "lexical",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "collocations",
+      "badge_default": "Kolokacije",
+      "initials_fallback": "Ko",
+      "labels": {
+        "sl": "Kolokacije",
+        "it": "Collocazioni"
+      },
+      "kind": "lexical",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "loris",
+      "badge_default": "LORIS",
+      "initials_fallback": "L",
+      "labels": {
+        "sl": "LORIS",
+        "it": "LORIS"
+      },
+      "kind": "rules",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "zvezek",
+      "badge_default": "Zvezek",
+      "initials_fallback": "Z",
+      "labels": {
+        "sl": "Zvezek",
+        "it": "Zvezek"
+      },
+      "kind": "terminology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "crossterm",
+      "badge_default": "CROSSTERM",
+      "initials_fallback": "CT",
+      "labels": {
+        "sl": "CROSSTERM",
+        "it": "CROSSTERM"
+      },
+      "kind": "terminology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "solska",
+      "badge_default": "Šolska",
+      "initials_fallback": "Š",
+      "labels": {
+        "sl": "Šolska terminologija",
+        "it": "Terminologia scolastica"
+      },
+      "kind": "terminology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "tretji_sektor",
+      "badge_default": "Tretji sektor",
+      "initials_fallback": "TS",
+      "labels": {
+        "sl": "Tretji sektor",
+        "it": "Terzo settore"
+      },
+      "kind": "terminology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "zkb",
+      "badge_default": "ZKB",
+      "initials_fallback": "ZK",
+      "labels": {
+        "sl": "ZKB",
+        "it": "ZKB"
+      },
+      "kind": "terminology",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "jezikovna_posta",
+      "badge_default": "Pošta",
+      "initials_fallback": "JP",
+      "labels": {
+        "sl": "Jezikovna pošta",
+        "it": "Jezikovna pošta"
+      },
+      "kind": "advisory",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "jezikovna_urgenca",
+      "badge_default": "Urgenca",
+      "initials_fallback": "JU",
+      "labels": {
+        "sl": "Jezikovna urgenca",
+        "it": "Jezikovna urgenca"
+      },
+      "kind": "advisory",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "gradivo",
+      "badge_default": "Gradivo",
+      "initials_fallback": "G",
+      "labels": {
+        "sl": "Gradivo",
+        "it": "Materiali"
+      },
+      "kind": "navigation",
+      "official_asset": null
+    }
+  ]
+}

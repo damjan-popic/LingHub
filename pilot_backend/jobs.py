@@ -1,0 +1,95 @@
+"""Persisted bounded work with short-job priority and starvation prevention."""
+from __future__ import annotations
+import fcntl,json,threading,time
+from .store import canonical,digest,stamp
+from .security import Failure
+
+
+def render_result(value):
+    if not isinstance(value,dict):raise Failure('invalid_answer',502)
+    status=value.get('status')
+    if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
+    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error'}
+    out={k:v for k,v in value.items()if k in allowed}
+    for field in ('short_answer','answer_md'):
+        if not isinstance(out.get(field,''),str)or len(out.get(field,''))>100000:raise Failure('invalid_answer',502)
+        out.setdefault(field,'')
+    for field in ('source_badges','evidence'):
+        if not isinstance(out.get(field,[]),list):raise Failure('invalid_answer',502)
+        out.setdefault(field,[])
+    # The UI renders these canonical blocks as text. Anchors address Unicode code points.
+    blocks=out.get('display_blocks')or out.get('blocks')
+    if blocks:
+        if not isinstance(blocks,list)or len(blocks)>100 or any(not isinstance(b,dict)or not isinstance(b.get('text'),str)for b in blocks):raise Failure('invalid_answer',502)
+        blocks=[{'block_id':str(b.get('block_id',f'b{i}')),'text':b['text']}for i,b in enumerate(blocks)]
+        if len({b['block_id']for b in blocks})!=len(blocks):raise Failure('invalid_answer',502)
+    else:blocks=[{'block_id':'answer','text':out['answer_md']or out['short_answer']}]
+    out['blocks']=blocks
+    return out,digest(blocks)
+
+class Jobs:
+    def __init__(self,store,adapter,workers=2):
+        self.store=store;self.adapter=adapter;self.workers=workers;self.stop_event=threading.Event();self.threads=[];self.lock=None
+    def start(self):
+        if self.threads:return
+        self.lock=self.store.path.with_suffix('.workers.lock').open('a')
+        try:fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:self.lock.close();self.lock=None;raise RuntimeError('A pilot worker instance is already active')from None
+        self.store.recover_jobs()
+        self.threads=[threading.Thread(target=self.loop,args=('model',),name=f'pilot-worker-{i}',daemon=True)for i in range(self.workers)]
+        self.threads.append(threading.Thread(target=self.loop,args=('cpu',),name='pilot-worker-cpu',daemon=True))
+        for t in self.threads:t.start()
+    def close(self):
+        self.stop_event.set()
+        for t in self.threads:t.join(timeout=1)
+        # Retain the lock while an in-flight request is completing; a replacement must fail closed.
+        if not any(t.is_alive()for t in self.threads)and self.lock:self.lock.close();self.lock=None
+    def claim(self,pool=None):
+        with self.store.tx()as db:
+            rows=list(db.execute("SELECT j.*,r.family_id FROM jobs j JOIN runs r ON r.id=j.run_id WHERE j.state='queued'ORDER BY CASE WHEN j.created<?THEN 0 WHEN j.kind='short'THEN 1 ELSE 2 END,j.created",(stamp()-60,)))
+            rows=[r for r in rows if pool is None or(pool=='cpu')==(r['model']=='cpu')]
+            busy=list(db.execute("SELECT j.owner,j.model,r.family_id FROM jobs j JOIN runs r ON r.id=j.run_id WHERE j.state='running'"))
+            # One job/account and one/model prevents a comparison or long expansion monopolizing GPUs.
+            row=next((r for r in rows if all((r['owner']!=b['owner']or'cpu'in {r['model'],b['model']})and r['model']!=b['model']and r['family_id']!=b['family_id']for b in busy)),None)
+            if not row:return None
+            db.execute("UPDATE jobs SET state='running',started=?,attempts=attempts+1 WHERE id=?AND state='queued'",(stamp(),row['id']))
+            db.execute("UPDATE runs SET state='running'WHERE id=?",(row['run_id'],));return dict(row)
+    def execute(self,job):
+        started=time.monotonic();rid=job['run_id']
+        try:
+            with self.store.connect()as db:
+                r=dict(db.execute('SELECT *FROM runs WHERE id=?',(rid,)).fetchone());f=dict(db.execute('SELECT *FROM families WHERE id=?',(r['family_id'],)).fetchone());policy=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(f['policy_id'],)).fetchone()[0])
+                parent=db.execute('SELECT result FROM runs WHERE id=?',(r['parent_run_id'],)).fetchone()if r['parent_run_id']else None
+            if not f['bundle']:
+                frozen=self.adapter.freeze(f,policy)
+                if not isinstance(frozen.get('bundle'),dict)or not isinstance(frozen.get('identity'),dict):raise Failure('invalid_freeze',502)
+                with self.store.tx()as db:
+                    db.execute('UPDATE families SET bundle=?,identity=?WHERE id=?AND bundle IS NULL',(canonical(frozen['bundle']),canonical(frozen['identity']),f['id']))
+                    current=db.execute('SELECT bundle FROM families WHERE id=?',(f['id'],)).fetchone()
+                    if current is None:return
+                    bundle=json.loads(current[0])
+            else:bundle=json.loads(f['bundle'])
+            result,display=render_result(self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None))
+            result['server_elapsed_seconds']=time.monotonic()-started
+            with self.store.tx()as db:
+                current=db.execute('SELECT *FROM jobs WHERE id=?',(job['id'],)).fetchone()
+                if not current:return
+                state='cancelled'if current['cancel_requested']else'complete'
+                db.execute('UPDATE jobs SET state=?,finished=?WHERE id=?',(state,stamp(),job['id']))
+                db.execute('UPDATE runs SET state=?,result=?,display_hash=?,finished=?WHERE id=?',(state,canonical(result)if state=='complete'else None,display if state=='complete'else None,stamp(),rid))
+        except Exception as error:
+            code=error.code if isinstance(error,Failure)else'answer_unavailable'
+            with self.store.tx()as db:
+                db.execute("UPDATE jobs SET state=CASE WHEN cancel_requested=1 THEN 'cancelled'ELSE 'failed'END,error_code=?,finished=?WHERE id=?",(code,stamp(),job['id']))
+                db.execute("UPDATE runs SET state='failed',finished=?WHERE id=?",(stamp(),rid))
+            # Only an error code is retained; provider exceptions may contain private URLs or model identities.
+        finally:
+            from .cycles import monitor_canary
+            try:monitor_canary(self.store)
+            except Failure as error:
+                if error.code!='cycle_busy':raise
+    def loop(self,pool):
+        while not self.stop_event.is_set():
+            job=self.claim(pool)
+            if job:self.execute(job)
+            else:self.stop_event.wait(.15)

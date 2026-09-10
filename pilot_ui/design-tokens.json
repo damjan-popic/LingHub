@@ -1,0 +1,71 @@
+{
+  "schema": "klikai.verified-brand.v1",
+  "observed_at": "2026-09-10T14:43:04.545Z",
+  "reference_urls": [
+    "https://www.jeziknaklik.it/",
+    "https://www.jeziknaklik.it/it/"
+  ],
+  "capture_status": "BOTH_LOCALES_HTTP_200_NO_CHALLENGE",
+  "colors": {
+    "brand_green": {
+      "value": "#197689",
+      "computed": "rgb(25, 118, 137)",
+      "selector": "navigation anchor; ordinary content anchor",
+      "provenance": "portal-sl.json brandCandidates / portal-it.json brandCandidates"
+    },
+    "brand_orange": {
+      "value": "#E34926",
+      "computed": "rgb(227, 73, 38)",
+      "selector": ".colibri-post-category",
+      "provenance": "portal-sl.json and portal-it.json brandCandidates"
+    },
+    "text": {
+      "value": "#252424",
+      "computed": "rgb(37, 36, 36)",
+      "selector": "body",
+      "provenance": "portal-sl.json and portal-it.json brandCandidates"
+    },
+    "green_dark": {
+      "value": "#115463",
+      "provenance": "pilot contrast derivative, not claimed as portal sample"
+    },
+    "page": {
+      "value": "#F8FAF9",
+      "provenance": "pilot neutral, not claimed as portal sample"
+    }
+  },
+  "fonts": {
+    "observed_body": "Open Sans",
+    "observed_heading": "Montserrat",
+    "pilot": "system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
+    "remote_fonts_included": false
+  },
+  "contrast": {
+    "white_on_primary": 5.26,
+    "ink_on_paper": 15.48,
+    "muted_on_paper": 6.23,
+    "orange_wordmark_on_page": 3.82,
+    "expanded_button_text": 8.57
+  },
+  "locale_control": {
+    "observed": "Floating lower-right flag-only Weglot control, current locale first; no visible text labels",
+    "pilot": "Header SL / IT text links, active underline, no flags",
+    "reason": "Explicit pilot header/no-flags/accessibility requirements override copying the flag control"
+  },
+  "capture_files": {
+    "portal-it-desktop.png": "7b36c299302569d4f457ad2ed3aedfd2613849173cd28bc1173eab0883045ff5",
+    "receipt.json": "d84cb3c82961a64fe6ffa1a227ed46d6bcb24210d2f63ec0e18ce4458ce372b5",
+    "portal-sl.json": "ca96c2ca6cdee5be2a2578606bd28d127f61af31a159e410f47d83af306fb7d3",
+    "portal-sl-mobile.png": "24a58884b717a3214006f848ca69124205d9e83f6f363f648eda65a4aca03855",
+    "portal-it.json": "cf39ee2bdbdb3c0a86e45018b53e0ea73109c265dc179b6f4be22a9d637dc1ba",
+    "portal-it-mobile.png": "7edad6f84cede9f34e563d2c3de95fc78fa0a35e6c69d351bb593cad3799848c",
+    "portal-sl-desktop.png": "242205a32b1ae6d1eebc97161938a9e4f58167ae7cdcd0ffd45f6b7423826a2d"
+  },
+  "not_copied": [
+    "font binaries",
+    "cookies",
+    "third-party scripts",
+    "logos",
+    "whole theme"
+  ]
+}

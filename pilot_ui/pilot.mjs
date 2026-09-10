@@ -1,4 +1,4 @@
-import {basePath,localePath,anchorForText,tierBlocks,sourceKey,usedBadges,safeSourceLink,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
@@ -120,12 +120,13 @@ async function openSource(tier,id,kind,reference={}) {
     if(data.edition)$('source-content').append(el('p',t('edition')+' '+String(data.edition),{class:'source-locator'}));
     if(/predlog|proposal/i.test(data.status||''))$('source-content').append(el('p',t('proposal_scope'),{class:'source-qualifier'}));
     if(data.annual_scope||data.publication_scope==='annual_additions')$('source-content').append(el('p',t('annual_scope'),{class:'source-qualifier'}));
-    $('source-content').append(el('blockquote',data.excerpt||data.text||t('source_unavailable')));
+    const excerpt=sourceExcerptPresentation(data);
+    $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
     if(tier.run_id&&!reference.comparisonId)$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));
     const link=safeSourceLink(data.url||data.original_url);if(link)$('source-content').append(el('a',t('open_original'),{href:link,target:'_blank',rel:'noopener noreferrer',class:'plain'}));
     const selectedEvidence=evidenceFor(tier).find(item=>evidenceId(item)===id),related=evidenceFor(tier).filter(item=>sourceKey(item)===sourceKey(selectedEvidence));
     if(selectedEvidence&&related.length>1){const more=el('details'),summary=el('summary',t('other_used_passages'));more.append(summary);for(const [index,item]of related.entries()){const choice=el('button',t('source_number',{number:item.local_number||item.number||index+1}),{type:'button',class:'plain'});choice.addEventListener('click',()=>openSource(tier,evidenceId(item),kind,reference));choice.disabled=evidenceId(item)===id;more.append(choice);}$('source-content').append(more);}
-    if(data.bibliography){const details=el('details'),summary=el('summary',t('source_bibliography'));details.append(summary);const bib=typeof data.bibliography==='string'?data.bibliography:Object.entries(data.bibliography).map(([key,value])=>key+': '+String(value)).join('\n');details.append(el('p',bib));$('source-content').append(details);}
+    if(data.bibliography){const details=el('details',null,{class:'source-bibliography'}),summary=el('summary',t('source_bibliography'));details.append(summary);const bib=typeof data.bibliography==='string'?data.bibliography:Object.entries(data.bibliography).map(([key,value])=>key+': '+String(value)).join('\n');details.append(el('p',bib));if(excerpt.attributionHidden){details.append(el('p',t('original_source_excerpt')));details.append(el('pre',excerpt.original,{class:'source-original'}));}$('source-content').append(details);}
   }catch(error){clear($('source-content'));$('source-content').append(el('p',t('source_unavailable'),{class:'error'}));}
 }
 function captureSelection() {

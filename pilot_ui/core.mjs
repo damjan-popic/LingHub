@@ -31,6 +31,35 @@ export function safeSourceLink(value) {
     return url.href;
   } catch { return null; }
 }
+export function sourceExcerptPresentation(data) {
+  const original = data?.excerpt || data?.text || '';
+  const unchanged = {text:original,original,attributionHidden:false};
+  if (typeof original !== 'string' || !original) return unchanged;
+  // This is a view over the original excerpt, never a rewrite of source/answer
+  // blocks or their canonical offsets. Only explicit publisher metadata may
+  // identify a signature; names inferred from prose or titles are not enough.
+  const link = safeSourceLink(data.url || data.original_url);
+  if (!link || new URL(link).hostname !== 'svetovalnica.zrc-sazu.si') return unchanged;
+  const bibliography = data.bibliography;
+  if (!bibliography || typeof bibliography !== 'object') return unchanged;
+  const authors = Array.isArray(bibliography.authors) ? bibliography.authors : [];
+  const dates = Array.isArray(bibliography.signed_date_text) ? bibliography.signed_date_text : [];
+  const signatures = new Set();
+  for (const author of authors) for (const date of dates) {
+    if (typeof author === 'string' && author.trim() && !/[\r\n]/.test(author) &&
+        typeof date === 'string' && date.trim() && !/[\r\n]/.test(date)) signatures.add(author.trim()+' ('+date.trim()+')');
+  }
+  // A recognized administrative funding footer can follow the signature.
+  // Unknown following prose prevents hiding, including apparent quotations.
+  const fundingFooter = /^Odgovor je bil pripravljen v sklopu projekta [^\r\n]+, ki ga financira Ministrstvo za kulturo Republike Slovenije\.$/;
+  for (const match of original.matchAll(/^[^\r\n]+/gm)) {
+    if (!signatures.has(match[0].trim()) || !original.slice(0,match.index).trim()) continue;
+    const suffix = original.slice(match.index+match[0].length).trim();
+    if (suffix && !fundingFooter.test(suffix)) continue;
+    return {text:original.slice(0,match.index).trimEnd(),original,attributionHidden:true};
+  }
+  return unchanged;
+}
 export function jobState(value) { return value?.state === 'complete' ? value.status || 'complete' : value?.state || value?.status || 'queued'; }
 export function readableLocator(locator, labels) {
   if (typeof locator === 'string') return locator;

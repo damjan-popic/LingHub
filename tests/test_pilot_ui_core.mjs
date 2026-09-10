@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {basePath,localePath,anchorForText,tierBlocks,usedBadges,safeSourceLink,readableLocator,errorKey} from '../pilot_ui/core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,usedBadges,safeSourceLink,sourceExcerptPresentation,readableLocator,errorKey} from '../pilot_ui/core.mjs';
 
 test('prefix routes never introduce an external or traversal route',()=>{
   assert.equal(localePath('/tools/klikai','it'),'/tools/klikai/it/');assert.equal(localePath('','sl'),'/');assert.equal(basePath('/pilot/'),'/pilot');
@@ -40,4 +40,32 @@ test('human source locators show the source page and omit internal coordinate ar
   assert.equal(readableLocator({page_index:0},{page:'Stran',topic:'Tema'}),'Stran 1');
   assert.equal(readableLocator({topic_id:7758},{page:'Stran',topic:'Tema'}),'Tema 7758');
   assert.equal(readableLocator({anchors:[{text:'hidden'}],sha256:'private'},{page:'Page',topic:'Topic'}),'');
+});
+
+const signatureFixture = excerpt => ({excerpt,url:'https://svetovalnica.zrc-sazu.si/topic/7758',bibliography:{authors:['Avtor Primer'],signed_date_text:['junij 2026']}});
+test('source drawer moves only metadata-matched terminal signature to deliberate original detail',()=>{
+  const prose='Victor Hugo je predmet primera. 🙂 e\u0301\nIme Avtor Primer je omenjeno v povedi.';
+  const footer='Odgovor je bil pripravljen v sklopu projekta Preizkus (2026), ki ga financira Ministrstvo za kulturo Republike Slovenije.';
+  for (const ending of ['','\n'+footer]) {
+    const data=signatureFixture(prose+'\nAvtor Primer (junij 2026)'+ending),before=JSON.stringify(data),result=sourceExcerptPresentation(data);
+    assert.equal(result.text,prose);assert.equal(result.original,data.excerpt);assert.equal(result.attributionHidden,true);assert.equal(JSON.stringify(data),before);
+  }
+  const crlf=signatureFixture('Izvirni zapis.\r\nAvtor Primer (junij 2026)\r\n');
+  assert.equal(sourceExcerptPresentation(crlf).text,'Izvirni zapis.');assert.equal(sourceExcerptPresentation(crlf).original,crlf.excerpt);
+});
+test('source drawer preserves inline names, subject names, quotes, unknown dates and following prose',()=>{
+  for(const text of ['Victor Hugo','Besedilo o Avtor Primer.','Besedilo.\nAvtor Primer','Besedilo.\nDruga Oseba (junij 2026)','Besedilo.\nAvtor Primer (maj 2026)','Avtor Primer (junij 2026)','Besedilo.\n> Avtor Primer (junij 2026)','Besedilo.\n»Avtor Primer (junij 2026)«','Besedilo. Avtor Primer (junij 2026)','Besedilo.\nAvtor Primer (junij 2026)\nNaslednja vsebinska poved.']) {
+    const result=sourceExcerptPresentation(signatureFixture(text));assert.equal(result.text,text);assert.equal(result.attributionHidden,false,text);
+  }
+});
+test('source drawer requires explicit structured signature metadata from the original publisher',()=>{
+  const text='Besedilo.\nAvtor Primer (junij 2026)';
+  for(const overrides of [{bibliography:'Avtor Primer (junij 2026)'},{bibliography:{authors:['Avtor Primer'],date:'2026-06-01'}},{bibliography:{authors:['Druga Oseba'],signed_date_text:['junij 2026']}},{url:'https://fran.si/'},{url:'https://svetovalnica.zrc-sazu.si.evil.test/'}]) {
+    const data={...signatureFixture(text),...overrides};assert.equal(sourceExcerptPresentation(data).text,text);
+  }
+});
+test('answer blocks and feedback offsets retain source-like bylines unchanged',()=>{
+  const text='Izvirni odgovor.\nAvtor Primer (junij 2026)',block={block_id:'canonical-source-fallback',text};
+  assert.deepEqual(tierBlocks({blocks:[block]},'long'),[block]);
+  const start=text.indexOf('Avtor');assert.equal(anchorForText(block.block_id,text,start,text.length).quote,'Avtor Primer (junij 2026)');
 });

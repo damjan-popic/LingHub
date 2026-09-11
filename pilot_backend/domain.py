@@ -1,6 +1,6 @@
 """Owned immutable families, render receipts and revisioned feedback."""
 from __future__ import annotations
-import hashlib,json,secrets
+import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
 
@@ -186,7 +186,7 @@ class Domain:
         if not isinstance(choice,str)or not isinstance(tier,str):raise Failure('invalid_request')
         if choice not in VOTES or tier not in {'short','long'}:raise Failure('invalid_request')
         with self.store.tx()as db:
-            a=self.owned(db,'assignments',aid,owner)
+            self.owned(db,'assignments',aid,owner)
             def action():
                 ready=db.execute('SELECT count(*)FROM assignment_runs ar JOIN runs r ON r.id=ar.run_id WHERE ar.assignment_id=?AND ar.tier=?AND r.delivered IS NOT NULL',(aid,tier)).fetchone()[0]
                 if ready!=2:raise Failure('answer_not_delivered',409)

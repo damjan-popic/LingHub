@@ -3,7 +3,6 @@ import json
 from urllib.parse import urlsplit,urlencode
 import httpx
 from .security import Failure
-from .store import digest
 from . import terminology, collation
 
 

@@ -1,4 +1,3 @@
-import copy
 import pytest
 from pilot_backend.collation import plan,collect
 from pilot_backend.store import digest
@@ -58,7 +57,6 @@ def test_job_instrumentation_keeps_blind_public_response_free_of_timings(tmp_pat
  import json
  from argon2 import PasswordHasher,Type
  from pilot_backend.api import create_app
- from fastapi.testclient import TestClient
  class Adapter:
   def freeze(self,family,policy):return {'bundle':{'frozen':True},'identity':{'synthetic':True}}
   def generate(self,*args):return {'status':'validated','short_answer':'Synthetic.','answer_md':'Synthetic.','evidence':[],'source_badges':[],'timings':{'generation_ms':1}}

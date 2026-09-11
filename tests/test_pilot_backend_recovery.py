@@ -72,3 +72,30 @@ def test_support_restore_refuses_unprotected_archive(fixture,tmp_path):
     support=package(fixture,tmp_path);Path(support['archive']).chmod(0o644)
     with pytest.raises(ValueError):restore_support(support['archive'],tmp_path/'bad-restore',support['sha256'])
     assert not(tmp_path/'bad-restore').exists()
+
+def test_retained_runtime_tokenizer_hashes_survive_real_support_restore(fixture,tmp_path):
+    store,owner,key,cfg,archive,_=fixture
+    gateway=json.loads(cfg['gateway'].read_text())
+    inventory={'tools/zrc_reference/pilot_tokenizer.py':'a'*64,'tools/zrc_reference/pilot_glossary.json':'b'*64}
+    gateway['retained_snapshots']=[{'runtime_release':{'path':'/fixed/runtime','files':inventory}}]
+    cfg['gateway'].write_text(canonical(gateway))
+    support=package(fixture,tmp_path);dest=tmp_path/'restored'
+    restore_support(support['archive'],dest,support['sha256'])
+    assert json.loads((dest/'config-gateway.json').read_text())['retained_snapshots'][0]['runtime_release']['files']==inventory
+
+@pytest.mark.parametrize('inventory',[
+    {'tools/zrc_reference/pilot_tokenizer.py':'plaintext secret'},
+    {'tools/zrc_reference/pilot_tokenizer.py':{'token':'a'*64}},
+    {'../../pilot_tokenizer.py':'a'*64},
+    {'tools/zrc_reference/.env':'a'*64},
+    {'tools/zrc_reference/pilot_tokenizer.py':'A'*64},
+    {},
+])
+def test_retained_runtime_hash_exception_rejects_unsafe_members_and_values(inventory):
+    with pytest.raises(ValueError):sanitized_config({'retained_snapshots':[{'runtime_release':{'files':inventory}}]})
+
+def test_retained_runtime_hash_exception_does_not_relax_other_credential_fields():
+    inventory={'tools/zrc_reference/pilot_tokenizer.py':'a'*64}
+    for value in ({'files':inventory},{'runtime_release':{'files':inventory}},
+                  {'retained_snapshots':[{'runtime_release':{'files':inventory},'gateway_token':'a'*64}]}):
+        with pytest.raises(ValueError):sanitized_config(value)

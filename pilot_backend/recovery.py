@@ -10,7 +10,14 @@ MEMBERS={'manifest.json','feedback.tar.gz','current-deletions.jsonl','evidence-s
 
 def sanitized_config(value,*,pins=False):
     """Only explicit config/pin metadata; raw bodies and plaintext credentials are refused."""
-    def visit(node):
+    def visit(node,path=()):
+        if path==('retained_snapshots','runtime_release','files'):
+            # These are module-path -> SHA-256 entries, not credential fields.
+            # Keep this exception local to the exact retained runtime inventory.
+            if not isinstance(node,dict)or not 1<=len(node)<=128:raise ValueError('Invalid retained runtime hash inventory')
+            for member,identity in node.items():
+                if not isinstance(member,str)or not re.fullmatch(r'tools/zrc_reference/[a-z_][a-z0-9_]*\.(?:py|json)',member)or not isinstance(identity,str)or not re.fullmatch(r'[a-f0-9]{64}',identity):raise ValueError('Invalid retained runtime hash inventory')
+            return
         if isinstance(node,dict):
             for key,item in node.items():
                 if not isinstance(key,str):raise ValueError('Invalid recovery metadata key')
@@ -19,9 +26,9 @@ def sanitized_config(value,*,pins=False):
                 if ('token'in lowered or lowered.endswith('key'))and not lowered.endswith(('_file','_sha256','_hash')):
                     if not(lowered.endswith('_file')or lowered.endswith('_sha256')or lowered in{'max_output_tokens','max_new_tokens','tokenizer_revision','tokenizer_repository','tokenizer_python','tokenizer','max_tokens','reasoning_token_budget'}):raise ValueError('Plaintext credential field forbidden in recovery metadata')
                 if lowered in{'question','answer_md','short_answer','claims','source_text','raw_text','reasoning_content','reasoning','payload','content'}:raise ValueError('Raw body field forbidden in recovery metadata')
-                visit(item)
+                visit(item,path+(key,))
         elif isinstance(node,list):
-            for item in node:visit(item)
+            for item in node:visit(item,path)
         elif isinstance(node,str):
             if len(node)>8192 or re.search(r'(?i)(?:postgres(?:ql)?|https?)://[^/\s:@]+:[^/\s@]+@',node)or '-----BEGIN PRIVATE KEY-----'in node or re.search(r'\bhf_[A-Za-z0-9]{20,}\b',node):raise ValueError('Credential or blob forbidden in recovery metadata')
         elif node is not None and type(node)not in{int,float,bool}:raise ValueError('Invalid recovery metadata type')

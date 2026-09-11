@@ -15,6 +15,9 @@ from .adapter import Gateway
 
 MESSAGES={'sl':{'login_required':'Prijavite se.','login_failed':'Prijava ni uspela.','login_throttled':'Preveč poskusov. Poskusite pozneje.','invalid_request':'Zahteva ni veljavna.','not_found':'Zapis ni na voljo.','forbidden':'Dostop ni dovoljen.','csrf_failed':'Osvežite stran in poskusite znova.','password_change_required':'Najprej spremenite začasno geslo.'},'it':{'login_required':'Accedi.','login_failed':'Accesso non riuscito.','login_throttled':'Troppi tentativi. Riprova più tardi.','invalid_request':'Richiesta non valida.','not_found':'La voce non è disponibile.','forbidden':'Accesso non consentito.','csrf_failed':'Aggiorna la pagina e riprova.','password_change_required':'Prima cambia la password temporanea.'}}
 
+MESSAGES['sl']['generation_waiting_capacity']='Izbrani model trenutno nima razpoložljivih zmogljivosti. Iskanje po virih in natančna orodja so na voljo.'
+MESSAGES['it']['generation_waiting_capacity']='Il modello selezionato non ha capacità disponibile. La ricerca nelle fonti e gli strumenti esatti sono disponibili.'
+
 def config_checked(config):
     c=dict(config);base=c.get('base_path','').rstrip('/')
     if base and(not base.startswith('/')or'//'in base or any(x in base for x in ('..','?','#','\\','"',"'",'<','>'))):raise ValueError('Invalid prefix')
@@ -32,7 +35,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);domain=Domain(store,config['tasks'],config['models']);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'));jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'));domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None));jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
     @asynccontextmanager
     async def lifespan(app):
@@ -116,12 +119,18 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         u=user(request,False);p=await payload(request);token,s=await password_call(auth.change_password,u['id'],text(p.get('current_password'),1024),text(p.get('new_password'),1024));return set_session(token,s)
     @app.get(api+'/families')
     async def families(request:Request):return domain.families(user(request)['id'])
+    @app.get(api+'/capabilities')
+    async def capabilities(request:Request):
+        user(request)
+        result={'tasks':list(domain.tasks),'models':list(domain.models),'comparisons':set(domain.models)=={'qwen','gemma'}}
+        if hasattr(adapter,'capabilities'):result.update(await run_in_threadpool(adapter.capabilities))
+        return result
     @app.post(api+'/families')
-    async def new_family(request:Request):return domain.create_family(user(request)['id'],await payload(request))
+    async def new_family(request:Request):return await run_in_threadpool(domain.create_family,user(request)['id'],await payload(request))
     @app.get(api+'/families/{fid}')
     async def family(fid:str,request:Request):return domain.family(user(request)['id'],fid)
     @app.post(api+'/families/{fid}/expand')
-    async def expand(fid:str,request:Request):return domain.expand(user(request)['id'],fid,await payload(request))
+    async def expand(fid:str,request:Request):return await run_in_threadpool(domain.expand,user(request)['id'],fid,await payload(request))
     @app.get(api+'/jobs/{jid}')
     async def job(jid:str,request:Request):return domain.job(user(request)['id'],jid)
     @app.post(api+'/jobs/{jid}/cancel')
@@ -154,11 +163,11 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/feedback')
     async def feedback_history(request:Request):return domain.feedback_history(owner=user(request)['id'])
     @app.post(api+'/comparisons')
-    async def comparison_new(request:Request):return domain.create_comparison(user(request)['id'],await payload(request))
+    async def comparison_new(request:Request):return await run_in_threadpool(domain.create_comparison,user(request)['id'],await payload(request))
     @app.get(api+'/comparisons/{aid}')
     async def comparison(aid:str,request:Request):return domain.comparison(user(request)['id'],aid)
     @app.post(api+'/comparisons/{aid}/expand')
-    async def comparison_expand(aid:str,request:Request):return domain.expand_comparison(user(request)['id'],aid,await payload(request))
+    async def comparison_expand(aid:str,request:Request):return await run_in_threadpool(domain.expand_comparison,user(request)['id'],aid,await payload(request))
     @app.post(api+'/comparisons/{aid}/delivered')
     async def comparison_delivered(aid:str,request:Request):return domain.comparison_delivery(user(request)['id'],aid,await payload(request))
     @app.post(api+'/comparisons/{aid}/vote')

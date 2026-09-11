@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl,json,math,threading,time
 from .store import canonical,digest,stamp
 from .security import Failure
+from .classification import method
 
 
 FREEZE_STAGES={'cpu_collation_ms','tool_evidence_ms','lexical_ms','embedding_ms','vector_search_ms','rerank_ms','retrieval_and_freeze_ms','evidence_lookup_ms'}
@@ -73,6 +74,9 @@ class Jobs:
             with self.store.connect()as db:
                 r=dict(db.execute('SELECT *FROM runs WHERE id=?',(rid,)).fetchone());f=dict(db.execute('SELECT *FROM families WHERE id=?',(r['family_id'],)).fetchone());policy=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(f['policy_id'],)).fetchone()[0])
                 parent=db.execute('SELECT result FROM runs WHERE id=?',(r['parent_run_id'],)).fetchone()if r['parent_run_id']else None
+                focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(f['id'],)).fetchone()
+                if focus:f['focus']=focus[0]
+            if f['task']=='reference'and hasattr(self.adapter,'require_generation'):self.adapter.require_generation([r['model']])
             if not f['bundle']:
                 freeze_started=time.monotonic()
                 frozen=self.adapter.freeze(f,policy)
@@ -89,6 +93,7 @@ class Jobs:
             generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
             validation_started=time.monotonic()
             result,display=render_result(generated)
+            result['capability']=f['task'];result['answer_method']=method(result)
             presentation_ms=(time.monotonic()-validation_started)*1000
             timings=result.setdefault('timings',{})
             # Reuse retains the historical observation in the family, but does not

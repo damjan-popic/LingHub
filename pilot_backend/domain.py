@@ -3,6 +3,8 @@ from __future__ import annotations
 import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
+from . import collation
+from .classification import method
 
 RATINGS={None,'useful','partly_useful','not_useful'}
 TAGS={'linguistic','missing_context','source','accent','language','interface','slow','incorrect','incomplete','unclear','too_long','too_short','source_issue','wrong_language','unsupported','other','wrong_form','missing_qualification','citation','style','translation','factual_error','irrelevant','unsafe','formatting'}
@@ -22,8 +24,13 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4):
-        self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None):
+        self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission
+    def require_generation(self,models):
+        if self.generation_admission:self.generation_admission(models)
+    def answer_actions(self,run):
+        value=json.loads(run['result'])if run and run['result']else {}
+        return method(value)not in {'clarification_required','capability_unavailable','failed'}
     def owned(self,db,table,identifier,owner):
         if table not in {'families','jobs','assignments','feedback'}:raise ValueError('Invalid owned table')
         row=db.execute(f'SELECT * FROM {table} WHERE id=? AND owner=?',(identifier,owner)).fetchone()
@@ -47,7 +54,7 @@ class Domain:
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
-        job_model='cpu'if task in {'source_search','text_check','terminology'}else model
+        job_model='cpu'if task in {'source_search','text_check','terminology','morphology'}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         return {'run_id':rid,'job_id':jid}
     def select_policy(self,db,owner,comparison=False):
@@ -58,17 +65,31 @@ class Domain:
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
     def create_family(self,owner,payload):
-        fields(payload,{'question','context','locale','interface_locale','input_language','model','task','idempotency_key'})
+        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key'})
         q=text(payload.get('question'),5000).strip();context=text(payload.get('context',''),3000)
         locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model','qwen')
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
         if not q or locale not in {'sl','it'}or interface not in {'sl','it'}or input_language not in {'sl','it','mixed','und'}or task not in self.tasks or model not in self.models:raise Failure('invalid_request')
+        checked_key(payload.get('idempotency_key'))
+        focus=text(payload['focus'],512).strip()if 'focus'in payload else None
+        if focus=='':focus=None
+        clarification=None
         if task=='text_check'and input_language not in {'sl','it'}:raise Failure('input_language_required')
+        if task=='morphology'and input_language not in {'sl','it'}:clarification={'code':'input_language_required','fields':['input_language']}
+        if task=='reference':
+            routing=collation.plan(q,input_language,focus)
+            if routing and routing['status']=='clarification_required':
+                language=routing['reason']=='input_language_required'
+                clarification={'code':'input_language_required'if language else'focus_required','fields':['input_language'if language else'focus']}
+        if clarification:return {'status':'clarification_required','clarification':clarification}
         if task=='terminology'and not 2<=len(q)<=500:raise Failure('invalid_request')
+        if task=='morphology'and (len(q)>1000 or not 1<=len(q.split())<=32 or any(len(token)>200 for token in q.split())):raise Failure('invalid_request')
         with self.store.tx()as db:
             def action():
+                if task=='reference':self.require_generation([model])
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
+                if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
                 r=self.new_run(db,fid,owner,'short',model);return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
@@ -79,17 +100,20 @@ class Domain:
                 old=db.execute("SELECT * FROM runs WHERE family_id=?AND tier='long'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
                 if old:return {'job_id':db.execute('SELECT id FROM jobs WHERE run_id=?',(old['id'],)).fetchone()[0]}
                 parent=db.execute("SELECT * FROM runs WHERE family_id=?AND tier='short'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
-                if not parent or parent['state']!='complete' or f['task']!='reference':raise Failure('expansion_unavailable',409)
+                if not parent or parent['state']!='complete' or f['task']!='reference'or not self.answer_actions(parent):raise Failure('expansion_unavailable',409)
+                self.require_generation([f['model']])
                 self.admit(db,owner);return self.new_run(db,fid,owner,'long',f['model'],parent=parent['id'])
             result=self.idem(db,owner,'expand:'+fid,payload,action)
         return {'family':self.family(owner,fid),'job':self.job(owner,result['job_id'])}
     def tier(self,db,run,blind=False):
         r=dict(run);out={k:r[k]for k in ('state','revision','parent_run_id')};out['run_id']=r['id']
-        job=db.execute('SELECT id FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
-        if not blind:out['job_id']=job[0]if job else None
+        job=db.execute('SELECT id,error_code FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
+        if not blind:
+            out['job_id']=job[0]if job else None
+            if job and job['error_code']:out['error_code']=job['error_code']
         if r['result']:
             result=json.loads(r['result'])
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method'):
                 if k in result:out[k]=result[k]
             if not blind:out['display_sha256']=r['display_hash'];out['model']=r['model']
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.
@@ -97,6 +121,8 @@ class Domain:
     def family(self,owner,fid):
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
+            focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()
+            if focus:out['focus']=focus[0]
             for r in db.execute('SELECT * FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision',(fid,)):out[r['tier']]=self.tier(db,r)
             return out
     def families(self,owner):
@@ -139,6 +165,9 @@ class Domain:
             f=self.owned(db,'families',fid,owner)
             if f['task']!='reference':raise Failure('comparison_unavailable')
             def action():
+                parent=db.execute("SELECT *FROM runs WHERE family_id=?AND tier='short'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
+                if parent and parent['state']=='complete'and not self.answer_actions(parent):raise Failure('comparison_unavailable',409)
+                self.require_generation(self.models)
                 self.admit(db,owner,2);aid=uid();mapping=dict(zip(('A','B'),secrets.SystemRandom().sample(list(self.models),2)))
                 prior=bool(db.execute('SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND delivered IS NOT NULL',(fid,)).fetchone()or db.execute('SELECT 1 FROM assignments a JOIN runs r ON r.assignment_id=a.id WHERE a.family_id=?AND (a.revealed IS NOT NULL OR a.blind=0)AND r.delivered IS NOT NULL',(fid,)).fetchone())
                 db.execute('INSERT INTO assignments VALUES(?,?,?,?,?,?,?,?,?)',(aid,owner,fid,int(blind),canonical(mapping),None,int(prior),'short',stamp()))
@@ -165,7 +194,8 @@ class Domain:
             def action():
                 if a['active_tier']=='long':return {'comparison_id':aid}
                 short=list(db.execute("SELECT ar.side,r.* FROM assignment_runs ar JOIN runs r ON r.id=ar.run_id WHERE ar.assignment_id=?AND ar.tier='short'",(aid,)))
-                if len(short)!=2 or any(r['state']!='complete'for r in short):raise Failure('expansion_unavailable',409)
+                if len(short)!=2 or any(r['state']!='complete'or not self.answer_actions(r)for r in short):raise Failure('expansion_unavailable',409)
+                self.require_generation([r['model']for r in short])
                 self.admit(db,owner,2)
                 for r in short:
                     run=self.new_run(db,a['family_id'],owner,'long',r['model'],aid,r['id']);db.execute('INSERT INTO assignment_runs VALUES(?,?,?,?)',(aid,'long',r['side'],run['run_id']))
@@ -188,6 +218,8 @@ class Domain:
         with self.store.tx()as db:
             self.owned(db,'assignments',aid,owner)
             def action():
+                runs=list(db.execute('SELECT r.*FROM assignment_runs ar JOIN runs r ON r.id=ar.run_id WHERE ar.assignment_id=?AND ar.tier=?',(aid,tier)))
+                if any(not self.answer_actions(r)for r in runs):raise Failure('feedback_unavailable',409)
                 ready=db.execute('SELECT count(*)FROM assignment_runs ar JOIN runs r ON r.id=ar.run_id WHERE ar.assignment_id=?AND ar.tier=?AND r.delivered IS NOT NULL',(aid,tier)).fetchone()[0]
                 if ready!=2:raise Failure('answer_not_delivered',409)
                 revision=db.execute('SELECT coalesce(max(revision),0)+1 FROM votes WHERE assignment_id=?',(aid,)).fetchone()[0]
@@ -210,6 +242,9 @@ class Domain:
             r=self.run(db,payload.get('run_id'),owner)
             if r['state']!='complete' or not r['delivered']:raise Failure('answer_not_delivered',409)
             result=json.loads(r['result']);evidence=result.get('evidence',[])
+            if not self.answer_actions(r):raise Failure('feedback_unavailable',409)
+            task=db.execute('SELECT task FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+            target=dict(target,capability=task,answer_method=result.get('answer_method',method(result)))
             if target['kind']=='source'and not any(e.get('evidence_id',e.get('passage_id',e.get('citation_id')))==target.get('evidence_id')for e in evidence):raise Failure('invalid_evidence')
             if anchor:
                 if not isinstance(anchor,dict):raise Failure('invalid_anchor')

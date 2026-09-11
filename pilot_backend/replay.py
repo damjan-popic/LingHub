@@ -4,7 +4,7 @@ import copy,fcntl,hashlib,json,os,re,stat,time,uuid
 from datetime import datetime,timezone
 from pathlib import Path
 from .store import canonical,digest,stamp
-from .cycles import private_write,validate_candidate,snapshot,suggestions
+from .cycles import private_write,validate_candidate,snapshot,suggestions,answer_feedback
 from .security import Failure
 from .classification import method,contains_generated_text
 
@@ -72,11 +72,16 @@ def run(store,gateway,cases_path,cases_sha,*,candidate=None,max_cases=4,force_te
     with store.connect()as db:
         base_id=store.meta('active_policy',db=db);base=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(base_id,)).fetchone()[0])
         consumed=db.execute("SELECT coalesce(max(cutoff),0)FROM cycles WHERE kind='adaptation'AND status='CANARY_PENDING'").fetchone()[0]
-    human=[r for r in rows if r['origin']=='human'and r['task']=='reference'and r['seq']>consumed]
+    human=[r for r in rows if r['origin']=='human'and r['task']=='reference'and r['seq']>consumed and answer_feedback(r)]
     eligible=len(human)>=20 and len({r['owner']for r in human})>=3 and len({r['family_id']for r in human})>=10
     if not force_test and not eligible:return {'status':'INSUFFICIENT_DATA','model_requests':0,'baseline_kept':True,'human_events':len(human),'force_test':False}
     if store.meta('adaptation_paused','0')=='1'and not force_test:return {'status':'PAUSED','model_requests':0,'baseline_kept':True,'force_test':False}
     if busy(store):return {'status':'DEFERRED_PUBLIC_JOBS','model_requests':0,'baseline_kept':True,'force_test':bool(force_test)}
+    if hasattr(gateway,'capabilities'):
+        observed=gateway.capabilities()
+        models={case['model']for case in cases['cases']}
+        if any(not observed.get('generation',{}).get('models',{}).get(name,{}).get('available')for name in models):
+            return {'status':'DEFERRED_CAPACITY','model_requests':0,'baseline_kept':True,'force_test':bool(force_test),'capability':'generation','generation_status':'GENERATION_WAITING_CAPACITY'}
     try:expected_pin=current_pin(gateway)
     except Exception:return {'status':'CURRENT_IDENTITY_UNAVAILABLE','model_requests':0,'baseline_kept':True,'force_test':bool(force_test)}
     choices=suggestions(human,base)

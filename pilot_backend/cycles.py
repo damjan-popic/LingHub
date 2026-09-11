@@ -8,7 +8,7 @@ from .store import canonical,digest,stamp,BASE_POLICY
 from .security import Failure
 from .classification import method,VERSION as CLASSIFICATION_VERSION
 
-VERSION='pilot-analysis-v3'
+VERSION='pilot-analysis-v3-cpu-methods'
 ALLOWLIST={'rerank_policy':('always_for_answers','conditional_for_answers'),'short_style_preset':('direct_qualified_v1','direct_examples_v1'),'long_style_preset':('explanation_examples_v1','explanation_comparison_v1')}
 COMMENT_SIGNALS={
     'accent':r'\b(?:naglas\w*|accent\w*)\b',
@@ -51,6 +51,9 @@ def snapshot(store,previous=0):
         run_rows=[dict(r)for r in db.execute('SELECT r.id,r.state,r.delivered,r.finished,r.result,r.model,r.tier,f.locale,f.task,a.origin FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner')]
     return cutoff,rows,run_rows
 
+def answer_feedback(row):
+    return method(json.loads(row.get('result')or'{}'))not in {'clarification_required','capability_unavailable'}
+
 def environment_pin(rows):
     return digest({'identities':sorted({r['identity']or'{}'for r in rows}),
                    'cohorts':sorted({r['cohort']for r in rows})})
@@ -66,7 +69,7 @@ def development_groups(rows):
 def suggestions(rows,base):
     output=[];slices=defaultdict(list)
     for row in rows:
-        if row['origin']=='human'and row['task']=='reference':slices[row['locale']].append(row)
+        if row['origin']=='human'and row['task']=='reference'and answer_feedback(row):slices[row['locale']].append(row)
     for locale,items in sorted(slices.items()):
         if len({r['family_id']for r in items})<10 or len({r['owner']for r in items})<3:continue
         counts=Counter(t for r in items for t in json.loads(r['tags']))
@@ -96,7 +99,7 @@ def analyse(store,output_dir=None):
             report=json.loads(old[0])
             if output_dir:write_analysis(report,output_dir)
             return report
-        by_origin=Counter(r['origin']for r in rows);human=[r for r in rows if r['origin']=='human'];groups=defaultdict(lambda:Counter());issues=[]
+        by_origin=Counter(r['origin']for r in rows);human=[r for r in rows if r['origin']=='human'and answer_feedback(r)];groups=defaultdict(lambda:Counter());issues=[]
         for row in rows:
             key=canonical([row['origin'],row['locale'],row['task'],row['model'],row['tier']]);groups[key]['feedback']+=1;groups[key][row['rating']or'issue_only']+=1
             for tag in json.loads(row['tags']):groups[key]['tag:'+tag]+=1
@@ -120,6 +123,8 @@ def analyse(store,output_dir=None):
         counts={'vote_groups':dict(vote_groups),'human_votes':sum(v['origin']=='human'for v in votes),'source_groups':dict(source_groups),'feedback_by_origin':dict(by_origin),'human_feedback':len(human),'human_participants':len({r['owner']for r in human}),'human_cases':len({r['family_id']for r in human}),'human_runs':sum(r['origin']=='human'for r in runs),'human_delivered_runs':delivered,'human_technical_failures':failures,'human_p95_seconds':percentile(latencies),'groups':dict(groups)}
         mentions=Counter(signal for issue in issues if issue['origin']=='human'for signal in issue['comment_summary']['comment_mentions'])
         counts['human_comment_mentions']=dict(mentions)
+        counts['non_answer_feedback_excluded']=sum(not answer_feedback(row)for row in rows)
+        counts['feedback_method_groups']=dict(Counter(canonical([row['origin'],row['task'],method(json.loads(row['result']or'{}'))])for row in rows))
         output_methods=defaultdict(Counter)
         for run in runs:
             result=json.loads(run['result']or'{}')
@@ -191,7 +196,7 @@ def adapt(store,candidates=None,validations=None,implemented=None,replay_gateway
     with cycle_lock(store):
         with store.connect()as db:
             previous=db.execute("SELECT coalesce(max(cutoff),0)FROM cycles WHERE kind='adaptation'AND status='CANARY_PENDING'").fetchone()[0];base_id=store.meta('active_policy',db=db);base=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(base_id,)).fetchone()[0])
-        cutoff,rows,runs=snapshot(store,previous);human=[r for r in rows if r['origin']=='human'and r['task']=='reference'];input_hash=digest([{k:r[k]for k in ('id','revision','seq')}for r in human])
+        cutoff,rows,runs=snapshot(store,previous);human=[r for r in rows if r['origin']=='human'and r['task']=='reference'and answer_feedback(r)];input_hash=digest([{k:r[k]for k in ('id','revision','seq')}for r in human])
         if candidates is None:candidates=suggestions(human,base)
         if validations is None:
             validations={}

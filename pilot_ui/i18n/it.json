@@ -225,5 +225,14 @@
   "select_text_language": "Scegli la lingua del testo",
   "text_language_hint": "La lingua del testo da controllare può essere diversa dalla lingua dell’interfaccia e delle spiegazioni.",
   "input_language_required": "Scegli la lingua del testo da controllare.",
-  "deterministic_working": "Consultazione delle risorse…"
+  "deterministic_working": "Consultazione delle risorse…",
+  "focus_label": "Espressione da verificare",
+  "focus_hint": "Inserisci una sola espressione per gli strumenti richiesti. Non occorre modificare la domanda.",
+  "focus_required": "Quale espressione vuoi verificare con gli strumenti richiesti?",
+  "continue_question": "Continua",
+  "checking_request": "Verifica della richiesta …",
+  "generation_waiting_capacity": "La spiegazione con il modello selezionato non è al momento disponibile per capacità occupata. La ricerca nelle fonti e gli strumenti linguistici esatti restano disponibili.",
+  "use_source_search": "Scegli la ricerca nelle fonti",
+  "use_exact_tools": "Scegli la ricerca terminologica",
+  "morphology": "Forme e lemmi"
 }

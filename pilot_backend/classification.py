@@ -4,6 +4,7 @@ MODES={'generated','mixed_generated_and_source_partial','source_supported_partia
 
 def method(result):
     if not isinstance(result,dict):return 'unknown'
+    if result.get('answer_kind')in {'capability_unavailable','unavailable'}:return 'capability_unavailable'
     if result.get('status')=='failed':return 'failed'
     mode=result.get('synthesis_mode')
     if mode in MODES:return mode

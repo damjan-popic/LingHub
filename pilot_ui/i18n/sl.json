@@ -225,5 +225,14 @@
   "select_text_language": "Izberite jezik besedila",
   "text_language_hint": "Jezik pregledanega besedila je lahko drugačen od jezika vmesnika in pojasnil.",
   "input_language_required": "Za pregled izberite jezik besedila.",
-  "deterministic_working": "Preverjam vire …"
+  "deterministic_working": "Preverjam vire …",
+  "focus_label": "Izraz za preverjanje",
+  "focus_hint": "Vpišite en izraz, na katerega naj se nanašajo izbrana orodja. Vprašanja ni treba spreminjati.",
+  "focus_required": "Kateri izraz želite preveriti z izbranimi orodji?",
+  "continue_question": "Nadaljuj",
+  "checking_request": "Preverjam zahtevo …",
+  "generation_waiting_capacity": "Razlaga z izbranim modelom trenutno ni na voljo zaradi zasedenih zmogljivosti. Iskanje po virih in natančna jezikovna orodja ostajajo na voljo.",
+  "use_source_search": "Izberi iskanje po virih",
+  "use_exact_tools": "Izberi terminološko iskanje",
+  "morphology": "Oblike in iztočnice"
 }

@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,urlencode
 import httpx
 from .security import Failure
-from . import terminology, collation
+from . import terminology, collation, morphology
 
 
 def private_url(url):
@@ -28,7 +28,57 @@ class Gateway:
                     if not isinstance(data,dict):raise Failure('answer_unavailable',503)
                     return data
         except (httpx.HTTPError,ValueError,TypeError):raise Failure('answer_unavailable',503)from None
+    def capabilities(self):
+        """Short, read-only readiness observation; never probes by generating text."""
+        unavailable={'generation':{'status':'GENERATION_WAITING_CAPACITY','models':{name:{'available':False,'status':'GENERATION_WAITING_CAPACITY'}for name in ('qwen','gemma')}},'dense':{'available':False,'status':'DENSE_ENCODING_WAITING_CAPACITY'},'lexical':{'available':False},'tools':self.tool_capabilities()}
+        try:
+            with httpx.Client(base_url=self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(2,connect=.5))as client:
+                with client.stream('GET','/internal/pilot/capabilities',headers={'X-Pilot-Internal-Token':self.token})as response:
+                    if response.status_code!=200:return unavailable
+                    raw=bytearray()
+                    for chunk in response.iter_bytes():
+                        raw.extend(chunk)
+                        if len(raw)>32768:return unavailable
+                    value=json.loads(raw)
+            for name in ('qwen','gemma'):
+                ready=value.get('generation',{}).get('models',{}).get(name,{}).get('available')is True
+                unavailable['generation']['models'][name]={'available':ready,'status':'AVAILABLE'if ready else'GENERATION_WAITING_CAPACITY'}
+            if any(m['available']for m in unavailable['generation']['models'].values()):unavailable['generation']['status']='AVAILABLE'
+            for name in ('dense','lexical'):
+                ready=value.get(name,{}).get('available')is True
+                unavailable[name]={'available':ready,'status':'AVAILABLE'if ready else'DENSE_ENCODING_WAITING_CAPACITY'if name=='dense'else'UNAVAILABLE'}
+            return unavailable
+        except (httpx.HTTPError,ValueError,TypeError,AttributeError):return unavailable
+    def tool_capabilities(self):
+        def health(base,path):
+            if not base:return {}
+            try:
+                with httpx.Client(base_url=base,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(.5,connect=.25))as client:
+                    with client.stream('GET',path)as response:
+                        if response.status_code!=200:return {}
+                        raw=bytearray()
+                        for chunk in response.iter_bytes():
+                            raw.extend(chunk)
+                            if len(raw)>32768:return {}
+                        value=json.loads(raw)
+                return value if isinstance(value,dict)and value.get('status')=='ok'else{}
+            except (httpx.HTTPError,ValueError,TypeError):return {}
+        klikai=health(self.klikai_url,'/api/health');ling=health(self.linghub_url,'/health')
+        def obj(value,key):
+            item=value.get(key);return item if isinstance(item,dict)else{}
+        tasks={'terminology':{'configured':bool(self.klikai_url),'available':bool(klikai)and obj(klikai,'morphology').get('usable')is True},'morphology':{'configured':bool(self.linghub_url),'available':obj(obj(ling,'resources'),'morphology').get('available')is True},'text_check':{'configured':bool(self.linghub_url),'available':ling.get('analyzer_service_reachable')is True}}
+        configured=[v for v in tasks.values()if v['configured']]
+        return {'configured':bool(configured),'available':bool(configured)and all(v['available']for v in configured),'tasks':tasks,'observation':'read_only_cpu_health'}
+    def require_generation(self,models):
+        observed=self.capabilities()
+        if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
     def freeze(self,family,policy):
+        if family['task']=='morphology':
+            if not self.linghub_url:raise Failure('task_unavailable',503)
+            lang=family.get('input_language');tokens=family['question'].split()
+            if lang not in {'sl','it'}or not 1<=len(tokens)<=32:raise Failure('invalid_request')
+            data=self.request('/v1/morphology/lemmatize',{'lang':lang,'tokens':tokens,'limit':4},self.linghub_url)
+            return morphology.freeze(data,tokens,lang,family['locale'])
         if family['task']=='terminology':
             if not self.klikai_url:raise Failure('task_unavailable',503)
             query=family['question']
@@ -53,6 +103,7 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('task')=='morphology':return morphology.answer(bundle,tier)
         if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
         if bundle.get('task')=='text_check':
             if not self.linghub_url:raise Failure('task_unavailable',503)
@@ -65,6 +116,7 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('task')=='morphology':return morphology.source(bundle,evidence_id,tier)
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
         return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
 

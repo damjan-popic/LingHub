@@ -27,24 +27,26 @@ _TERM_NOUN_REQUEST = re.compile(r'^\s*(?:termini|terminološk\w*\s+ustreznic\w*|
 _QUOTES = re.compile(r'«([^«»\n]+)»|»([^»«\n]+)«|“([^“”\n]+)”|"([^"\n]+)"')
 
 
-def plan(question, input_language='und'):
+def plan(question, input_language='und', focus=None):
     wording=_QUOTES.sub(' ',question) # A tool name inside the quoted subject is not an operation.
     operations = [name for name,pattern in _PATTERNS.items() if re.search(pattern,wording,re.I)
                   and (name!='terminology' or _TERM_REQUEST.search(wording) or _TERM_NOUN_REQUEST.search(wording) or _TERM_TARGET_REQUEST.search(wording))]
     if not operations:return None
+    explicit_focus=focus is not None
     spans = list(_QUOTES.finditer(question))
     # One explicit focus avoids silently selecting one of several unrelated terms.
-    if len(spans)!=1:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'one_quoted_focus_required'}
-    match=spans[0];focus=next(x for x in match.groups() if x is not None)
+    if not explicit_focus:
+        if len(spans)!=1:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'one_quoted_focus_required'}
+        match=spans[0];focus=next(x for x in match.groups() if x is not None)
     if not focus.strip()or len(focus)>512:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'focus_outside_bound'}
     needs_language=any(x!='terminology'for x in operations)
     if needs_language and input_language not in {'sl','it'}:
         return {'version':VERSION,'operations':operations,'focus':focus,'status':'clarification_required','reason':'input_language_required'}
-    return {'version':VERSION,'operations':operations,'focus':focus,'input_language':input_language,'status':'ready','routing_kind':'explicit_requested_operations_and_quoted_focus'}
+    return {'version':VERSION,'operations':operations,'focus':focus,'input_language':input_language,'status':'ready','routing_kind':'explicit_requested_operations_and_focus_field'if explicit_focus else'explicit_requested_operations_and_quoted_focus'}
 
 
 def collect(gateway, family):
-    routing=plan(family['question'],family.get('input_language','und'))
+    routing=plan(family['question'],family.get('input_language','und'),family.get('focus'))
     if routing is None:return None
     result={'version':VERSION,'plan':routing,'captures':[],'capabilities_identity':None,'timings':{}}
     if routing['status']!='ready':return result

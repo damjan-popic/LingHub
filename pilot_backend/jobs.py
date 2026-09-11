@@ -52,16 +52,19 @@ class Jobs:
             # One job/account and one/model prevents a comparison or long expansion monopolizing GPUs.
             row=next((r for r in rows if all((r['owner']!=b['owner']or'cpu'in {r['model'],b['model']})and r['model']!=b['model']and r['family_id']!=b['family_id']for b in busy)),None)
             if not row:return None
-            db.execute("UPDATE jobs SET state='running',started=?,attempts=attempts+1 WHERE id=?AND state='queued'",(stamp(),row['id']))
-            db.execute("UPDATE runs SET state='running'WHERE id=?",(row['run_id'],));return dict(row)
+            claimed_at=stamp()
+            db.execute("UPDATE jobs SET state='running',started=?,attempts=attempts+1 WHERE id=?AND state='queued'",(claimed_at,row['id']))
+            db.execute("UPDATE runs SET state='running'WHERE id=?",(row['run_id'],));return dict(row,started=claimed_at)
     def execute(self,job):
-        started=time.monotonic();rid=job['run_id']
+        started=time.monotonic();rid=job['run_id'];queue_wait_ms=max(0,((job.get('started')or stamp())-job['created'])*1000);freeze_ms=0.0
         try:
             with self.store.connect()as db:
                 r=dict(db.execute('SELECT *FROM runs WHERE id=?',(rid,)).fetchone());f=dict(db.execute('SELECT *FROM families WHERE id=?',(r['family_id'],)).fetchone());policy=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(f['policy_id'],)).fetchone()[0])
                 parent=db.execute('SELECT result FROM runs WHERE id=?',(r['parent_run_id'],)).fetchone()if r['parent_run_id']else None
             if not f['bundle']:
+                freeze_started=time.monotonic()
                 frozen=self.adapter.freeze(f,policy)
+                freeze_ms=(time.monotonic()-freeze_started)*1000
                 if not isinstance(frozen.get('bundle'),dict)or not isinstance(frozen.get('identity'),dict):raise Failure('invalid_freeze',502)
                 with self.store.tx()as db:
                     db.execute('UPDATE families SET bundle=?,identity=?WHERE id=?AND bundle IS NULL',(canonical(frozen['bundle']),canonical(frozen['identity']),f['id']))
@@ -69,7 +72,12 @@ class Jobs:
                     if current is None:return
                     bundle=json.loads(current[0])
             else:bundle=json.loads(f['bundle'])
-            result,display=render_result(self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None))
+            generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
+            validation_started=time.monotonic()
+            result,display=render_result(generated)
+            presentation_ms=(time.monotonic()-validation_started)*1000
+            timings=result.setdefault('timings',{})
+            timings.update({'queue_wait_ms':queue_wait_ms,'evidence_lookup_ms':freeze_ms,'evidence_cache_reused':bool(f['bundle']),'presentation_validation_ms':presentation_ms,'first_useful_validated_response_ms':queue_wait_ms+(time.monotonic()-started)*1000,'first_useful_display_ms':None,'display_observation':'not_observed_here; ownership-checked browser delivery receipt required'})
             result['server_elapsed_seconds']=time.monotonic()-started
             with self.store.tx()as db:
                 current=db.execute('SELECT *FROM jobs WHERE id=?',(job['id'],)).fetchone()

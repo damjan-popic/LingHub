@@ -4,7 +4,7 @@ from urllib.parse import urlsplit,urlencode
 import httpx
 from .security import Failure
 from .store import digest
-from . import terminology
+from . import terminology, collation
 
 
 def private_url(url):
@@ -43,7 +43,11 @@ class Gateway:
             if not capabilities.get('identity')or not capabilities.get('analyzer_service_reachable'):raise Failure('task_unavailable',503)
             identity={k:capabilities[k]for k in ('identity','resources','models','defaults')if k in capabilities}
             return {'bundle':{'text':family['question'],'lang':family['input_language'],'output_locale':family['locale'],'task':'text_check','capabilities_identity':capabilities['identity']},'identity':identity}
-        return self.request('/internal/pilot/freeze',{'question':family['question'],'context':family['context'],'locale':family['locale'],'task':family['task'],'policy':policy})
+        request={'question':family['question'],'context':family['context'],'locale':family['locale'],'task':family['task'],'policy':policy}
+        if family['task']=='reference':
+            tools=collation.collect(self,family)
+            if tools is not None:request['tool_evidence']=tools
+        return self.request('/internal/pilot/freeze',request)
     def generate(self,bundle,tier,model,parent=None):
         if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
         if bundle.get('task')=='text_check':

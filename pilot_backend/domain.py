@@ -5,6 +5,7 @@ from .store import canonical,digest,stamp,uid
 from .security import Failure
 from . import collation
 from .classification import method
+from . import human_feedback
 
 RATINGS={None,'useful','partly_useful','not_useful'}
 TAGS={'linguistic','missing_context','source','accent','language','interface','slow','incorrect','incomplete','unclear','too_long','too_short','source_issue','wrong_language','unsupported','other','wrong_form','missing_qualification','citation','style','translation','factual_error','irrelevant','unsafe','formatting'}
@@ -24,8 +25,8 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None):
-        self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True):
+        self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
     def require_generation(self,models):
         if self.generation_admission:self.generation_admission(models)
     def answer_actions(self,run):
@@ -59,14 +60,14 @@ class Domain:
         return {'run_id':rid,'job_id':jid}
     def select_policy(self,db,owner,comparison=False):
         baseline=self.store.meta('active_policy',db=db)
-        if comparison or self.store.meta('adaptation_paused','0',db)=='1':return baseline
+        if comparison or self.store.meta('adaptation_paused','0',db)=='1'or self.store.meta('human_testing_mode','0',db)=='1':return baseline
         row=db.execute("SELECT * FROM canaries WHERE state='running'AND expires>?ORDER BY created DESC LIMIT 1",(stamp(),)).fetchone()
         # Stable account/cohort allocation; no per-request reroll or existing-family mutation.
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
     def create_family(self,owner,payload):
         fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key'})
-        q=text(payload.get('question'),5000).strip();context=text(payload.get('context',''),3000)
+        original_question=text(payload.get('question'),5000);q=original_question.strip();context=text(payload.get('context',''),3000)
         locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model','qwen')
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
         if not q or locale not in {'sl','it'}or interface not in {'sl','it'}or input_language not in {'sl','it','mixed','und'}or task not in self.tasks or model not in self.models:raise Failure('invalid_request')
@@ -89,6 +90,7 @@ class Domain:
                 if task=='reference':self.require_generation([model])
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
+                db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
                 r=self.new_run(db,fid,owner,'short',model);return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
@@ -115,7 +117,10 @@ class Domain:
             result=json.loads(r['result'])
             for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method'):
                 if k in result:out[k]=result[k]
-            if not blind:out['display_sha256']=r['display_hash'];out['model']=r['model']
+            if not blind:
+                out['display_sha256']=r['display_hash'];out['model']=r['model']
+                from .human_feedback import public_execution
+                out.update(public_execution(result))
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.
         return out
     def family(self,owner,fid):
@@ -123,6 +128,8 @@ class Domain:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()
             if focus:out['focus']=focus[0]
+            original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(fid,)).fetchone()
+            if original:out['question']=original[0]
             for r in db.execute('SELECT * FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision',(fid,)):out[r['tier']]=self.tier(db,r)
             return out
     def families(self,owner):
@@ -135,7 +142,7 @@ class Domain:
                 a=self.owned(db,'assignments',r['assignment_id'],owner)
                 terminal=db.execute("SELECT count(*)FROM runs WHERE assignment_id=?AND tier=?AND state IN ('complete','failed','cancelled')",(a['id'],r['tier'])).fetchone()[0]
                 if a['blind']and not a['revealed']and terminal<2:return {'job_id':jid,'state':'queued','family_id':r['family_id'],'tier':r['tier'],'position':None,'error_code':None,'pair_state':'preparing'}
-            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code']}
+            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code']}
     def cancel(self,owner,jid):
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)
@@ -157,6 +164,7 @@ class Domain:
         db.execute('INSERT INTO deliveries VALUES(?,?,?,?,?,?)',(uid(),owner,r['id'],r['display_hash'],int(bool(expanded)),stamp()))
         db.execute('UPDATE runs SET delivered=coalesce(delivered,?)WHERE id=?',(stamp(),r['id']))
     def create_comparison(self,owner,payload):
+        if not self.comparisons_enabled or self.store.meta('human_testing_mode','0')=='1':raise Failure('comparisons_deferred',409)
         fields(payload,{'family_id','blind','tier','idempotency_key'})
         if not isinstance(payload.get('family_id'),str):raise Failure('invalid_request')
         fid=payload.get('family_id');blind=payload.get('blind',True)
@@ -189,6 +197,7 @@ class Domain:
             vote=db.execute('SELECT choice,tier,revision,expanded FROM votes WHERE assignment_id=?ORDER BY revision DESC LIMIT 1',(aid,)).fetchone()
             return {'comparison_id':aid,'family_id':a['family_id'],'blind':bool(a['blind']),'revealed':bool(a['revealed']),'tier':a['active_tier'],'pair_state':'ready'if pair_ready else'preparing','sides':tiers[a['active_tier']],'short':tiers['short'],'long':tiers['long'],'vote':dict(vote)if vote else None,'prior_named_exposure':bool(a['prior_named_exposure'])}
     def expand_comparison(self,owner,aid,payload):
+        if not self.comparisons_enabled or self.store.meta('human_testing_mode','0')=='1':raise Failure('comparisons_deferred',409)
         with self.store.tx()as db:
             a=self.owned(db,'assignments',aid,owner)
             def action():
@@ -232,11 +241,14 @@ class Domain:
             db.execute('UPDATE assignments SET revealed=coalesce(revealed,?)WHERE id=?',(stamp(),aid))
         return self.comparison(owner,aid)
     def feedback(self,owner,payload):
-        fields(payload,{'run_id','rating','tags','comment','proposed_correction','anchor','target','idempotency_key','feedback_id'})
+        fields(payload,{'run_id','rating','quality_score','display_locale','tags','comment','proposed_correction','anchor','target','idempotency_key','feedback_id'})
         if not isinstance(payload.get('run_id'),str):raise Failure('invalid_request')
+        score=payload.get('quality_score');display_locale=payload.get('display_locale')
+        if score is not None and(type(score)is not int or not 1<=score<=5):raise Failure('invalid_feedback')
+        if display_locale is not None and display_locale not in {'sl','it'}:raise Failure('invalid_feedback')
         rating=payload.get('rating');tags=payload.get('tags',[]);comment=text(payload.get('comment',''),8000);correction=text(payload.get('proposed_correction',''),8000);anchor=payload.get('anchor');target=payload.get('target',{'kind':'answer'})
         if rating is not None and not isinstance(rating,str):raise Failure('invalid_feedback')
-        if rating not in RATINGS or not isinstance(tags,list)or len(tags)>12 or any(not isinstance(t,str)or t not in TAGS for t in tags)or(not rating and not(tags or anchor or comment or correction)):raise Failure('invalid_feedback')
+        if rating not in RATINGS or not isinstance(tags,list)or len(tags)>12 or any(not isinstance(t,str)or t not in TAGS for t in tags)or(not rating and score is None and not(tags or anchor or comment or correction)):raise Failure('invalid_feedback')
         if not isinstance(target,dict)or set(target)-{'kind','evidence_id'}or not isinstance(target.get('kind'),str)or target.get('kind')not in {'answer','source'}:raise Failure('invalid_feedback')
         with self.store.tx()as db:
             r=self.run(db,payload.get('run_id'),owner)
@@ -259,16 +271,21 @@ class Domain:
                 if payload.get('feedback_id')and payload['feedback_id']!=fid:raise Failure('not_found',404)
                 if not old:db.execute('INSERT INTO feedback VALUES(?,?,?,0)',(fid,owner,r['id']))
                 db.execute('UPDATE feedback SET revision=?WHERE id=?',(revision,fid))
-                db.execute('INSERT INTO feedback_events(id,feedback_id,revision,rating,tags,comment,correction,anchor,display_hash,created,target)VALUES(?,?,?,?,?,?,?,?,?,?,?)',(uid(),fid,revision,rating,canonical(tags),comment,correction,canonical(anchor)if anchor else None,r['display_hash'],stamp(),canonical(target)))
+                event_id=uid();created=stamp()
+                db.execute('INSERT INTO feedback_events(id,feedback_id,revision,rating,tags,comment,correction,anchor,display_hash,created,target)VALUES(?,?,?,?,?,?,?,?,?,?,?)',(event_id,fid,revision,rating,canonical(tags),comment,correction,canonical(anchor)if anchor else None,r['display_hash'],created,canonical(target)))
+                locale=display_locale or db.execute('SELECT interface_locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+                snapshot=human_feedback.observation(db,owner,r,result,created,locale)
+                db.execute('INSERT INTO feedback_observations VALUES(?,?,?)',(event_id,score,canonical(snapshot)))
                 return {'feedback_id':fid,'revision':revision,'acknowledged':True}
             return self.idem(db,owner,'feedback',payload,action)
     def feedback_history(self,owner=None,reviewer=None):
         with self.store.connect()as db:
-            sql='SELECT f.id AS feedback_id,f.run_id,f.revision,e.rating,e.tags,e.comment,e.correction,e.anchor,e.created,e.target FROM feedback f JOIN feedback_events e ON e.feedback_id=f.id AND e.revision=f.revision'
+            sql='SELECT f.id AS feedback_id,f.run_id,f.revision,e.id,e.rating,e.tags,e.comment,e.correction,e.anchor,e.created,e.target FROM feedback f JOIN feedback_events e ON e.feedback_id=f.id AND e.revision=f.revision'
             args=[]
             if owner:sql+=' WHERE f.owner=?';args=[owner]
             elif reviewer:sql+=' JOIN review_assignments a ON a.feedback_id=f.id WHERE a.reviewer=?';args=[reviewer]
             rows=[dict(r)for r in db.execute(sql+' ORDER BY e.created DESC LIMIT 500',args)]
             for r in rows:
+                human_feedback.attach(db,r)
                 for k in ('tags','anchor','target'):r[k]=json.loads(r[k])if r[k]else None
             return {'feedback':rows}

@@ -67,6 +67,7 @@ def current_pin(gateway):
     return {'source_model_profile_pin':value,'retrieval_pin':retrieval}
 
 def run(store,gateway,cases_path,cases_sha,*,candidate=None,max_cases=4,force_test=False,period=None):
+    if store.meta('human_testing_mode','0')=='1':return {'status':'DEFERRED_HUMAN_TESTING','model_requests':0,'baseline_kept':True,'force_test':bool(force_test)}
     if type(max_cases)is not int or not 1<=max_cases<=4:raise ValueError('Replay is bounded to at most four cases')
     cases=manifest(cases_path,cases_sha);cutoff,rows,_=snapshot(store)
     with store.connect()as db:

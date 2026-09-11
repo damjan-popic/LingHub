@@ -32,7 +32,7 @@ class SyntheticFixtureAdapter:
         return {'evidence_id':evidence_id,'source_label':'Svetovalnica','excerpt':'SYNTHETIC SOURCE — Huga.','locator':'SYNTHETIC TEST','status':'advisory','url':'https://svetovalnica.zrc-sazu.si/','bibliography':{'author':'Synthetic bibliography only'}}
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--directory',type=Path,required=True);ap.add_argument('--port',type=int,required=True);ap.add_argument('--prefix',default='');ap.add_argument('--reuse',action='store_true');ap.add_argument('--capacity-control',action='store_true');args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--directory',type=Path,required=True);ap.add_argument('--port',type=int,required=True);ap.add_argument('--prefix',default='');ap.add_argument('--reuse',action='store_true');ap.add_argument('--capacity-control',action='store_true');ap.add_argument('--human-testing',action='store_true');args=ap.parse_args()
     if args.directory.exists()and not args.reuse:raise SystemExit('Use a NEW private directory')
     if args.reuse:
         if args.directory.is_symlink()or args.directory.stat().st_uid!=os.getuid()or stat.S_IMODE(args.directory.stat().st_mode)!=0o700:raise SystemExit('Fixture directory differs')
@@ -45,7 +45,7 @@ def main():
     if args.capacity_control:
         adapter.capacity_path=args.directory/'synthetic-capacity.txt'
         if not args.reuse:adapter.capacity_path.write_text('available');adapter.capacity_path.chmod(0o600)
-    app=create_app({'store':str(args.directory/'pilot.sqlite3'),'allowed_origins':[f'http://127.0.0.1:{args.port}'],'secure_cookies':False,'base_path':args.prefix,'tasks':['reference','source_search','text_check','terminology'],'models':['qwen','gemma']},adapter=adapter)
+    app=create_app({'store':str(args.directory/'pilot.sqlite3'),'allowed_origins':[f'http://127.0.0.1:{args.port}'],'secure_cookies':False,'base_path':args.prefix,'tasks':['reference','source_search','text_check','terminology'],'models':['qwen','gemma'],'human_testing_mode':args.human_testing},adapter=adapter)
     if not args.reuse:
         accounts={}
         for username,role,must_change in [('ui-tester','tester',False),('ui-other','tester',False),('ui-admin','admin',False),('ui-initial','tester',True),('ui-reviewer','reviewer',False)]:

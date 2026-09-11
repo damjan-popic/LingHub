@@ -8,7 +8,7 @@ from .store import canonical,digest,stamp,BASE_POLICY
 from .security import Failure
 from .classification import method,VERSION as CLASSIFICATION_VERSION
 
-VERSION='pilot-analysis-v3-cpu-methods'
+VERSION='pilot-analysis-v4-human-quality'
 ALLOWLIST={'rerank_policy':('always_for_answers','conditional_for_answers'),'short_style_preset':('direct_qualified_v1','direct_examples_v1'),'long_style_preset':('explanation_examples_v1','explanation_comparison_v1')}
 COMMENT_SIGNALS={
     'accent':r'\b(?:naglas\w*|accent\w*)\b',
@@ -46,7 +46,7 @@ def percentile(values,q=.95):
 def snapshot(store,previous=0):
     with store.tx()as db:
         sequence=db.execute("SELECT seq FROM sqlite_sequence WHERE name='feedback_events'").fetchone();cutoff=sequence[0]if sequence else 0
-        rows=[dict(r)for r in db.execute('''SELECT e.*,f.owner,f.run_id,a.origin,a.cohort,r.model,r.tier,r.result,r.family_id,fa.locale,fa.task,fa.identity,fa.policy_id FROM feedback_events e JOIN feedback f ON f.id=e.feedback_id JOIN accounts a ON a.id=f.owner JOIN runs r ON r.id=f.run_id JOIN families fa ON fa.id=r.family_id WHERE e.seq>?AND e.seq<=?AND e.revision=(SELECT max(e2.revision)FROM feedback_events e2 WHERE e2.feedback_id=e.feedback_id AND e2.seq<=?) ORDER BY e.seq''',(previous,cutoff,cutoff))]
+        rows=[dict(r)for r in db.execute('''SELECT e.*,o.quality_score,f.owner,f.run_id,a.origin,a.cohort,r.model,r.tier,r.result,r.family_id,fa.locale,fa.task,fa.identity,fa.policy_id FROM feedback_events e LEFT JOIN feedback_observations o ON o.event_id=e.id JOIN feedback f ON f.id=e.feedback_id JOIN accounts a ON a.id=f.owner JOIN runs r ON r.id=f.run_id JOIN families fa ON fa.id=r.family_id WHERE e.seq>?AND e.seq<=?AND e.revision=(SELECT max(e2.revision)FROM feedback_events e2 WHERE e2.feedback_id=e.feedback_id AND e2.seq<=?) ORDER BY e.seq''',(previous,cutoff,cutoff))]
         # Denominators include actual delivered answers even when no vote was supplied.
         run_rows=[dict(r)for r in db.execute('SELECT r.id,r.state,r.delivered,r.finished,r.result,r.model,r.tier,f.locale,f.task,a.origin FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner')]
     return cutoff,rows,run_rows
@@ -101,7 +101,7 @@ def analyse(store,output_dir=None):
             return report
         by_origin=Counter(r['origin']for r in rows);human=[r for r in rows if r['origin']=='human'and answer_feedback(r)];groups=defaultdict(lambda:Counter());issues=[]
         for row in rows:
-            key=canonical([row['origin'],row['locale'],row['task'],row['model'],row['tier']]);groups[key]['feedback']+=1;groups[key][row['rating']or'issue_only']+=1
+            key=canonical([row['origin'],row['locale'],row['task'],row['model'],row['tier']]);groups[key]['feedback']+=1;groups[key]['quality:'+str(row['quality_score'])if row.get('quality_score')is not None else row['rating']or'issue_only']+=1
             for tag in json.loads(row['tags']):groups[key]['tag:'+tag]+=1
             if row['rating']!='useful'or row['tags']!='[]'or row['comment']or row['correction']:
                 issues.append({'triage_id':digest([row['feedback_id'],row['revision']])[:24],'feedback_id':row['feedback_id'],'revision':row['revision'],'origin':row['origin'],'locale':row['locale'],'task':row['task'],'tier':row['tier'],'tags':json.loads(row['tags']),'target':json.loads(row['target']),'comment_summary':comment_summary(row),'comment_is_untrusted_data':True})
@@ -119,10 +119,15 @@ def analyse(store,output_dir=None):
         for row in rows:
             sources={e.get('source_slug','unknown')for e in json.loads(row['result']or'{}').get('evidence',[])}or{'none'}
             for source in sources:
-                key=canonical([row['origin'],source,row['locale'],row['task'],row['model'],row['tier']]);source_groups[key]['feedback']+=1;source_groups[key][row['rating']or'issue_only']+=1
+                key=canonical([row['origin'],source,row['locale'],row['task'],row['model'],row['tier']]);source_groups[key]['feedback']+=1;source_groups[key]['quality:'+str(row['quality_score'])if row.get('quality_score')is not None else row['rating']or'issue_only']+=1
         counts={'vote_groups':dict(vote_groups),'human_votes':sum(v['origin']=='human'for v in votes),'source_groups':dict(source_groups),'feedback_by_origin':dict(by_origin),'human_feedback':len(human),'human_participants':len({r['owner']for r in human}),'human_cases':len({r['family_id']for r in human}),'human_runs':sum(r['origin']=='human'for r in runs),'human_delivered_runs':delivered,'human_technical_failures':failures,'human_p95_seconds':percentile(latencies),'groups':dict(groups)}
         mentions=Counter(signal for issue in issues if issue['origin']=='human'for signal in issue['comment_summary']['comment_mentions'])
         counts['human_comment_mentions']=dict(mentions)
+        def quality(items):
+            scores=[r['quality_score']for r in items if type(r.get('quality_score'))is int]
+            return {'scale':'answer-quality-1-5-v1','rated_answers':len(scores),'mean':sum(scores)/len(scores)if scores else None,'histogram':{str(n):scores.count(n)for n in range(1,6)},'unrated_feedback':sum(r.get('quality_score')is None for r in items)}
+        counts['human_quality']=quality(human)
+        counts['nonhuman_quality_by_origin']={origin:quality([r for r in rows if r['origin']==origin and answer_feedback(r)])for origin in sorted(by_origin)if origin!='human'}
         counts['non_answer_feedback_excluded']=sum(not answer_feedback(row)for row in rows)
         counts['feedback_method_groups']=dict(Counter(canonical([row['origin'],row['task'],method(json.loads(row['result']or'{}'))])for row in rows))
         output_methods=defaultdict(Counter)
@@ -134,6 +139,10 @@ def analyse(store,output_dir=None):
         counts['output_classification_version']=CLASSIFICATION_VERSION
         counts['classification_scope']='new analysis of retained metadata; historical bodies and prior cycles are unchanged'
         report={'schema':'klikai.pilot.analysis.v1','cycle_id':cid,'cutoff':cutoff,'policy_id':policy,'analyser_revision':VERSION,'status':'ANALYSIS_COMPLETE','input_hash':digest([{k:r[k]for k in ('id','revision','seq')}for r in rows]),'counts':counts,'issues':issues,'candidate_suggestions':suggestions(rows,json.loads(next(iter_policy(store,policy)))),'environment_pin':environment_pin(human),'development_source_groups':sorted(development_groups(human)),'reports':{'sl':f"Pilot: {len(human)} povratnih informacij ljudi; {delivered} prikazanih odgovorov. Sintetični podatki so ločeni. Samodejna sprememba zahteva neodvisno preverjanje.",'it':f"Pilot: {len(human)} riscontri umani; {delivered} risposte mostrate. Dati sintetici separati. Le modifiche automatiche richiedono una verifica indipendente."},'comments_sent_to_model':False}
+        for locale in ('sl','it'):
+            q=counts['human_quality'];mean=f"{q['mean']:.2f}"if q['mean']is not None else '—'
+            report['reports'][locale]+=(f" Ocene kakovosti ljudi (1–5): {q['rated_answers']}; povprečje {mean}."if locale=='sl'else f" Valutazioni umane della qualità (1–5): {q['rated_answers']}; media {mean}.")
+            if store.meta('human_testing_mode','0')=='1':report['reports'][locale]+=(' Samodejno prilagajanje in nove primerjave sta odložena.'if locale=='sl'else' Adattamento automatico e nuovi confronti sono rinviati.')
         labels={'sl':dict(zip(COMMENT_SIGNALS,('naglas','pregibanje','izjeme','sobesedilo','opora v virih','jezik','jasnost'))),'it':dict(zip(COMMENT_SIGNALS,('accento','flessione','eccezioni','contesto','supporto nelle fonti','lingua','chiarezza')))}
         for locale in('sl','it'):
             if mentions:report['reports'][locale]+=(' Omenjene teme komentarjev (navedbe niso preverjene): 'if locale=='sl'else' Temi menzionati nei commenti (segnalazioni non verificate): ')+', '.join(labels[locale][key]+' '+str(value)for key,value in sorted(mentions.items()))+'.'
@@ -193,6 +202,7 @@ def independent_gate(validation,baseline,candidate,development_families,expected
     return True,'validated',metrics
 
 def adapt(store,candidates=None,validations=None,implemented=None,replay_gateway=None,replay_cases=None):
+    if store.meta('human_testing_mode','0')=='1':return {'status':'DEFERRED_HUMAN_TESTING','model_requests':0,'baseline_kept':True,'automatic_adaptation_enabled':False}
     with cycle_lock(store):
         with store.connect()as db:
             previous=db.execute("SELECT coalesce(max(cutoff),0)FROM cycles WHERE kind='adaptation'AND status='CANARY_PENDING'").fetchone()[0];base_id=store.meta('active_policy',db=db);base=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(base_id,)).fetchone()[0])
@@ -264,6 +274,7 @@ def canary_identity_matches(identity,pin,params):
     except (ValueError,KeyError,TypeError):return False
 
 def monitor_canary(store,gateway=None):
+    if store.meta('human_testing_mode','0')=='1':return {'status':'DEFERRED_HUMAN_TESTING','baseline_kept':True}
     with cycle_lock(store):
         sql="SELECT r.*,f.owner,f.identity AS family_identity FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner WHERE f.policy_id=?AND f.task='reference'AND r.assignment_id IS NULL AND a.origin='human'AND r.created>=?"
         with store.connect()as db:

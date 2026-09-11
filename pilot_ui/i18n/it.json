@@ -234,5 +234,21 @@
   "generation_waiting_capacity": "La spiegazione con il modello selezionato non è al momento disponibile per capacità occupata. La ricerca nelle fonti e gli strumenti linguistici esatti restano disponibili.",
   "use_source_search": "Scegli la ricerca nelle fonti",
   "use_exact_tools": "Scegli la ricerca terminologica",
-  "morphology": "Forme e lemmi"
+  "morphology": "Forme e lemmi",
+  "quality_question": "Qual è la qualità della risposta?",
+  "quality_score": "Valutazione {score} su 5",
+  "quality_endpoints": "1 — molto scarsa · 5 — eccellente",
+  "quality_comment": "Commento (facoltativo)",
+  "quality_result": "Qualità della risposta: {score}/5",
+  "cpu_slower": "È disponibile l’elaborazione più lenta su CPU; caricamento e risposta possono richiedere diversi minuti. Puoi lasciare aperta la pagina.",
+  "human_testing_deferred": "Raccogliamo le esperienze delle persone. Adattamento automatico e nuovi confronti dei modelli sono rinviati.",
+  "human_quality_summary": "Valutazioni umane: {count}. Qualità media: {mean}/5.",
+  "human_record": "Riscontro di un partecipante",
+  "synthetic_record": "Dati di prova o importati — esclusi dal riepilogo umano",
+  "original_prompt": "Domanda originale",
+  "displayed_answer": "Risposta esatta mostrata",
+  "record_versions": "Versioni della risposta, del modello e delle fonti",
+  "admin_export_json": "Esporta JSON",
+  "admin_export_csv": "Esporta CSV",
+  "feedback_unsaved": "Le modifiche non sono ancora salvate."
 }

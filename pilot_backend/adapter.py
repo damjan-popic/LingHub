@@ -17,7 +17,7 @@ class Gateway:
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
-            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 240,connect=5))as client:
+            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None else{})as response:
                     if response.status_code!=200:raise Failure('answer_unavailable',503)
                     content=bytearray()
@@ -41,8 +41,12 @@ class Gateway:
                         if len(raw)>32768:return unavailable
                     value=json.loads(raw)
             for name in ('qwen','gemma'):
-                ready=value.get('generation',{}).get('models',{}).get(name,{}).get('available')is True
-                unavailable['generation']['models'][name]={'available':ready,'status':'AVAILABLE'if ready else'GENERATION_WAITING_CAPACITY'}
+                item=value.get('generation',{}).get('models',{}).get(name,{})
+                ready=item.get('available')is True
+                safe={'available':ready,'status':item.get('status')if item.get('status')in {'AVAILABLE','CPU_LOADING','CPU_BUSY','CPU_READY','GENERATION_WAITING_CAPACITY'}else'AVAILABLE'if ready else'GENERATION_WAITING_CAPACITY','device':item.get('device')if item.get('device')in {'cpu','gpu'}else None,'gpu_available':item.get('gpu_available')is True}
+                cpu=item.get('cpu',{})
+                if isinstance(cpu,dict):safe['cpu']={k:v for k,v in cpu.items()if(k=='available'and type(v)is bool)or(k=='phase'and isinstance(v,str)and v in {'ready','loading','running','idle','busy','unavailable'})or(k in {'queued_or_running','queue_capacity'}and type(v)is int and 0<=v<=100)}
+                unavailable['generation']['models'][name]=safe
             if any(m['available']for m in unavailable['generation']['models'].values()):unavailable['generation']['status']='AVAILABLE'
             for name in ('dense','lexical'):
                 ready=value.get(name,{}).get('available')is True

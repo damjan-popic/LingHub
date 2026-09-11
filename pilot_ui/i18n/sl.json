@@ -234,5 +234,21 @@
   "generation_waiting_capacity": "Razlaga z izbranim modelom trenutno ni na voljo zaradi zasedenih zmogljivosti. Iskanje po virih in natančna jezikovna orodja ostajajo na voljo.",
   "use_source_search": "Izberi iskanje po virih",
   "use_exact_tools": "Izberi terminološko iskanje",
-  "morphology": "Oblike in iztočnice"
+  "morphology": "Oblike in iztočnice",
+  "quality_question": "Kako kakovosten je odgovor?",
+  "quality_score": "Ocena {score} od 5",
+  "quality_endpoints": "1 — zelo slab · 5 — odličen",
+  "quality_comment": "Komentar (neobvezno)",
+  "quality_result": "Kakovost odgovora: {score}/5",
+  "cpu_slower": "Na voljo je počasnejše izvajanje na CPU; nalaganje in odgovor lahko trajata več minut. Stran lahko ostane odprta.",
+  "human_testing_deferred": "Zbiramo izkušnje ljudi. Samodejno prilagajanje in nove primerjave modelov sta odložena.",
+  "human_quality_summary": "Ocene ljudi: {count}. Povprečna kakovost: {mean}/5.",
+  "human_record": "Povratna informacija udeleženca",
+  "synthetic_record": "Preskusni ali uvoženi podatki — izključeni iz povzetka ljudi",
+  "original_prompt": "Izvirno vprašanje",
+  "displayed_answer": "Natančno prikazani odgovor",
+  "record_versions": "Različice odgovora, modela in virov",
+  "admin_export_json": "Izvozi JSON",
+  "admin_export_csv": "Izvozi CSV",
+  "feedback_unsaved": "Spremembe še niso shranjene."
 }

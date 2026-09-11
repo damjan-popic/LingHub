@@ -1,11 +1,11 @@
 """Small authenticated same-origin pilot surface; internal APIs stay private."""
 from __future__ import annotations
 from contextlib import asynccontextmanager
-import asyncio,hashlib,hmac,ipaddress,json,os,secrets,threading
+import asyncio,csv,hashlib,hmac,io,ipaddress,json,os,secrets,threading
 from pathlib import Path
 from urllib.parse import urlsplit
 from fastapi import FastAPI,Request
-from fastapi.responses import JSONResponse,HTMLResponse,FileResponse,RedirectResponse
+from fastapi.responses import JSONResponse,HTMLResponse,FileResponse,RedirectResponse,Response
 from starlette.concurrency import run_in_threadpool
 from .store import Store,canonical,digest,stamp
 from .security import Auth,Failure
@@ -29,13 +29,17 @@ def config_checked(config):
         p=urlsplit(origin)
         if p.scheme not in {'http','https'}or not p.hostname or p.path or p.query or p.fragment or p.username or origin.rstrip('/')!=origin:raise ValueError('Invalid origin')
         if p.scheme!='https'and(c['secure_cookies']or p.hostname not in {'127.0.0.1','localhost','::1'}):raise ValueError('HTTP is allowed only in explicit loopback development')
+    c.setdefault('human_testing_mode',False);c.setdefault('comparisons_enabled',not c['human_testing_mode'])
+    if any(type(c[k])is not bool for k in ('human_testing_mode','comparisons_enabled')):raise ValueError('Testing mode flags must be boolean')
     c['allowed_hosts']={urlsplit(o).netloc for o in origins}
     if not c['secure_cookies']and any(urlsplit(o).hostname not in {'127.0.0.1','localhost','::1'}for o in origins):raise ValueError('Secure cookies required outside loopback')
     if c.get('edge_token')and len(c['edge_token'])<32:raise ValueError('Strong boundary token required')
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'));domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None));jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'));domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled']);jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    if config.get('human_testing_mode'):
+        with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
     @asynccontextmanager
     async def lifespan(app):
@@ -90,7 +94,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if not password_gate.acquire(blocking=False):raise Failure('login_busy',429)
         try:return await run_in_threadpool(fn,*args)
         finally:password_gate.release()
-    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change'])},'capabilities':{'tasks':list(domain.tasks),'models':list(domain.models),'comparisons':set(domain.models)=={'qwen','gemma'}}}
+    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change'])},'capabilities':{'tasks':list(domain.tasks),'models':list(domain.models),'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.models)=={'qwen','gemma'}}}
     def set_session(token,s):
         result=JSONResponse(session_result(s));result.set_cookie(cookie,token,httponly=True,secure=config['secure_cookies'],samesite='strict',path=base+'/'if base else'/',max_age=auth.absolute);return result
     @app.get(base+'/health')
@@ -122,7 +126,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/capabilities')
     async def capabilities(request:Request):
         user(request)
-        result={'tasks':list(domain.tasks),'models':list(domain.models),'comparisons':set(domain.models)=={'qwen','gemma'}}
+        result={'tasks':list(domain.tasks),'models':list(domain.models),'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.models)=={'qwen','gemma'}}
         if hasattr(adapter,'capabilities'):result.update(await run_in_threadpool(adapter.capabilities))
         return result
     @app.post(api+'/families')
@@ -267,11 +271,14 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
                     candidate=observed.get('next_run');instant=datetime.fromisoformat(candidate)if isinstance(candidate,str)else None
                     if observed.get('installed')is True and type(observed.get('observed_at'))in {int,float}and 0<=age<86400 and instant and instant.tzinfo and instant.timestamp()>stamp():result['next_run']=candidate
             except(OSError,ValueError,TypeError):pass
+        result['human_testing_mode']=store.meta('human_testing_mode','0')=='1'
+        result['human_feedback_summary']=json.loads(latest['report']).get('counts',{}).get('human_quality')if latest else None
         return result
     @app.post(api+'/admin/pause')
     async def pause(request:Request):
         u=user(request,roles={'admin'});p=await payload(request)
         if type(p.get('paused'))is not bool:raise Failure('invalid_request')
+        if p['paused']is False and store.meta('human_testing_mode','0')=='1':raise Failure('adaptation_deferred',409)
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('adaptation_paused','1'if p['paused']else'0'));store.audit('adaptation_pause',u['id'],{'paused':p['paused']},db)
         return {'paused':p['paused']}
     @app.post(api+'/admin/revert')
@@ -290,12 +297,22 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
                 events=[dict(r)for r in db.execute('SELECT e.* FROM feedback_events e JOIN feedback f ON f.id=e.feedback_id WHERE f.owner=?ORDER BY e.seq',(who,))]
                 votes=[dict(r)for r in db.execute('SELECT id,assignment_id,revision,tier,choice,expanded,created FROM votes WHERE owner=?ORDER BY seq',(who,))]
                 for event in events:
+                    from .human_feedback import attach
+                    attach(db,event)
                     for key in ('tags','anchor','target'):event[key]=json.loads(event[key])if event[key]else None
                 exported.append({'account':account,'families':[domain.family(who,fid)for fid in ids],'comparisons':[domain.comparison(who,aid)for aid in assignments],'feedback_revisions':events,'votes':votes})
-        return {'schema':'klikai.pilot.export.v1','created':stamp(),'accounts':exported}
+        with store.connect()as db:
+            latest=db.execute("SELECT report FROM cycles WHERE kind='analysis'ORDER BY created DESC LIMIT 1").fetchone()
+        return {'schema':'klikai.pilot.export.v1','created':stamp(),'accounts':exported,'latest_analysis':json.loads(latest[0])if latest and owner is None else None,'human_testing_mode':store.meta('human_testing_mode','0')=='1'}
     @app.post(api+'/admin/export')
     async def admin_export(request:Request):
-        u=user(request,roles={'admin'});p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('reauth_password'),1024));return JSONResponse(export(),headers={'Content-Disposition':'attachment; filename="klikai-pilot-export.json"'})
+        u=user(request,roles={'admin'});p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('reauth_password'),1024))
+        if p.get('format','json')not in {'json','csv'}:raise Failure('invalid_request')
+        data=export()
+        if p.get('format')=='csv':
+            from .human_feedback import csv_export
+            return Response(csv_export(data),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="klikai-pilot-feedback.csv"'})
+        return JSONResponse(data,headers={'Content-Disposition':'attachment; filename="klikai-pilot-export.json"'})
     @app.post(api+'/account/export')
     async def account_export(request:Request):
         u=user(request);p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('current_password'),1024));return JSONResponse(export(u['id']),headers={'Content-Disposition':'attachment; filename="klikai-my-records.json"'})

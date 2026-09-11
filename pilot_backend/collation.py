@@ -15,17 +15,22 @@ from . import terminology
 VERSION = 'klikai.tool-collation.v1'
 MAX_BYTES = 128 * 1024
 _PATTERNS = {
-    'terminology': r'\b(?:termin\w*|equivalent\w*|ustreznic\w*)\b',
+    'terminology': r'\b(?:termin(?:e|i|ov|om|ih|u)?|terminolog(?:ia|ico|ica|ici|iche|ij\w*)|terminološk\w*|equivalent\w*|ustreznic\w*)\b',
     'morphology': r'\b(?:morfolog\w*|morpholog\w*|pregib\w*|lemma|lemmat\w*)\b|\bforma\s+base\b',
     'loris': r'\bloris\b',
     'synonyms': r'\b(?:sopomen\w*|sinonim\w*)\b',
     'collocations': r'\b(?:kolokacij\w*|collocaz\w*)\b',
 }
+_TERM_REQUEST = re.compile(r'\b(?:poišči|preveri\w*|najdi|navedi\w*|pokaži\w*|iščem|potrebujem|uporabi\w*|controlla\w*|verifica\w*|cerca\w*|trova\w*|mostra\w*|elenca\w*|consulta\w*|analizza\w*|individua\w*|dammi|vorrei)\b',re.I)
+_TERM_TARGET_REQUEST = re.compile(r'\b(?:kater[iaoe]\s+(?:(?:so|je)\s+)?(?:termin(?:i|ov)?|ustreznic\w*)|qual[ei]\s+(?:(?:sono|è)\s+)?(?:(?:i|gli|le|il)\s+)?(?:termin[ei]|equivalent[ei]))\b',re.I)
+_TERM_NOUN_REQUEST = re.compile(r'^\s*(?:termini|terminološk\w*\s+ustreznic\w*|equivalent\w*|ustreznic\w*)\s+(?:za|per|di)\b',re.I)
 _QUOTES = re.compile(r'«([^«»\n]+)»|»([^»«\n]+)«|“([^“”\n]+)”|"([^"\n]+)"')
 
 
 def plan(question, input_language='und'):
-    operations = [name for name,pattern in _PATTERNS.items() if re.search(pattern,question,re.I)]
+    wording=_QUOTES.sub(' ',question) # A tool name inside the quoted subject is not an operation.
+    operations = [name for name,pattern in _PATTERNS.items() if re.search(pattern,wording,re.I)
+                  and (name!='terminology' or _TERM_REQUEST.search(wording) or _TERM_NOUN_REQUEST.search(wording) or _TERM_TARGET_REQUEST.search(wording))]
     if not operations:return None
     spans = list(_QUOTES.finditer(question))
     # One explicit focus avoids silently selecting one of several unrelated terms.

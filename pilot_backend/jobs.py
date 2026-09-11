@@ -1,8 +1,20 @@
 """Persisted bounded work with short-job priority and starvation prevention."""
 from __future__ import annotations
-import fcntl,json,threading,time
+import fcntl,json,math,threading,time
 from .store import canonical,digest,stamp
 from .security import Failure
+
+
+FREEZE_STAGES={'cpu_collation_ms','tool_evidence_ms','lexical_ms','embedding_ms','vector_search_ms','rerank_ms','retrieval_and_freeze_ms','evidence_lookup_ms'}
+
+def freeze_observation(frozen,elapsed_ms):
+    """Private numeric observations, outside the immutable source/model pin."""
+    raw=frozen.get('timings')or {};stages={}
+    for name in FREEZE_STAGES|{'tokenizer_ms'}:
+        value=raw.get(name)
+        if type(value)in {int,float}and math.isfinite(value)and value>=0:
+            stages['freeze_tokenizer_ms'if name=='tokenizer_ms'else name]=value
+    return {'version':'pilot-freeze-observation-v1','adapter_elapsed_ms':elapsed_ms,'stages':stages}
 
 
 def render_result(value):
@@ -66,18 +78,25 @@ class Jobs:
                 frozen=self.adapter.freeze(f,policy)
                 freeze_ms=(time.monotonic()-freeze_started)*1000
                 if not isinstance(frozen.get('bundle'),dict)or not isinstance(frozen.get('identity'),dict):raise Failure('invalid_freeze',502)
+                identity=dict(frozen['identity'],freeze_observation=freeze_observation(frozen,freeze_ms))
                 with self.store.tx()as db:
-                    db.execute('UPDATE families SET bundle=?,identity=?WHERE id=?AND bundle IS NULL',(canonical(frozen['bundle']),canonical(frozen['identity']),f['id']))
-                    current=db.execute('SELECT bundle FROM families WHERE id=?',(f['id'],)).fetchone()
+                    db.execute('UPDATE families SET bundle=?,identity=?WHERE id=?AND bundle IS NULL',(canonical(frozen['bundle']),canonical(identity),f['id']))
+                    current=db.execute('SELECT bundle,identity FROM families WHERE id=?',(f['id'],)).fetchone()
                     if current is None:return
-                    bundle=json.loads(current[0])
-            else:bundle=json.loads(f['bundle'])
+                    bundle=json.loads(current[0]);observation=json.loads(current[1]).get('freeze_observation')
+            else:
+                bundle=json.loads(f['bundle']);observation=json.loads(f['identity']or'{}').get('freeze_observation')
             generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
             validation_started=time.monotonic()
             result,display=render_result(generated)
             presentation_ms=(time.monotonic()-validation_started)*1000
             timings=result.setdefault('timings',{})
-            timings.update({'queue_wait_ms':queue_wait_ms,'evidence_lookup_ms':freeze_ms,'evidence_cache_reused':bool(f['bundle']),'presentation_validation_ms':presentation_ms,'first_useful_validated_response_ms':queue_wait_ms+(time.monotonic()-started)*1000,'first_useful_display_ms':None,'display_observation':'not_observed_here; ownership-checked browser delivery receipt required'})
+            # Reuse retains the historical observation in the family, but does not
+            # charge earlier retrieval work again to this run's latency.
+            if not f['bundle']and observation:
+                for name,value in observation['stages'].items():
+                    if timings.get(name)is None:timings[name]=value
+            timings.update({'queue_wait_ms':queue_wait_ms,'family_freeze_elapsed_ms':freeze_ms,'evidence_cache_reused':bool(f['bundle']),'freeze_observation_scope':'retained_prior_family_freeze'if f['bundle']else'performed_this_run','freeze_observation_available':observation is not None,'presentation_validation_ms':presentation_ms,'first_useful_validated_response_ms':queue_wait_ms+(time.monotonic()-started)*1000,'first_useful_display_ms':None,'display_observation':'not_observed_here; ownership-checked browser delivery receipt required'})
             result['server_elapsed_seconds']=time.monotonic()-started
             with self.store.tx()as db:
                 current=db.execute('SELECT *FROM jobs WHERE id=?',(job['id'],)).fetchone()

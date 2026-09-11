@@ -46,7 +46,12 @@ class Gateway:
         if family['task']=='reference':
             tools=collation.collect(self,family)
             if tools is not None:request['tool_evidence']=tools
-        return self.request('/internal/pilot/freeze',request)
+        frozen=self.request('/internal/pilot/freeze',request)
+        if family['task']=='reference'and tools is not None:
+            # CPU collection precedes gateway validation/projection. Keep its
+            # duration separate from that gateway's tool_evidence_ms observation.
+            frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
+        return frozen
     def generate(self,bundle,tier,model,parent=None):
         if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
         if bundle.get('task')=='text_check':

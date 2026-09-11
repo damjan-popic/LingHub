@@ -9,7 +9,7 @@ def render_result(value):
     if not isinstance(value,dict):raise Failure('invalid_answer',502)
     status=value.get('status')
     if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
-    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error'}
+    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code'}
     out={k:v for k,v in value.items()if k in allowed}
     for field in ('short_answer','answer_md'):
         if not isinstance(out.get(field,''),str)or len(out.get(field,''))>100000:raise Failure('invalid_answer',502)

@@ -6,8 +6,9 @@ import fcntl,json,math,os,re
 from pathlib import Path
 from .store import canonical,digest,stamp,BASE_POLICY
 from .security import Failure
+from .classification import method,VERSION as CLASSIFICATION_VERSION
 
-VERSION='pilot-analysis-v2'
+VERSION='pilot-analysis-v3'
 ALLOWLIST={'rerank_policy':('always_for_answers','conditional_for_answers'),'short_style_preset':('direct_qualified_v1','direct_examples_v1'),'long_style_preset':('explanation_examples_v1','explanation_comparison_v1')}
 COMMENT_SIGNALS={
     'accent':r'\b(?:naglas\w*|accent\w*)\b',
@@ -119,6 +120,14 @@ def analyse(store,output_dir=None):
         counts={'vote_groups':dict(vote_groups),'human_votes':sum(v['origin']=='human'for v in votes),'source_groups':dict(source_groups),'feedback_by_origin':dict(by_origin),'human_feedback':len(human),'human_participants':len({r['owner']for r in human}),'human_cases':len({r['family_id']for r in human}),'human_runs':sum(r['origin']=='human'for r in runs),'human_delivered_runs':delivered,'human_technical_failures':failures,'human_p95_seconds':percentile(latencies),'groups':dict(groups)}
         mentions=Counter(signal for issue in issues if issue['origin']=='human'for signal in issue['comment_summary']['comment_mentions'])
         counts['human_comment_mentions']=dict(mentions)
+        output_methods=defaultdict(Counter)
+        for run in runs:
+            result=json.loads(run['result']or'{}')
+            key=canonical([run['origin'],run['locale'],run['task'],run['model'],run['tier']])
+            output_methods[key][method(result)]+=1
+        counts['output_method_groups']=dict(output_methods)
+        counts['output_classification_version']=CLASSIFICATION_VERSION
+        counts['classification_scope']='new analysis of retained metadata; historical bodies and prior cycles are unchanged'
         report={'schema':'klikai.pilot.analysis.v1','cycle_id':cid,'cutoff':cutoff,'policy_id':policy,'analyser_revision':VERSION,'status':'ANALYSIS_COMPLETE','input_hash':digest([{k:r[k]for k in ('id','revision','seq')}for r in rows]),'counts':counts,'issues':issues,'candidate_suggestions':suggestions(rows,json.loads(next(iter_policy(store,policy)))),'environment_pin':environment_pin(human),'development_source_groups':sorted(development_groups(human)),'reports':{'sl':f"Pilot: {len(human)} povratnih informacij ljudi; {delivered} prikazanih odgovorov. Sintetični podatki so ločeni. Samodejna sprememba zahteva neodvisno preverjanje.",'it':f"Pilot: {len(human)} riscontri umani; {delivered} risposte mostrate. Dati sintetici separati. Le modifiche automatiche richiedono una verifica indipendente."},'comments_sent_to_model':False}
         labels={'sl':dict(zip(COMMENT_SIGNALS,('naglas','pregibanje','izjeme','sobesedilo','opora v virih','jezik','jasnost'))),'it':dict(zip(COMMENT_SIGNALS,('accento','flessione','eccezioni','contesto','supporto nelle fonti','lingua','chiarezza')))}
         for locale in('sl','it'):

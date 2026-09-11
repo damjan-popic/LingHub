@@ -6,8 +6,9 @@ from pathlib import Path
 from .store import canonical,digest,stamp
 from .cycles import private_write,validate_candidate,snapshot,suggestions
 from .security import Failure
+from .classification import method,contains_generated_text
 
-VERSION='pilot-replay-v1'
+VERSION='pilot-replay-v2'
 SCHEMA='klikai.pilot.exposed-replay.v1'
 CASE_KEYS={'case_id','question','context','locale','task','tier','model','sources','source_groups','original_case_sha256','exposure_set'}
 
@@ -43,7 +44,7 @@ def busy(store):
     with store.connect()as db:return bool(db.execute("SELECT 1 FROM jobs WHERE state IN('queued','running') LIMIT 1").fetchone())
 
 def technical(result):
-    return (isinstance(result,dict)and result.get('status')=='validated'and result.get('answer_kind')in{'generated','source_only'}
+    return (isinstance(result,dict)and result.get('status')=='validated'and result.get('answer_kind')in{'generated','mixed','source_only'}
             and isinstance(result.get('evidence'),list)and bool(result.get('short_answer')or result.get('answer_md'))
             and not result.get('critical_safety_or_provenance_error'))
 
@@ -111,7 +112,7 @@ def run(store,gateway,cases_path,cases_sha,*,candidate=None,max_cases=4,force_te
             if not path.exists():save(path,state)
             save(root/('latest-test.json'if force_test else'latest.json'),{'report':str(path),'sha256':file_sha(path),'run_id':run_id})
             return {'status':'COMPLETE','run_id':run_id,'report':str(path),'sha256':file_sha(path),'model_requests':0,'cases_complete':len(state['cases']),'case_count':len(cases['cases']),
-                    'model_generated_outputs':state['model_generated_outputs'],'all_technical_checks_pass':state['all_technical_checks_pass'],'force_test':bool(force_test),'baseline_kept':True,'human_quality_scores_created':False}
+                    'model_generated_outputs':state['model_generated_outputs'],'output_method_counts':state.get('output_method_counts',{}),'all_technical_checks_pass':state['all_technical_checks_pass'],'force_test':bool(force_test),'baseline_kept':True,'human_quality_scores_created':False}
         calls=0;completed=0
         def request(name,route,payload):
             nonlocal calls
@@ -143,7 +144,7 @@ def run(store,gateway,cases_path,cases_sha,*,candidate=None,max_cases=4,force_te
                     state['source_model_profile_pin']=pin;persist()
                     short=request(prefix+'-short','/internal/pilot/generate',{'bundle':frozen['bundle'],'tier':'short','model':case['model'],'parent_answer':None})
                     result=short if case['tier']=='short'else request(prefix+'-long','/internal/pilot/generate',{'bundle':frozen['bundle'],'tier':'long','model':case['model'],'parent_answer':short})
-                    pair[label]={'technical_pass':technical(short)and technical(result),'status':result.get('status'),'answer_kind':result.get('answer_kind'),'profile_pin':digest(frozen['identity']['profiles']),
+                    pair[label]={'technical_pass':technical(short)and technical(result),'status':result.get('status'),'answer_kind':result.get('answer_kind'),'synthesis_mode':result.get('synthesis_mode'),'output_method':method(result),'profile_pin':digest(frozen['identity']['profiles']),
                                  'evidence_packet_hash':frozen['bundle']['payload']['packets'][case['tier']]['evidence_packet_hash'],'result_sha256':digest(result)}
                 if current_pin(gateway)!=expected_pin:raise ValueError('Runtime or retrieval changed during paired replay')
                 state['cases'][case['case_id']]={'source_groups':case['source_groups'],'locale':case['locale'],'tier':case['tier'],'model':case['model'],'pair':pair}
@@ -152,11 +153,15 @@ def run(store,gateway,cases_path,cases_sha,*,candidate=None,max_cases=4,force_te
         except Deferred:state['status']='DEFERRED_PUBLIC_JOBS'
         except Exception as error:state.update(status='FAILED',error_code=error.code if isinstance(error,Failure)else'integrity_or_runtime_failure')
         state.update(updated=stamp(),all_technical_checks_pass=state['status']=='COMPLETE'and all(x['technical_pass']for c in state['cases'].values()for x in c['pair'].values()),human_quality_scores_created=False,baseline_kept=True)
-        state['model_generated_outputs']=sum(x['answer_kind']=='generated'for c in state['cases'].values()for x in c['pair'].values());persist()
+        state['output_method_counts']={}
+        for case in state['cases'].values():
+            for item in case['pair'].values():
+                label=item.get('output_method',method(item));state['output_method_counts'][label]=state['output_method_counts'].get(label,0)+1
+        state['model_generated_outputs']=sum(contains_generated_text(x)for c in state['cases'].values()for x in c['pair'].values());persist()
         # This index points only to a fully hashed private report; raw responses stay private.
         if state['status']=='COMPLETE':save(root/('latest-test.json'if force_test else'latest.json'),{'report':str(path),'sha256':file_sha(path),'run_id':run_id})
         return {'status':state['status'],'run_id':run_id,'report':str(path),'sha256':file_sha(path),'model_requests':calls,'cases_complete':len(state['cases']),'case_count':len(cases['cases']),
-                'model_generated_outputs':state['model_generated_outputs'],'all_technical_checks_pass':state['all_technical_checks_pass'],'force_test':bool(force_test),'baseline_kept':True,'human_quality_scores_created':False}
+                'model_generated_outputs':state['model_generated_outputs'],'output_method_counts':state.get('output_method_counts',{}),'all_technical_checks_pass':state['all_technical_checks_pass'],'force_test':bool(force_test),'baseline_kept':True,'human_quality_scores_created':False}
 
 def gate(store,base,candidate,*,gateway=None,cases_path=None,cases_sha=None):
     root=store.path.parent/'replay';index=root/'latest.json'

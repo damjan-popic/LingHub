@@ -89,7 +89,7 @@ class Domain:
         if not blind:out['job_id']=job[0]if job else None
         if r['result']:
             result=json.loads(r['result'])
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','citations','deterministic_result'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result'):
                 if k in result:out[k]=result[k]
             if not blind:out['display_sha256']=r['display_hash'];out['model']=r['model']
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.

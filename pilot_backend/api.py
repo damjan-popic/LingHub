@@ -12,6 +12,7 @@ from .security import Auth,Failure
 from .domain import Domain,text
 from .jobs import Jobs
 from .adapter import Gateway
+from .adoption import historical_source
 
 MESSAGES={'sl':{'login_required':'Prijavite se.','login_failed':'Prijava ni uspela.','login_throttled':'Preveč poskusov. Poskusite pozneje.','invalid_request':'Zahteva ni veljavna.','not_found':'Zapis ni na voljo.','forbidden':'Dostop ni dovoljen.','csrf_failed':'Osvežite stran in poskusite znova.','password_change_required':'Najprej spremenite začasno geslo.'},'it':{'login_required':'Accedi.','login_failed':'Accesso non riuscito.','login_throttled':'Troppi tentativi. Riprova più tardi.','invalid_request':'Richiesta non valida.','not_found':'La voce non è disponibile.','forbidden':'Accesso non consentito.','csrf_failed':'Aggiorna la pagina e riprova.','password_change_required':'Prima cambia la password temporanea.'}}
 
@@ -153,7 +154,8 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             evidence=json.loads(r['result']).get('evidence',[])
             if not any(e.get('evidence_id',e.get('passage_id',e.get('citation_id')))==eid for e in evidence):raise Failure('not_found',404)
             bundle=json.loads(f['bundle'])
-        result=await run_in_threadpool(adapter.source,bundle,eid,tier)
+            retained=historical_source(db,fid,r['id'],owner,eid)
+        result=retained if retained is not None else await run_in_threadpool(adapter.source,bundle,eid,tier)
         if isinstance(result.get('evidence'),list):
             evidence=next((e for e in result['evidence']if e.get('citation_id',e.get('evidence_id'))==eid),None)
             if not evidence:raise Failure('not_found',404)

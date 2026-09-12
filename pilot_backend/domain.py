@@ -6,6 +6,7 @@ from .security import Failure
 from . import collation
 from .classification import method
 from . import human_feedback
+from .adoption import historical_record
 
 RATINGS={None,'useful','partly_useful','not_useful'}
 TAGS={'linguistic','missing_context','source','accent','language','interface','slow','incorrect','incomplete','unclear','too_long','too_short','source_issue','wrong_language','unsupported','other','wrong_form','missing_qualification','citation','style','translation','factual_error','irrelevant','unsafe','formatting'}
@@ -36,10 +37,12 @@ class Domain:
         if table not in {'families','jobs','assignments','feedback'}:raise ValueError('Invalid owned table')
         row=db.execute(f'SELECT * FROM {table} WHERE id=? AND owner=?',(identifier,owner)).fetchone()
         if not row:raise Failure('not_found',404)
+        if table=='families':historical_record(db,identifier,owner=owner)
         return dict(row)
     def run(self,db,identifier,owner):
         row=db.execute('SELECT r.* FROM runs r JOIN families f ON f.id=r.family_id WHERE r.id=? AND f.owner=?',(identifier,owner)).fetchone()
         if not row:raise Failure('not_found',404)
+        historical_record(db,row['family_id'],owner=owner,run_id=identifier)
         return dict(row)
     def idem(self,db,owner,scope,payload,action):
         key=checked_key(payload.get('idempotency_key'));request_hash=digest({k:v for k,v in payload.items()if k!='idempotency_key'})
@@ -52,6 +55,7 @@ class Domain:
         active="state IN ('queued','running')"
         if db.execute(f'SELECT count(*)FROM jobs WHERE {active}').fetchone()[0]+count>self.max_queue or db.execute(f'SELECT count(*)FROM jobs WHERE owner=?AND {active}',(owner,)).fetchone()[0]+count>self.per_owner:raise Failure('queue_full',429)
     def new_run(self,db,family,owner,tier,model,assignment=None,parent=None):
+        if historical_record(db,family,owner=owner)is not None:raise Failure('historical_generation_unavailable',409)
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
@@ -108,6 +112,7 @@ class Domain:
             result=self.idem(db,owner,'expand:'+fid,payload,action)
         return {'family':self.family(owner,fid),'job':self.job(owner,result['job_id'])}
     def tier(self,db,run,blind=False):
+        historical=historical_record(db,run['family_id'],run_id=run['id'])
         r=dict(run);out={k:r[k]for k in ('state','revision','parent_run_id')};out['run_id']=r['id']
         job=db.execute('SELECT id,error_code FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
         if not blind:
@@ -121,6 +126,7 @@ class Domain:
                 out['display_sha256']=r['display_hash'];out['model']=r['model']
                 from .human_feedback import public_execution
                 out.update(public_execution(result))
+        if historical is not None:out['historical_evidence']={'status':'exact_retained_record','fresh_origin_assurance':False}
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.
         return out
     def family(self,owner,fid):

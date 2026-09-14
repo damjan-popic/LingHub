@@ -163,3 +163,54 @@ def test_full_record_config_is_explicit_boolean_and_default_remains_off(tmp_path
         with pytest.raises(ValueError):config_checked(dict(config, editorial_full_records=bad))
     app = create_app(dict(config, editorial_full_records=True), start_workers=False)
     assert app.state.jobs.adapter.editorial_full_records is True
+
+
+def operator_record():
+    return {**detail(), 'rights_mode': 'restricted', 'access_policy': {
+        'policy_id': editorial.OPERATOR_POLICY_ID, 'scope': 'authenticated_local_pilot',
+        'decision': 'operator_enabled', 'source_slug': SOURCE}}
+
+
+def operator_discovery():
+    bundle = discovered()
+    hits = [{**h, 'rights_mode': 'restricted'} for h in bundle['hits']]
+    return editorial.freeze({'query': 'query', 'sources': [SOURCE], 'count': 1, 'hits': hits}, 'query', SOURCE, 'sl')['bundle']
+
+
+def test_operator_policy_is_separate_from_rights_and_frozen_in_owned_evidence():
+    record = operator_record()
+    bundle = editorial.freeze_records(operator_discovery(), [record], editorial.OPERATOR_POLICY_ID)['bundle']
+    answer = editorial.answer(bundle, 'short')
+    assert answer['evidence'][0]['rights_mode'] == 'restricted'
+    assert answer['evidence'][0]['access_policy'] == record['access_policy']
+    drawer = editorial.source(bundle, answer['evidence'][0]['evidence_id'], 'short')
+    assert drawer['bibliography']['access_policy'] == record['access_policy']
+    assert drawer['bibliography']['rights_mode'] == 'restricted'
+    with pytest.raises(Failure):editorial.freeze_records(operator_discovery(), [record])
+    for policy in [None, {}, {**record['access_policy'], 'source_slug': 'jezikovna_urgenca'},
+                   {**record['access_policy'], 'scope': 'public'},
+                   {**record['access_policy'], 'policy_id': 'arbitrary'}]:
+        with pytest.raises(Failure):
+            editorial.freeze_records(operator_discovery(), [{**record, 'access_policy': policy}], editorial.OPERATOR_POLICY_ID)
+    for rights in ['unknown', 'metadata_only', 'linked_only']:
+        with pytest.raises(Failure):
+            editorial.freeze_records(operator_discovery(), [{**record, 'rights_mode': rights}], editorial.OPERATOR_POLICY_ID)
+
+
+def test_service_token_is_sent_only_to_explicit_editorial_detail(monkeypatch):
+    import httpx
+    observed = []
+    def transport(instance, request):
+        observed.append((request.url.path, request.headers.get('X-Pilot-Internal-Token')))
+        return httpx.Response(200, json={'fixture': True})
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', transport)
+    token = 'synthetic-private-token-' * 3
+    gateway = Gateway('http://127.0.0.1:18320', token, klikai_url='http://127.0.0.1:8000',
+                      editorial_full_records=True, editorial_operator_policy_id=editorial.OPERATOR_POLICY_ID)
+    for path in ['/api/search?q=query', '/api/health', '/api/editorial/records/jezikovna_posta/jezikovna_posta%3Afixture-1']:
+        gateway.request(path, None, gateway.klikai_url)
+    assert [value for path,value in observed] == [None, None, token]
+    for policy, enabled in [('arbitrary', True), (editorial.OPERATOR_POLICY_ID, False)]:
+        with pytest.raises(ValueError):
+            Gateway('http://127.0.0.1:18320',token,klikai_url='http://127.0.0.1:8000',
+                    editorial_full_records=enabled,editorial_operator_policy_id=policy)

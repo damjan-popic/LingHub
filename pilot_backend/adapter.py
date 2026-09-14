@@ -12,15 +12,18 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False):
+    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None):
         self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
         if type(editorial_full_records)is not bool:raise ValueError('Editorial full-record capability must be boolean')
         self.editorial_full_records=editorial_full_records
+        if editorial_operator_policy_id is not None and (editorial_operator_policy_id!=editorial.OPERATOR_POLICY_ID or not editorial_full_records or not self.klikai_url):raise ValueError('Invalid local editorial operator policy')
+        self.editorial_operator_policy_id=editorial_operator_policy_id
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
             with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
-                with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None else{})as response:
+                editorial_auth=bool(self.editorial_operator_policy_id and base==self.klikai_url and path.startswith('/api/editorial/records/'))
+                with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
                     if response.status_code!=200:raise Failure('answer_unavailable',503)
                     content=bytearray()
                     for chunk in response.iter_bytes():
@@ -92,7 +95,7 @@ class Gateway:
                 # A denial/error never falls back to a stale discovery excerpt.
                 records=[self.request('/api/editorial/records/'+quote(family['task'],safe='')+'/'+quote(hit['resource_id'],safe=''),None,self.klikai_url)
                          for hit in frozen['bundle']['hits']]
-                return editorial.freeze_records(frozen['bundle'],records)
+                return editorial.freeze_records(frozen['bundle'],records,self.editorial_operator_policy_id)
             return frozen
         if family['task']=='morphology':
             if not self.linghub_url:raise Failure('task_unavailable',503)

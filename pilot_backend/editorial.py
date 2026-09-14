@@ -18,6 +18,7 @@ CONTRACT = 'klikai.pilot.editorial-search-excerpt.v1'
 RECORD_CONTRACT = 'klikai.editorial-record.v1'
 FULL_CONTRACT = 'klikai.pilot.editorial-record-capture.v1'
 MAX_RECORD_BYTES = 65536
+OPERATOR_POLICY_ID = 'damjan-local-pilot-editorial-20260914'
 
 
 def freeze(data, query, source, locale):
@@ -127,26 +128,37 @@ def source(bundle, eid, tier):
     raise Failure('not_found', 404)
 
 
-def freeze_records(discovery, records):
+def freeze_records(discovery, records, operator_policy_id=None):
     """Admit one complete record-state response per validated search identity.
 
     Never promote the discovery snippet into a question or a paired answer.
     Full-text denial, an invalid record, or an exceeded bound fails the request.
     """
     checked(discovery)
+    if operator_policy_id is not None and operator_policy_id != OPERATOR_POLICY_ID:
+        raise Failure('invalid_answer', 502)
     if discovery['contract'] != CONTRACT or not isinstance(records, list) or not records or len(records) != len(discovery['hits']):
         raise Failure('invalid_answer', 502)
     text_fields = ('title', 'question_original', 'answer_text', 'article_text', 'additional_info', 'source_date', 'url', 'source_badge')
     required = {'contract', 'resource_id', 'source_slug', 'source_label', 'rights_mode',
                 'content_status', 'complete_qa', 'missing_fields', 'release_id', 'content_hash', 'references', *text_fields}
     for hit, record in zip(discovery['hits'], records):
-        if not isinstance(record, dict) or set(record) != required:
+        if not isinstance(record, dict) or set(record) not in (required, required | {'access_policy'}):
             raise Failure('invalid_answer', 502)
+        policy = record.get('access_policy')
+        expected_policy = {'policy_id': OPERATOR_POLICY_ID, 'scope': 'authenticated_local_pilot',
+                           'decision': 'operator_enabled', 'source_slug': hit['source_slug']}
+        if operator_policy_id is not None:
+            if policy != expected_policy:
+                raise Failure('invalid_answer', 502)
+        elif policy is not None:
+            raise Failure('invalid_answer', 502)
+        allowed_rights = {'owned', 'open', 'restricted'} if operator_policy_id else {'owned', 'open'}
         if len(json.dumps(record, ensure_ascii=False, separators=(',', ':')).encode()) > MAX_RECORD_BYTES:
             raise Failure('editorial_record_too_large', 413)
         if (record['contract'] != RECORD_CONTRACT or record['source_slug'] != hit['source_slug']
                 or record['resource_id'] != hit['resource_id'] or record['source_label'] != SOURCES[hit['source_slug']]
-                or record['rights_mode'] not in {'owned', 'open'} or hit['rights_mode'] != record['rights_mode']):
+                or record['rights_mode'] not in allowed_rights or hit['rights_mode'] != record['rights_mode']):
             raise Failure('invalid_answer', 502)
         for field in text_fields:
             if record[field] is not None and (not isinstance(record[field], str) or not record[field].strip()):
@@ -231,7 +243,8 @@ def record_evidence(bundle):
              'external_id': record['resource_id'], 'title': record['title'],
              'rights_mode': record['rights_mode'], 'url': record['url'], 'source_date': record['source_date'],
              'source_revision': None, 'source_content_hash': record['content_hash'],
-             'stored_release_id': record['release_id'], 'captured_response_sha256': bundle['snapshot_sha256']}
+             'stored_release_id': record['release_id'], 'captured_response_sha256': bundle['snapshot_sha256'],
+             **({'access_policy': deepcopy(record['access_policy'])} if record.get('access_policy') else {})}
             for i, record in enumerate(bundle['records'])]
 
 
@@ -259,5 +272,6 @@ def record_source(bundle, eid):
                     'url': record['url'],
                     'bibliography': {'record_id': record['resource_id'], 'source_date': record['source_date'],
                         'rights_mode': record['rights_mode'], 'stored_release_id': record['release_id'],
-                        'source_content_hash': record['content_hash']}}
+                        'source_content_hash': record['content_hash'],
+                        **({'access_policy': deepcopy(record['access_policy'])} if record.get('access_policy') else {})}}
     raise Failure('not_found', 404)

@@ -13,6 +13,7 @@ from .domain import Domain,text
 from .jobs import Jobs
 from .adapter import Gateway
 from .adoption import historical_source
+from .editorial import OPERATOR_POLICY_ID
 
 MESSAGES={'sl':{'login_required':'Prijavite se.','login_failed':'Prijava ni uspela.','login_throttled':'Preveč poskusov. Poskusite pozneje.','invalid_request':'Zahteva ni veljavna.','not_found':'Zapis ni na voljo.','forbidden':'Dostop ni dovoljen.','csrf_failed':'Osvežite stran in poskusite znova.','password_change_required':'Najprej spremenite začasno geslo.'},'it':{'login_required':'Accedi.','login_failed':'Accesso non riuscito.','login_throttled':'Troppi tentativi. Riprova più tardi.','invalid_request':'Richiesta non valida.','not_found':'La voce non è disponibile.','forbidden':'Accesso non consentito.','csrf_failed':'Aggiorna la pagina e riprova.','password_change_required':'Prima cambia la password temporanea.'}}
 
@@ -32,6 +33,8 @@ def config_checked(config):
         if p.scheme!='https'and(c['secure_cookies']or p.hostname not in {'127.0.0.1','localhost','::1'}):raise ValueError('HTTP is allowed only in explicit loopback development')
     c.setdefault('human_testing_mode',False);c.setdefault('comparisons_enabled',not c['human_testing_mode']);c.setdefault('editorial_full_records',False)
     if type(c['editorial_full_records'])is not bool:raise ValueError('Editorial full-record capability must be boolean')
+    c.setdefault('editorial_operator_policy_id',None)
+    if c['editorial_operator_policy_id']is not None and(c['editorial_operator_policy_id']!=OPERATOR_POLICY_ID or not c['editorial_full_records']or not c.get('klikai_url')):raise ValueError('Invalid local editorial operator policy')
     if any(type(c[k])is not bool for k in ('human_testing_mode','comparisons_enabled')):raise ValueError('Testing mode flags must be boolean')
     c['allowed_hosts']={urlsplit(o).netloc for o in origins}
     if not c['secure_cookies']and any(urlsplit(o).hostname not in {'127.0.0.1','localhost','::1'}for o in origins):raise ValueError('Secure cookies required outside loopback')
@@ -39,7 +42,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records']);domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled']);jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id']);domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled']);jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'

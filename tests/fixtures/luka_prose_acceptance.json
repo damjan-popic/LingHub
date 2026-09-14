@@ -1,0 +1,175 @@
+{
+  "schema": "klikai.luka-prose-acceptance-fixtures.v1",
+  "retained_release_id": "luka-nonloris-2026-08-24-dc0b18c2b883",
+  "release_manifest_sha256": "c8a2aca7499bb43778b05ee59231b132edbc4174804b65a9ee39838a040d0fbd",
+  "accepted_klikai_git_sha": "ad16811dbb61e96e9590620f687c49cacb28b940",
+  "selection": "Independent retained-source inspection fixed these two representative records and literal queries before any live requests. This is an editorial source oracle, not an observed API capture, database-content inventory, or a claim of live ingestion edition.",
+  "canonical_hash_encoding": "UTF-8 json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(comma, colon)); no final newline. record_sha256 hashes the entire retained_source_record; payload_content_hash hashes its payload.",
+  "content_comparison": "Normalize whitespace on the observed snippet and each expected_content_fragments literal with one space between split words, then require each literal as a substring. Do not inject oracle text into observed results.",
+  "api_contract": {
+    "search_method": "GET",
+    "search_path": "/api/search",
+    "source_parameter": "sources",
+    "query_parameter": "q",
+    "detail_endpoint": null,
+    "detail_endpoint_note": "The accepted KLIKai router has no registered Luka prose detail endpoint. Do not invent one or recover missing editorial fields from this test fixture."
+  },
+  "api_limitations": [
+    "The search result is a related source excerpt capped at 360 characters, not a guaranteed complete editorial question and answer.",
+    "The accepted Pošta importer projects the title as question_original; its original full question remains in extra_json and is unavailable in the prose search response. Never label that title as the original question.",
+    "The search response does not expose the retained source_date, entry publication/update dates, source release ID, record hash, payload hash, or upstream key.",
+    "Document.url is null in the accepted Luka importer. Urgenca sources URLs are editorial references, not a verified original publication URL.",
+    "Retained-source provenance and accepted source configuration identify the oracle, not the live database ingestion edition."
+  ],
+  "must_not_populate_observed_capture_from_oracle": [
+    "original_question",
+    "full_answer",
+    "source_date",
+    "entry_publication_date",
+    "entry_update_date",
+    "original_publication_url",
+    "url",
+    "source_release_id",
+    "record_sha256",
+    "payload_content_hash",
+    "upstream_key"
+  ],
+  "cases": [
+    {
+      "source_slug": "jezikovna_urgenca",
+      "query": "rifiuti da demolizione",
+      "expected": {
+        "resource_id": "jezikovna_urgenca:15a446ebb9a5",
+        "source_slug": "jezikovna_urgenca",
+        "title": "Rifiuti da demolizione",
+        "source_badge": "URGENCA",
+        "rights_mode": "restricted",
+        "url": null
+      },
+      "expected_content_fragments": [
+        "Kako naj prevedemo rifiuti da demolizione?",
+        "Gradbeni odpadki."
+      ],
+      "source_file": "normalized/jezikovna_urgenca.jsonl",
+      "source_line": 2,
+      "source_file_sha256": "01c293734c73d5d8fb49b7c7ec32bac7236af7ed861cfeb8da800108e792100c",
+      "record_sha256": "438ffdc7dd4b9c36f66e976494f461423972903f97b934e72dcac86442766d48",
+      "payload_content_hash": "653438496450d49678d6679302aaedf220d4b6a89bdf10ed05285e7bf8b5d972",
+      "source_yaml_path": "data/sources/jezikovna-urgenca/source.yaml",
+      "source_yaml_sha256": "6bd9c0cbf538d26b5e121865170cb6f57a51cb001928ef18c60a23a61c1ee03b",
+      "source_metadata": {
+        "display_name": "Jezikovna urgenca",
+        "badge_label": "URGENCA",
+        "rights_mode": "restricted",
+        "source_type": "owned",
+        "adapter_key": "luka_jsonl_qa",
+        "trust_tier": 2
+      },
+      "retained_source_record": {
+        "categories": [
+          "prevod"
+        ],
+        "content_hash": "653438496450d49678d6679302aaedf220d4b6a89bdf10ed05285e7bf8b5d972",
+        "external_id": "jezikovna_urgenca:15a446ebb9a5",
+        "external_id_kind": "upstream_stable_key",
+        "payload": {
+          "entries": [
+            {
+              "answer": "Gradbeni odpadki.",
+              "question": "Kako naj prevedemo rifiuti da demolizione?",
+              "sources": [
+                {
+                  "label": null,
+                  "url": "https://www.linguee.it/italiano-sloveno/search?source=auto&query=rifiuti+da+demolizione&cw=358"
+                }
+              ],
+              "title": "Rifiuti da demolizione"
+            }
+          ]
+        },
+        "record_kind": "qa",
+        "schema_version": "klikai.luka-record.v2",
+        "source_date": "2026-08-11",
+        "source_slug": "jezikovna_urgenca",
+        "subcategories": [],
+        "upstream_id": 2,
+        "upstream_key": "15a446ebb9a5",
+        "upstream_line": 2,
+        "upstream_source": "jezikovna_urgenca"
+      },
+      "missing_provenance": {
+        "original_publication_url": null,
+        "entry_publication_date": null,
+        "entry_update_date": null,
+        "search_response_source_date": null
+      },
+      "scope_note": "Representative short editorial pair. The Linguee URL in the retained payload is a reference only; the search URL must remain null."
+    },
+    {
+      "source_slug": "jezikovna_posta",
+      "query": "agriturismo",
+      "expected": {
+        "resource_id": "jezikovna_posta:14101af6b312",
+        "source_slug": "jezikovna_posta",
+        "title": "Azienda Agricola in agriturismo",
+        "source_badge": "POŠTA",
+        "rights_mode": "restricted",
+        "url": null
+      },
+      "expected_content_fragments": [
+        "Azienda agricola prevajamo po črki zakona kmetijsko gospodarstvo."
+      ],
+      "source_file": "normalized/jezikovna_posta.jsonl",
+      "source_line": 117,
+      "source_file_sha256": "b67cde8bb8b577b9d992665ad8b5cd2e7e80e4adf1f2e09de3eb3f57d9657bf3",
+      "record_sha256": "dcee43ef23cd12a67706e6c96babd1a849cf2f68d86a52dae8c0193966660885",
+      "payload_content_hash": "f5dd624d86024f9d4d2996d97e3ecfddf7ed31d5708deb50bb951bf1ce1b3261",
+      "source_yaml_path": "data/sources/jezikovna-posta/source.yaml",
+      "source_yaml_sha256": "dddffad19d92fe0e4c84b6dd3ee84f55b7092111af4125a18c555d4e1439e2e6",
+      "source_metadata": {
+        "display_name": "Jezikovna pošta / Druga pomoč",
+        "badge_label": "POŠTA",
+        "rights_mode": "restricted",
+        "source_type": "owned",
+        "adapter_key": "luka_jsonl_qa",
+        "trust_tier": 2
+      },
+      "retained_source_record": {
+        "categories": [
+          "Prevod"
+        ],
+        "content_hash": "f5dd624d86024f9d4d2996d97e3ecfddf7ed31d5708deb50bb951bf1ce1b3261",
+        "external_id": "jezikovna_posta:14101af6b312",
+        "external_id_kind": "upstream_stable_key",
+        "payload": {
+          "entries": [
+            {
+              "content": [
+                "Azienda agricola prevajamo po črki zakona kmetijsko gospodarstvo. Pogovorno lahko uporabite tudi samo kmetija. Če gre za uradno in informativno besedilo za javno rabo svetujemo prvo možnost.Za agriturismo so v preteklosti pogosteje uporabljali izraz kmečki turizem, danes pa svetujemo različico turistična kmetija, vendar ne zaradi njene elegantnosti. To je namreč tudi oblika registracije dodatne dejavnosti kmetijskega gospodarstva oziroma kmetije, zaradi česar je izraz v RS uveljavljen in ga najdete tudi v zakonodaji.",
+                "AK"
+              ],
+              "question": "Kateri je pravilni prevod v slovenščino oz. pravilna raba naslednjih izrazov: Ali je azienda agricola kmetija? Ali je agriturismo turistična kmetija ali kmečki turizem ali kmetijski turizem?",
+              "title": "Azienda Agricola in agriturismo"
+            }
+          ]
+        },
+        "record_kind": "qa",
+        "schema_version": "klikai.luka-record.v2",
+        "source_date": "2026-08-14",
+        "source_slug": "jezikovna_posta",
+        "subcategories": [],
+        "upstream_id": 117,
+        "upstream_key": "14101af6b312",
+        "upstream_line": 117,
+        "upstream_source": "jezikovna_posta"
+      },
+      "missing_provenance": {
+        "original_publication_url": null,
+        "entry_publication_date": null,
+        "entry_update_date": null,
+        "search_response_source_date": null
+      },
+      "scope_note": "Representative published advice excerpt. Do not require the full original question or full answer in the 360-character search snippet. The retained original question and source date are oracle-only data."
+    }
+  ]
+}

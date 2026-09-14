@@ -3,7 +3,7 @@ from __future__ import annotations
 import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
-from . import collation
+from . import collation, editorial
 from .classification import method
 from . import human_feedback
 from .adoption import historical_record
@@ -59,7 +59,7 @@ class Domain:
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
-        job_model='cpu'if task in {'source_search','text_check','terminology','morphology'}else model
+        job_model='cpu'if task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         return {'run_id':rid,'job_id':jid}
     def select_policy(self,db,owner,comparison=False):
@@ -87,7 +87,7 @@ class Domain:
                 language=routing['reason']=='input_language_required'
                 clarification={'code':'input_language_required'if language else'focus_required','fields':['input_language'if language else'focus']}
         if clarification:return {'status':'clarification_required','clarification':clarification}
-        if task=='terminology'and not 2<=len(q)<=500:raise Failure('invalid_request')
+        if task in {'terminology',*editorial.SOURCES}and not 2<=len(q)<=500:raise Failure('invalid_request')
         if task=='morphology'and (len(q)>1000 or not 1<=len(q.split())<=32 or any(len(token)>200 for token in q.split())):raise Failure('invalid_request')
         with self.store.tx()as db:
             def action():

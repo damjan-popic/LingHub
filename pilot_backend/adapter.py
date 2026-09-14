@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,urlencode
 import httpx
 from .security import Failure
-from . import terminology, collation, morphology
+from . import terminology, collation, morphology, editorial
 
 
 def private_url(url):
@@ -71,12 +71,20 @@ class Gateway:
         def obj(value,key):
             item=value.get(key);return item if isinstance(item,dict)else{}
         tasks={'terminology':{'configured':bool(self.klikai_url),'available':bool(klikai)and obj(klikai,'morphology').get('usable')is True},'morphology':{'configured':bool(self.linghub_url),'available':obj(obj(ling,'resources'),'morphology').get('available')is True},'text_check':{'configured':bool(self.linghub_url),'available':ling.get('analyzer_service_reachable')is True}}
+        for source in editorial.SOURCES:
+            tasks[source]={'configured':bool(self.klikai_url),'available':bool(klikai)}
         configured=[v for v in tasks.values()if v['configured']]
         return {'configured':bool(configured),'available':bool(configured)and all(v['available']for v in configured),'tasks':tasks,'observation':'read_only_cpu_health'}
     def require_generation(self,models):
         observed=self.capabilities()
         if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
     def freeze(self,family,policy):
+        if family['task'] in editorial.SOURCES:
+            if not self.klikai_url:raise Failure('task_unavailable',503)
+            query=family['question']
+            if not 2<=len(query)<=500:raise Failure('invalid_request')
+            path='/api/search?'+urlencode({'q':query,'sources':family['task'],'limit':editorial.LIMIT})
+            return editorial.freeze(self.request(path,None,self.klikai_url),query,family['task'],family['locale'])
         if family['task']=='morphology':
             if not self.linghub_url:raise Failure('task_unavailable',503)
             lang=family.get('input_language');tokens=family['question'].split()
@@ -107,6 +115,7 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('task')=='editorial_search':return editorial.answer(bundle,tier)
         if bundle.get('task')=='morphology':return morphology.answer(bundle,tier)
         if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
         if bundle.get('task')=='text_check':
@@ -120,6 +129,7 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('task')=='editorial_search':return editorial.source(bundle,evidence_id,tier)
         if bundle.get('task')=='morphology':return morphology.source(bundle,evidence_id,tier)
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
         return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})

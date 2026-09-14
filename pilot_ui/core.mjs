@@ -19,6 +19,30 @@ export function tierBlocks(tier, kind = 'short') {
   // Legacy text can be displayed, but does not acquire invented feedback block identities.
   return typeof value === 'string' && value ? [{block_id:null,text:value}] : [];
 }
+export function isCpuTask(task) {
+  return ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'].includes(task);
+}
+export function blockTextPresentation(tier, block) {
+  const evidence = Array.isArray(tier?.evidence) ? tier.evidence : [];
+  if (tier?.deterministic_result?.task === 'editorial_search') {
+    // Source text can contain its own bracket references. The application link
+    // belongs outside the canonical block and is bound to the record index.
+    const match = /^editorial-record-(0|[1-9]\d*)$/.exec(block.block_id || '');
+    const index = match ? Number(match[1]) : -1;
+    const item = Number.isSafeInteger(index) && index >= 0 ? evidence[index] : null;
+    return {parts:[{text:block.text}],separateCitation:item ? {text:'['+(index+1)+']',number:index+1,evidence:item} : null};
+  }
+  const parts = [];
+  let end = 0;
+  for (const match of block.text.matchAll(/\[(\d{1,3})\]/g)) {
+    parts.push({text:block.text.slice(end,match.index)});
+    const item = evidence.find((e,i) => Number(e.local_number || e.number || i+1) === Number(match[1]));
+    parts.push(item ? {text:match[0],number:match[1],evidence:item} : {text:match[0]});
+    end = match.index + match[0].length;
+  }
+  parts.push({text:block.text.slice(end)});
+  return {parts,separateCitation:null};
+}
 export function sourceKey(item) { return typeof item === 'string' ? item : item?.source_key || item?.source_slug || item?.key || item?.slug || ''; }
 export function usedBadges(tier) {
   const seen = new Set();

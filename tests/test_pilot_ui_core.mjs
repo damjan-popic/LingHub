@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {basePath,localePath,anchorForText,tierBlocks,usedBadges,safeSourceLink,sourceExcerptPresentation,readableLocator,errorKey} from '../pilot_ui/core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,isCpuTask,blockTextPresentation,usedBadges,safeSourceLink,sourceExcerptPresentation,readableLocator,errorKey} from '../pilot_ui/core.mjs';
 
 test('prefix routes never introduce an external or traversal route',()=>{
   assert.equal(localePath('/tools/klikai','it'),'/tools/klikai/it/');assert.equal(localePath('','sl'),'/');assert.equal(basePath('/pilot/'),'/pilot');
@@ -14,6 +14,43 @@ test('Unicode anchors preserve emoji, combining marks and repeated exact words',
 });
 test('canonical blocks remain byte-for-byte text; missing identities are not invented',()=>{
   const b={block_id:'source-block',text:'Théophile <img onerror=x> [1]'};assert.deepEqual(tierBlocks({blocks:[b]}),[b]);assert.deepEqual(tierBlocks({short_answer:'Huga'}),[{block_id:null,text:'Huga'}]);assert.deepEqual(tierBlocks({answer_md:'Daljša razlaga'},'long'),[{block_id:null,text:'Daljša razlaga'}]);
+});
+test('editorial blocks preserve literal HTML and source bracket references with separate record citations',()=>{
+  const evidence=[{evidence_id:'first',local_number:9},{evidence_id:'second',local_number:1}];
+  const text='Objavljeni naslov <img src=x onerror=alert(1)>\n🙂 Izvirni [1] in [2]; <script>besedilo</script>.';
+  const block={block_id:'editorial-record-1',text},tier={deterministic_result:{task:'editorial_search'},blocks:[block],evidence};
+  const before=JSON.stringify(tier),view=blockTextPresentation(tier,block);
+  assert.deepEqual(view.parts,[{text}]);
+  assert.deepEqual(view.separateCitation,{text:'[2]',number:2,evidence:evidence[1]});
+  assert.equal(view.parts.map(part=>part.text).join(''),text);
+  assert.equal(JSON.stringify(tier),before);
+  const start=text.indexOf('[1]');
+  assert.equal(anchorForText(block.block_id,view.parts[0].text,start,start+3).quote,'[1]');
+});
+test('editorial summaries and unmatched record identities stay literal without fabricated citations',()=>{
+  const tier={deterministic_result:{task:'editorial_search'},evidence:[{evidence_id:'first'}]};
+  for(const block_id of ['editorial-summary','editorial-record-1','editorial-record-01','editorial-record--1','editorial-record-9007199254740992','other',null]) {
+    assert.deepEqual(blockTextPresentation(tier,{block_id,text:'<b>Delni odlomek</b> [1]'}),{parts:[{text:'<b>Delni odlomek</b> [1]'}],separateCitation:null});
+  }
+  assert.deepEqual(blockTextPresentation({deterministic_result:{task:'editorial_search'}},{block_id:'editorial-record-0',text:'[1]'}),{parts:[{text:'[1]'}],separateCitation:null});
+});
+test('existing answer modes retain inline citation numbers and literal unmatched markers',()=>{
+  const evidence=[{evidence_id:'nine',local_number:9},{evidence_id:'two',number:2},{evidence_id:'third'}];
+  const text='<b>Izvirno</b> [9], [2], [3], [1], [1234].';
+  for(const task of [undefined,'terminology','source_search','morphology']) {
+    const view=blockTextPresentation({deterministic_result:{task},evidence},{block_id:'editorial-record-0',text});
+    assert.equal(view.separateCitation,null);
+    assert.equal(view.parts.map(part=>part.text).join(''),text);
+    assert.deepEqual(view.parts.filter(part=>part.evidence).map(part=>[part.text,part.evidence.evidence_id]),[['[9]','nine'],['[2]','two'],['[3]','third']]);
+    assert(view.parts.some(part=>part.text==='[1]'&&!part.evidence));
+    assert(view.parts.some(part=>part.text.includes('[1234]')&&!part.evidence));
+  }
+});
+test('both editorial source presets use CPU controls while reference behavior stays unchanged',()=>{
+  for(const task of ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'])assert.equal(isCpuTask(task),true,task);
+  for(const task of ['reference','editorial_search','unknown',undefined])assert.equal(isCpuTask(task),false,String(task));
+  const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
+  for(const task of ['jezikovna_urgenca','jezikovna_posta'])assert.equal((html.match(new RegExp('value="'+task+'"','g'))||[]).length,1);
 });
 test('used badges deduplicate actual source identities, not all retrieved sources',()=>{
   assert.deepEqual(usedBadges({source_badges:[{source_key:'sloleks'}, {source_key:'sloleks'},'epravopis'],evidence:[{source_key:'unused'}]}),[{source_key:'sloleks'},'epravopis']);assert.deepEqual(usedBadges({evidence:[{source_key:'unused'}]}),[]);

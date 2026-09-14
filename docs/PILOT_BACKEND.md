@@ -94,6 +94,62 @@ The unchanged importer and source-derived disposable PostgreSQL tests prove that
 
 New `text_check` families require explicit `input_language=sl|it`; `locale` controls the explanation labels independently. The UI preserves the selected text language when switching SL/IT chrome. Historical families retain their original frozen analyzer choices and outputs.
 
+## Unified normal answers
+
+The explicit runtime setting `unified_answers: true` connects the existing default
+`reference` task to unified retrieval and the existing private generation gateway.
+It requires `klikai_url`. Existing saved families retain their capture contract;
+the deterministic terminology, editorial and source-search tasks keep their
+existing behavior. No database migration or source import is involved.
+
+The active KLIKai registry supplies the connected documentary families. Five Luka
+terminology collections use the existing exact/folded/morphology/prose lookup;
+Urgenca and Pošta use discovery plus the existing complete-record policy endpoint;
+other supported indexed sources use the existing search endpoint. The configured
+answer bank retains its original text, revision and draft status. Gradivo links
+remain browsable with their original `linked_only` rights and are excluded from
+documentary model context. Ontology, source-register and external-tool registry
+entries are not presented as documentary search results. Existing explicitly
+requested LingHub CPU operations still produce typed, pinned `tool_evidence` for
+the same gateway; missing tool focus/language never erases documentary retrieval.
+
+Source families run concurrently with finite request timeouts. Current upstream
+bounds are 20 terminology records per collection, three editorial discoveries
+with at most three detail requests, and ten generic search records per source.
+Coverage distinguishes no-match, partial, timeout, unavailable and unsupported;
+these APIs do not provide corpus totals or continuation cursors. The gateway adds
+its configured ZRC retrieval and chooses a bounded context independently of the
+complete returned collection. Restricted source admission remains controlled by
+the deployed gateway policy, including the existing editorial operator policy.
+
+The application freezes every returned admitted capture and gateway source view,
+including records not selected for generation. `GET /families/{id}/matches` accepts
+`offset` and `limit` (1–50), pages that saved collection, reports its exact
+`returned_count`, and reports `corpus_total: null`. `used_in_answer` reflects cited
+evidence in the saved answers. Both this route and existing source drawers enforce
+the family owner and never repeat upstream retrieval. Complete original material
+remains in the drawer when only a faithful excerpt fits the generation context.
+
+Normal submission and capture do not require provider readiness. A provider failure
+keeps the frozen matches and returns an explicit source-only result; it never counts
+as generated success. Public `generation` exposes safe provider identity, observed
+elapsed time and fixed error code/stage; it contains no exception message or private
+connection data. `first_content_ms` is null because this path does not stream.
+Public `retrieval` and `progress.stage` distinguish retrieval, generation and
+completion. Model/provider observations remain hidden in blind comparisons.
+
+Generated claims must resolve to frozen evidence. The gateway's signed answer text
+is preserved, and structured block `evidence_ids` supply separate clickable citation
+buttons with explicit local numbers. Unknown IDs or unsupported claim mappings are
+rejected as a generation failure, while the source matches remain accessible.
+
+`tests/test_pilot_unified.py` exercises the real application router, jobs, owned
+store, adapters, pagination, failure paths and source drawers with disposable
+fixtures. Its cross-repository case uses the current real gateway's capture
+validation, signing, context selection and composition validation with a synthetic
+model transport. These tests do not establish live model, browser or deployment
+acceptance; those require the separate managed delivery evidence.
+
 ## Periodic replay and comment triage
 
 `replay --config /private/backend.json --cases /private/exposed-cases.json --cases-sha256 SHA [--max-cases 1..4]` runs baseline plus one implemented candidate against at most four previously exposed development/regression cases. The manifest freezes questions, locale, tier, model, source choices/groups and original case hashes. Reserved groups and embedded gold/source-body fields are refused. The scheduler performs this bounded smoke replay before adaptation. With fewer than20 eligible human reference events, three participants or ten families, it returns `INSUFFICIENT_DATA` with zero gateway/model calls. Administrator pause is respected. Explicit `--force-test` permits a technical exercise whose artifacts can never support promotion or create human labels. Four cases are not the full120-case evaluation or semantic certification.

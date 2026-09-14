@@ -22,6 +22,34 @@ export function tierBlocks(tier, kind = 'short') {
 export function isCpuTask(task) {
   return ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'].includes(task);
 }
+export function progressLabel(job, task, tier='short') {
+  if (jobState(job) === 'queued') return 'queued';
+  if (job?.progress?.stage === 'retrieval') return 'retrieving_sources';
+  if (job?.progress?.stage === 'generation') return 'generating_grounded';
+  if (jobState(job) === 'validating') return 'validating';
+  if (['loading_model','waiting_model'].includes(jobState(job))) return 'loading_model';
+  return isCpuTask(task) ? 'deterministic_working' : tier === 'long' ? 'generating_long' : 'generating_short';
+}
+export function matchGroups(items, source='') {
+  const groups = new Map(), seen = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || typeof item.evidence_id !== 'string' || !item.evidence_id ||
+        typeof item.source_slug !== 'string' || !item.source_slug ||
+        typeof item.title !== 'string' || typeof item.snippet !== 'string' ||
+        (source && item.source_slug !== source) || seen.has(item.evidence_id)) continue;
+    seen.add(item.evidence_id);
+    if (!groups.has(item.source_slug)) groups.set(item.source_slug, []);
+    groups.get(item.source_slug).push(item);
+  }
+  return [...groups].map(([source_slug, records]) => ({source_slug, records}));
+}
+export function generationNotice(tier) {
+  const status = tier?.generation?.status;
+  if (status === 'generated') return 'generated_grounded';
+  if (status === 'failed' || status === 'unavailable') return 'generation_fallback';
+  if (status === 'no_support') return 'generation_no_support';
+  return null;
+}
 export function blockTextPresentation(tier, block) {
   const evidence = Array.isArray(tier?.evidence) ? tier.evidence : [];
   if (tier?.deterministic_result?.task === 'editorial_search') {
@@ -41,6 +69,12 @@ export function blockTextPresentation(tier, block) {
     end = match.index + match[0].length;
   }
   parts.push({text:block.text.slice(end)});
+  if (tier?.generation_status === 'generated' && Array.isArray(block.evidence_ids)) {
+    const inline = new Set(parts.filter(part=>part.evidence).map(part=>part.evidence.evidence_id));
+    const selected = [...new Set(block.evidence_ids)].map(id=>evidence.find(item=>item.evidence_id===id))
+      .filter(item=>item && !inline.has(item.evidence_id) && Number.isInteger(item.local_number) && item.local_number>0);
+    return {parts,separateCitation:null,separateCitations:selected.map(item=>({text:'['+item.local_number+']',number:item.local_number,evidence:item}))};
+  }
   return {parts,separateCitation:null};
 }
 export function sourceKey(item) { return typeof item === 'string' ? item : item?.source_key || item?.source_slug || item?.key || item?.slug || ''; }

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
-from . import collation, editorial
+from . import collation, editorial, unified
 from .classification import method
 from . import human_feedback
 from .adoption import historical_record
@@ -26,8 +26,9 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True):
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
+        self.unified_answers=unified_answers
     def require_generation(self,models):
         if self.generation_admission:self.generation_admission(models)
     def answer_actions(self,run):
@@ -81,7 +82,7 @@ class Domain:
         clarification=None
         if task=='text_check'and input_language not in {'sl','it'}:raise Failure('input_language_required')
         if task=='morphology'and input_language not in {'sl','it'}:clarification={'code':'input_language_required','fields':['input_language']}
-        if task=='reference':
+        if task=='reference'and not self.unified_answers:
             routing=collation.plan(q,input_language,focus)
             if routing and routing['status']=='clarification_required':
                 language=routing['reason']=='input_language_required'
@@ -91,7 +92,7 @@ class Domain:
         if task=='morphology'and (len(q)>1000 or not 1<=len(q.split())<=32 or any(len(token)>200 for token in q.split())):raise Failure('invalid_request')
         with self.store.tx()as db:
             def action():
-                if task=='reference':self.require_generation([model])
+                if task=='reference'and not self.unified_answers:self.require_generation([model])
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
@@ -120,7 +121,8 @@ class Domain:
             if job and job['error_code']:out['error_code']=job['error_code']
         if r['result']:
             result=json.loads(r['result'])
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress'):
+                if blind and k in {'retrieval','generation','progress'}:continue
                 if k in result:out[k]=result[k]
             if not blind:
                 out['display_sha256']=r['display_hash'];out['model']=r['model']
@@ -132,6 +134,9 @@ class Domain:
     def family(self,owner,fid):
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
+            bundle=json.loads(f['bundle'])if f['bundle']else{}
+            out['matches_available']=bundle.get('contract')==unified.CONTRACT
+            out['unified_answers']=out['matches_available']or(self.unified_answers and f['task']=='reference'and not f['bundle'])
             focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()
             if focus:out['focus']=focus[0]
             original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(fid,)).fetchone()
@@ -141,6 +146,16 @@ class Domain:
     def families(self,owner):
         with self.store.connect()as db:ids=[r[0]for r in db.execute('SELECT id FROM families WHERE owner=?ORDER BY created DESC LIMIT 100',(owner,))]
         return {'families':[self.family(owner,fid)for fid in ids]}
+    def matches(self,owner,fid,offset=0,limit=20):
+        with self.store.connect()as db:
+            f=self.owned(db,'families',fid,owner)
+            bundle=json.loads(f['bundle'])if f['bundle']else{}
+            if bundle.get('contract')!=unified.CONTRACT:raise Failure('not_found',404)
+            latest={}
+            for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):
+                latest[row['tier']]=json.loads(row['result'])if row['result']else{}
+            used={unified.evidence_id(e)for result in latest.values()for e in result.get('evidence',[])if isinstance(e,dict)}
+            return unified.matches_page(bundle,used,offset,limit)
     def job(self,owner,jid):
         with self.store.connect()as db:
             j=self.owned(db,'jobs',jid,owner);r=self.run(db,j['run_id'],owner)
@@ -148,7 +163,8 @@ class Domain:
                 a=self.owned(db,'assignments',r['assignment_id'],owner)
                 terminal=db.execute("SELECT count(*)FROM runs WHERE assignment_id=?AND tier=?AND state IN ('complete','failed','cancelled')",(a['id'],r['tier'])).fetchone()[0]
                 if a['blind']and not a['revealed']and terminal<2:return {'job_id':jid,'state':'queued','family_id':r['family_id'],'tier':r['tier'],'position':None,'error_code':None,'pair_state':'preparing'}
-            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code']}
+            result=json.loads(r['result'])if r['result']else{}
+            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress')}
     def cancel(self,owner,jid):
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)

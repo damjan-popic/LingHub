@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const {openComposerOptions,selectComposerOption}=require('./pilot_ui_options.cjs');
 /* Actual UI/auth/jobs/SQLite; synthetic writer explicitly controlled in private fixture only. */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {chromium}=require('/home/damjan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
@@ -17,7 +18,7 @@ const submit=async()=>{const response=page.waitForResponse(r=>r.url()===api+'/fa
  await page.goto(home+'/it/');await page.locator('#username').fill('ui-tester');await page.locator('#password').fill(accounts['ui-tester'].password);await page.locator('#login-form button[type=submit]').click();await page.locator('#app-view').waitFor({state:'visible'});
  let before=await families();let focusFamily;
  await check('focus_clarification_inline_no_family_rating_or_generation',async()=>{
-  await page.locator('#question').fill('Preveri morfologijo in sopomenke.');await page.locator('#input-language').selectOption('sl');await page.locator('#options-toggle').click();await page.locator('#answer-locale').selectOption('it');
+  await page.locator('#question').fill('Preveri morfologijo in sopomenke.');await selectComposerOption(page,'#input-language','sl');await openComposerOptions(page);await page.locator('#answer-locale').selectOption('it');
   let response=await submit();assert.equal(response.status(),200);assert.equal((await response.json()).status,'clarification_required');await page.locator('#focus-control').waitFor({state:'visible'});
   const labelBox=await page.locator('label[for=focus]').boundingBox(),inputBox=await page.locator('#focus').boundingBox();assert(inputBox.y-labelBox.y-labelBox.height>=8);assert.equal(await page.locator('#answer-card').isVisible(),false);assert.equal(await page.locator('#comparison').isVisible(),false);assert.equal(await page.locator('#short-feedback .rating').count(),0);assert.equal((await families()).length,before.length);assert.equal(await page.locator('#ask-button').innerText(),'Continua');
   await page.locator('[data-locale=sl]').click();assert.equal(await page.locator('#input-language').inputValue(),'sl');assert.equal(await page.locator('#answer-locale').inputValue(),'it');assert.equal(await page.locator('#question').inputValue(),'Preveri morfologijo in sopomenke.');
@@ -27,10 +28,10 @@ const submit=async()=>{const response=page.waitForResponse(r=>r.url()===api+'/fa
   await page.reload();await wait();assert.equal(await page.locator('#focus').inputValue(),'otrok');assert.equal((await families()).length,all.length);
  });
  await check('missing_language_continues_once_without_quote_syntax',async()=>{
-  await page.locator('#new-question').click();await page.locator('#task').selectOption('reference');await page.locator('#question').fill('Poišči kolokacije.');await page.locator('#input-language').selectOption('');
+  await page.locator('#new-question').click();await selectComposerOption(page,'#task','reference');await page.locator('#question').fill('Poišči kolokacije.');await selectComposerOption(page,'#input-language','');
   const count=(await families()).length;await submit();await page.locator('#focus-control').waitFor({state:'visible'});await page.locator('#focus').fill('mesto');
   let response=await submit();assert.equal((await response.json()).clarification.code,'input_language_required');assert.equal((await families()).length,count);assert.equal(await page.locator('#focus').inputValue(),'mesto');assert.equal(await page.locator('#answer-card').isVisible(),false);
-  await page.locator('#input-language').selectOption('sl');response=await submit();assert.equal(response.status(),200);await wait();assert.equal((await families()).length,count+1);
+  await selectComposerOption(page,'#input-language','sl');response=await submit();assert.equal(response.status(),200);await wait();assert.equal((await families()).length,count+1);
  });
  await check('capacity_failure_is_not_answer_and_source_mode_remains_usable',async()=>{
   fs.writeFileSync(cap,'unavailable');await page.locator('#new-question').click();await page.locator('#question').fill('SYNTHETIC new reference question.');const count=(await families()).length;

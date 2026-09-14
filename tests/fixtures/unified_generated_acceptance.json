@@ -1,0 +1,184 @@
+{
+  "schema": "klikai.unified-generated-acceptance-fixtures.v1",
+  "retained_release": {
+    "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883",
+    "release_id": "luka-nonloris-2026-08-24-dc0b18c2b883",
+    "manifest_sha256": "c8a2aca7499bb43778b05ee59231b132edbc4174804b65a9ee39838a040d0fbd"
+  },
+  "expectation_scope": "Independent retained source identities and originals only; no expected generated answer or invented database edition.",
+  "cases": [
+    {
+      "query": "agriturismo",
+      "records": [
+        {
+          "source_slug": "jezikovna_posta",
+          "query": "agriturismo",
+          "resource_id": "jezikovna_posta:14101af6b312",
+          "source_file": "normalized/jezikovna_posta.jsonl",
+          "source_line": 117,
+          "source_file_sha256": "b67cde8bb8b577b9d992665ad8b5cd2e7e80e4adf1f2e09de3eb3f57d9657bf3",
+          "record_sha256": "dcee43ef23cd12a67706e6c96babd1a849cf2f68d86a52dae8c0193966660885",
+          "payload_content_hash": "f5dd624d86024f9d4d2996d97e3ecfddf7ed31d5708deb50bb951bf1ce1b3261",
+          "retained_source_record": {
+            "categories": [
+              "Prevod"
+            ],
+            "content_hash": "f5dd624d86024f9d4d2996d97e3ecfddf7ed31d5708deb50bb951bf1ce1b3261",
+            "external_id": "jezikovna_posta:14101af6b312",
+            "external_id_kind": "upstream_stable_key",
+            "payload": {
+              "entries": [
+                {
+                  "content": [
+                    "Azienda agricola prevajamo po črki zakona kmetijsko gospodarstvo. Pogovorno lahko uporabite tudi samo kmetija. Če gre za uradno in informativno besedilo za javno rabo svetujemo prvo možnost.Za agriturismo so v preteklosti pogosteje uporabljali izraz kmečki turizem, danes pa svetujemo različico turistična kmetija, vendar ne zaradi njene elegantnosti. To je namreč tudi oblika registracije dodatne dejavnosti kmetijskega gospodarstva oziroma kmetije, zaradi česar je izraz v RS uveljavljen in ga najdete tudi v zakonodaji.",
+                    "AK"
+                  ],
+                  "question": "Kateri je pravilni prevod v slovenščino oz. pravilna raba naslednjih izrazov: Ali je azienda agricola kmetija? Ali je agriturismo turistična kmetija ali kmečki turizem ali kmetijski turizem?",
+                  "title": "Azienda Agricola in agriturismo"
+                }
+              ]
+            },
+            "record_kind": "qa",
+            "schema_version": "klikai.luka-record.v2",
+            "source_date": "2026-08-14",
+            "source_slug": "jezikovna_posta",
+            "subcategories": [],
+            "upstream_id": 117,
+            "upstream_key": "14101af6b312",
+            "upstream_line": 117,
+            "upstream_source": "jezikovna_posta"
+          },
+          "expected": {
+            "title": "Azienda Agricola in agriturismo",
+            "original_question": "Kateri je pravilni prevod v slovenščino oz. pravilna raba naslednjih izrazov: Ali je azienda agricola kmetija? Ali je agriturismo turistična kmetija ali kmečki turizem ali kmetijski turizem?",
+            "answer": "Azienda agricola prevajamo po črki zakona kmetijsko gospodarstvo. Pogovorno lahko uporabite tudi samo kmetija. Če gre za uradno in informativno besedilo za javno rabo svetujemo prvo možnost.Za agriturismo so v preteklosti pogosteje uporabljali izraz kmečki turizem, danes pa svetujemo različico turistična kmetija, vendar ne zaradi njene elegantnosti. To je namreč tudi oblika registracije dodatne dejavnosti kmetijskega gospodarstva oziroma kmetije, zaradi česar je izraz v RS uveljavljen in ga najdete tudi v zakonodaji.\n\nAK",
+            "answer_paragraphs": [
+              "Azienda agricola prevajamo po črki zakona kmetijsko gospodarstvo. Pogovorno lahko uporabite tudi samo kmetija. Če gre za uradno in informativno besedilo za javno rabo svetujemo prvo možnost.Za agriturismo so v preteklosti pogosteje uporabljali izraz kmečki turizem, danes pa svetujemo različico turistična kmetija, vendar ne zaradi njene elegantnosti. To je namreč tudi oblika registracije dodatne dejavnosti kmetijskega gospodarstva oziroma kmetije, zaradi česar je izraz v RS uveljavljen in ga najdete tudi v zakonodaji.",
+              "AK"
+            ],
+            "article_content": null,
+            "complete_original_qa": true,
+            "source_date": "2026-08-14",
+            "source_label": "Jezikovna pošta / Druga pomoč",
+            "source_badge": "POŠTA",
+            "rights_mode": "restricted",
+            "rights_clearance": "unestablished",
+            "url": null,
+            "references": [],
+            "entry_publication_date": null,
+            "entry_update_date": null,
+            "beyond_snippet_tail": "To je namreč tudi oblika registracije dodatne dejavnosti kmetijskega gospodarstva oziroma kmetije, zaradi česar je izraz v RS uveljavljen in ga najdete tudi v zakonodaji."
+          },
+          "provenance_notes": [
+            "Source date is retained source-bundle metadata, not an inferred publication date.",
+            "No original publication URL is provided by this record.",
+            "The complete original question is payload.entries[0].question; the importer preserves it in structured raw_json and QAEntry.extra_json despite projecting the title into QAEntry.question_original.",
+            "Answer paragraphs include the original AK signature."
+          ]
+        }
+      ],
+      "required_citation_source_slugs": [
+        "jezikovna_posta"
+      ]
+    },
+    {
+      "query": "consiglio d'amministrazione",
+      "records": [
+        {
+          "source_slug": "zkb",
+          "resource_id": "zkb:5c1f051f009d",
+          "source_file": "normalized/zkb.jsonl",
+          "source_line": 45,
+          "source_file_sha256": "e9a1af858891e4f1ad941a55f831fa0bf9306247f95283401e0c5a81aa06fc55",
+          "record_sha256": "0f42cd6985337078f89e81d83f9c29fe60005432f303f3c37a9f2a3c342b088d",
+          "payload_content_hash": "10c4f7ede36622e4a094ab235c9bc9a7a55c37624fb4158e39e21d12cb372a2e",
+          "retained_source_record": {
+            "categories": [],
+            "content_hash": "10c4f7ede36622e4a094ab235c9bc9a7a55c37624fb4158e39e21d12cb372a2e",
+            "external_id": "zkb:5c1f051f009d",
+            "external_id_kind": "upstream_stable_key",
+            "payload": {
+              "entries": [
+                {
+                  "original": [
+                    "consiglio d'amministrazione"
+                  ],
+                  "rationale": [
+                    "Druzbe lahko izbirajo med eno- in dvotirnim sistemom upravljanja in nadzora. V enotirnem sistemu družbo upravlja upravni odbor (POZOR: raba termina upravni svet NI ustrezna!), glede na zakone posameznih držav pa so lahko predvideni se drugi organi, npr. nadzorni odbor (POZOR: raba termina nadzorni svet NI ustrezna!). V dvotirnem sistemu sta v osnovi predvidena dva organa, in sicer nadzorni svet (it. consiglio di sorveglianza) in uprava (it. consiglio di gestione). V Italiji prevladuje enotirni sistem upravljanja, v Sloveniji pa dvotirni."
+                  ],
+                  "sources": [
+                    {
+                      "label": null,
+                      "url": "https://zakonodaja.com/zakon/zgd-1/253-clen-izbira-sistema-upravljanja"
+                    }
+                  ],
+                  "standardized": [
+                    "upravni odbor"
+                  ]
+                }
+              ]
+            },
+            "record_kind": "terminology_decision",
+            "schema_version": "klikai.luka-record.v2",
+            "source_date": "2026-08-14",
+            "source_slug": "zkb",
+            "subcategories": [],
+            "upstream_id": 45,
+            "upstream_key": "5c1f051f009d",
+            "upstream_line": 45,
+            "upstream_source": "ZKB"
+          },
+          "expected": {
+            "source_label": "Terminološke odločitve ZKB",
+            "drawer_fragments": [
+              "consiglio d'amministrazione",
+              "upravni odbor",
+              "Druzbe lahko izbirajo med eno- in dvotirnim sistemom upravljanja in nadzora. V enotirnem sistemu družbo upravlja upravni odbor (POZOR: raba termina upravni svet NI ustrezna!), glede na zakone posameznih držav pa so lahko predvideni se drugi organi, npr. nadzorni odbor (POZOR: raba termina nadzorni svet NI ustrezna!). V dvotirnem sistemu sta v osnovi predvidena dva organa, in sicer nadzorni svet (it. consiglio di sorveglianza) in uprava (it. consiglio di gestione). V Italiji prevladuje enotirni sistem upravljanja, v Sloveniji pa dvotirni."
+            ]
+          }
+        },
+        {
+          "source_slug": "jezikovna_urgenca",
+          "resource_id": "jezikovna_urgenca:35c24850cdc6",
+          "source_file": "normalized/jezikovna_urgenca.jsonl",
+          "source_line": 390,
+          "source_file_sha256": "01c293734c73d5d8fb49b7c7ec32bac7236af7ed861cfeb8da800108e792100c",
+          "record_sha256": "9f4f544612039e954688c7047e8602ac85706d8acfd5153e582f9198fffacc5a",
+          "payload_content_hash": "94718466b3a8da90f8535de6b4a611f0b4c9a97dd13c4ba449fc8dd98bc955af",
+          "retained_source_record": {
+            "categories": [
+              "prevod"
+            ],
+            "content_hash": "94718466b3a8da90f8535de6b4a611f0b4c9a97dd13c4ba449fc8dd98bc955af",
+            "external_id": "jezikovna_urgenca:35c24850cdc6",
+            "external_id_kind": "upstream_stable_key",
+            "payload": {
+              "entries": [
+                {
+                  "answer": "Consiglio d'Amministrazione = upravni odbor. Upravni svet bi ev. lahko bilo neko dodatno telo, ki bi imelo posvetovalno vlogo, a CdA to definitivno ni.",
+                  "question": "Kako naj prevedemo consiglio d'Amministrazione?",
+                  "title": "Consiglio d'Amministrazione"
+                }
+              ]
+            },
+            "record_kind": "qa",
+            "schema_version": "klikai.luka-record.v2",
+            "source_date": "2026-08-11",
+            "source_slug": "jezikovna_urgenca",
+            "subcategories": [],
+            "upstream_id": 390,
+            "upstream_key": "35c24850cdc6",
+            "upstream_line": 390,
+            "upstream_source": "jezikovna_urgenca"
+          },
+          "expected": {
+            "source_label": "Jezikovna urgenca",
+            "original_question": "Kako naj prevedemo consiglio d'Amministrazione?",
+            "answer": "Consiglio d'Amministrazione = upravni odbor. Upravni svet bi ev. lahko bilo neko dodatno telo, ki bi imelo posvetovalno vlogo, a CdA to definitivno ni."
+          }
+        }
+      ],
+      "required_citation_source_slugs": []
+    }
+  ]
+}

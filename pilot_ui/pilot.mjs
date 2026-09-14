@@ -1,8 +1,9 @@
-import {basePath,localePath,anchorForText,tierBlocks,isCpuTask,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,isCpuTask,progressLabel,matchGroups,generationNotice,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
 const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false};
+let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0;
 let registry = {sources:[]};
 const t = (key, values={}) => (state.messages[state.locale]?.[key] || key).replace(/\{(\w+)\}/g,(_,name)=>String(values[name]??''));
 const keyFor = name => {if(!state.requestKeys.has(name))state.requestKeys.set(name,crypto.randomUUID());return state.requestKeys.get(name);};
@@ -26,6 +27,7 @@ function setLocale(locale,push=true) {
   $('locale-note').hidden=!state.family||state.family.locale===state.locale;
   $('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
   if(state.family){if(acceptedStates.has(jobState(state.family.short)))renderText(state.family.short,'short',$('short-answer'));if(state.longOpen&&acceptedStates.has(jobState(state.family.long)))renderText(state.family.long,'long',$('long-answer'));$('answer-model').textContent=modelText(state.family.short);$('long-model').textContent=modelText(state.family.long);renderFeedback(state.family.short,'short',$('short-feedback'));if(state.longOpen)renderFeedback(state.family.long,'long',$('long-feedback'));}
+  renderGenerationNotice();renderMatches();
   if(push)setURL();
 }
 async function api(path, options={}) {
@@ -43,6 +45,7 @@ async function api(path, options={}) {
 function errorText(error) {return error.localized?error.message:t(errorKey(error.code));}
 async function action(button,fn,errorId='global-status') {if(button?.disabled)return;if(button)button.disabled=true;try{return await fn();}catch(error){$(errorId).textContent=errorText(error);}finally{if(button)button.disabled=false;}}
 function resetPrivate() {
+  sourceRequest++;resetMatches();
   state.boot++;for(const cancel of state.polling.values())cancel();state.polling.clear();state.user=null;state.csrf=null;state.family=null;state.comparison=null;state.selection=null;state.feedback.clear();state.feedbackDrafts.clear();state.delivered.clear();state.requestKeys.clear();state.job=null;state.longOpen=false;
   $('app-view').hidden=true;$('account-button').hidden=true;$('password-view').hidden=true;clear($('short-answer'));clear($('long-answer'));clear($('short-sources'));clear($('long-sources'));clear($('short-feedback'));clear($('long-feedback'));clear($('history-list'));clear($('admin-content'));clear($('source-content'));clear($('side-a-answer'));clear($('side-b-answer'));$('question').value='';document.querySelectorAll('dialog[open]').forEach(d=>d.close());setURL();
   clearClarification();$('focus').value='';state.answerLocaleExplicit=false;state.capabilities={};$('capacity-state').hidden=true;
@@ -56,12 +59,12 @@ function authenticated(session) {
   taskControls();const models=state.capabilities.models;
   if(models)for(const option of $('model').options){const entry=Array.isArray(models)?models.find(m=>(typeof m==='string'?m:m.id||m.model)===option.value):models[option.value];const readiness=typeof entry==='string'?entry:entry?.state||entry?.status;option.disabled=!entry||readiness==='unavailable'||entry?.available===false;option.textContent=option.value==='qwen'?'Qwen':'Gemma';if(readiness==='queued')option.textContent+=' · '+t('queued');}
 }
-function taskControls(){const task=$('task').value,cpu=isCpuTask(task),check=['text_check','morphology'].includes(task),note=['jezikovna_urgenca','jezikovna_posta'].includes(task)?'editorial_task_note':'deterministic_task_note';$('model').disabled=cpu;$('model').hidden=cpu;$('deterministic-task-note').hidden=!cpu;$('deterministic-task-note').dataset.i18n=note;textStatus('deterministic-task-note',note);$('text-language-control').hidden=!(check||task==='reference');$('input-language').required=false;capacityControls();}
+function taskControls(){const task=$('task').value,cpu=isCpuTask(task),check=['text_check','morphology'].includes(task),note=['jezikovna_urgenca','jezikovna_posta'].includes(task)?'editorial_task_note':'deterministic_task_note';$('model').disabled=cpu;$('model').hidden=cpu;document.querySelector('label[for="model"]').hidden=cpu;$('deterministic-task-note').hidden=!cpu;$('deterministic-task-note').dataset.i18n=note;textStatus('deterministic-task-note',note);$('text-language-control').hidden=!(check||task==='reference');$('input-language').required=false;capacityControls();}
 function capacityControls(){const generation=state.capabilities.generation,model=generation?.models?.[$('model').value];$('capacity-state').hidden=$('task').value!=='reference'||!model||model.available===true;if(!$('capacity-state').hidden)textStatus('capacity-message','generation_waiting_capacity');}
 async function refreshCapabilities(){state.capabilities={...state.capabilities,...await api('/capabilities')};capacityControls();}
 function clearClarification(){state.clarification=null;$('clarification').hidden=true;$('focus-control').hidden=true;$('ask-button').querySelector('span').dataset.i18n='ask';$('ask-button').querySelector('span').textContent=t('ask');}
 function clarificationText(){textStatus('clarification-message',state.clarification?.code==='input_language_required'?'input_language_required':'focus_required');$('ask-button').querySelector('span').dataset.i18n='continue_question';$('ask-button').querySelector('span').textContent=t('continue_question');}
-function showClarification(value){state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
+function showClarification(value){resetMatches();state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');if(value.fields.includes('input_language')){$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');}clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
 async function bootstrap() {
   const before=new URL(location.href),answer=before.searchParams.get('answer'),comparison=before.searchParams.get('comparison');textStatus('global-status','loading');
   const session=await api('/session');state.csrf=session.csrf_token;
@@ -92,6 +95,7 @@ function renderText(tier,kind,node,reference={}) {
     node.append(p);
     // Keep application controls out of the canonical text used for feedback.
     if(presentation.separateCitation)node.append(citationButton(presentation.separateCitation));
+    for(const citation of presentation.separateCitations||[])node.append(citationButton(citation));
   }
 }
 async function recordDelivered(tier,expanded) {
@@ -110,13 +114,49 @@ function renderFeedback(tier,kind,node) {
   form.addEventListener('submit',event=>{event.preventDefault();action(submit,async()=>{const body={run_id:tier.run_id,quality_score:draft.quality_score,display_locale:state.locale,rating:old?.rating||null,comment:comment.value,tags:old?.tags||[],idempotency_key:keyFor('quality:'+tier.run_id+':'+JSON.stringify(draft))};if(old?.feedback_id)body.feedback_id=old.feedback_id;const result=await api('/feedback',{method:'POST',body});if(!result.acknowledged)throw Error();state.feedbackDrafts.delete(tier.run_id);state.feedback.set(tier.run_id,{...old,...body,...result});renderFeedback(tier,kind,node);},'answer-status');});
   if(!delivered)form.querySelectorAll('input,textarea').forEach(control=>control.disabled=true);
 }
-function modelText(tier){const selected=tier?.model==='gemma'?'Gemma':tier?.model==='qwen'?'Qwen':'';if(!selected||state.family?.task!=='reference')return '';const actual=tier?.model_identity?.repository||tier?.model_identity?.model_id||selected,device=tier?.execution?.device;return actual+(device==='cpu'?' · CPU':device==='gpu'?' · GPU':'');}
+function modelText(tier){if(state.family?.task!=='reference')return '';const provider=tier?.generation?.provider,selected=tier?.model==='gemma'?'Gemma':tier?.model==='qwen'?'Qwen':'',actual=provider?.repository||provider?.model_id||tier?.model_identity?.repository||tier?.model_identity?.model_id||(tier?.generation?'':selected),device=provider?.device||tier?.execution?.device;return actual?actual+(device==='cpu'?' · CPU':device==='gpu'?' · GPU':''):'';}
+function renderGenerationNotice(){const key=generationNotice(state.family?.short);$('generation-notice').hidden=!key;textStatus('generation-notice',key);}
+function resetMatches(){matchesRequest++;matches={family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null};$('matches-panel').hidden=true;clear($('matches-list'));clear($('coverage-list'));$('matches-source').replaceChildren(el('option',t('all_loaded_sources'),{value:''}));textStatus('matches-status','');}
+function renderMatches(){
+  if(!matches.family||matches.family!==familyId()){$('matches-panel').hidden=true;return;}
+  $('matches-panel').hidden=false;
+  const filter=$('matches-source').value;clear($('matches-source'));$('matches-source').append(el('option',t('all_loaded_sources'),{value:''}));
+  for(const group of matchGroups(matches.items))$('matches-source').append(el('option',group.records[0].source_label||sourceLabel({source_slug:group.source_slug}).label,{value:group.source_slug}));
+  if([...$('matches-source').options].some(o=>o.value===filter))$('matches-source').value=filter;
+  textStatus('matches-summary','matches_loaded',{count:matches.items.length,returned:Number.isInteger(matches.returned)?matches.returned:'—'});
+  clear($('matches-list'));
+  for(const group of matchGroups(matches.items,$('matches-source').value)){
+    const section=el('section',null,{class:'match-group','data-source':group.source_slug});section.append(el('h3',group.records[0].source_label||sourceLabel({source_slug:group.source_slug}).label));
+    for(const item of group.records){const record=el('article',null,{class:'match-record','data-evidence-id':item.evidence_id,'data-used':String(item.used_in_answer===true)});record.append(el('p',t(item.used_in_answer===true?'match_used':'match_other'),{class:'small match-use'}),el('h4',item.title),el('p',item.snippet,{class:'match-snippet'}));const fid=matches.family;record.append(localButton('inspect_original',()=>{if(familyId()===fid)return openSource(state.family.short||{},item.evidence_id,'short',{sourceKey:item.source_slug,unusedMatch:item.used_in_answer!==true});},'plain'));section.append(record);}
+    $('matches-list').append(section);
+  }
+  if(matches.loaded&&!matches.items.length)$('matches-list').append(el('p',t('no_returned_matches')));
+  else if(matches.items.length&&!$('matches-list').children.length)$('matches-list').append(el('p',t('no_loaded_matches')));
+  clear($('coverage-list'));for(const source of matches.coverage){const status=['ok','no_match','partial','timeout','unavailable','unsupported','not_documentary'].includes(source.status)?source.status:'unavailable',label=source.label||source.source_label||(state.messages[state.locale]?.['retrieval_family_'+source.family]?t('retrieval_family_'+source.family):t('connected_resource'));const item=el('li',label+': '+t('retrieval_status_'+status));if(Number.isInteger(source.returned_count))item.append(document.createTextNode(' · '+t('returned_matches',{count:source.returned_count})));if(source.has_more===true||Number.isInteger(source.limit)&&source.returned_count>=source.limit)item.append(document.createTextNode(' · '+t('retrieval_limit')));$('coverage-list').append(item);}
+  $('retrieval-coverage').hidden=!matches.coverage.length;
+  const partial=matches.coverage.some(c=>['partial','timeout','unavailable','unsupported'].includes(c.status))||state.family?.short?.retrieval?.status==='partial',limited=matches.coverage.some(c=>c.has_more===true||Number.isInteger(c.limit)&&c.returned_count>=c.limit);
+  $('retrieval-notice').hidden=!partial&&!limited;textStatus('retrieval-notice',partial?'retrieval_partial':limited?'retrieval_limited':'');
+  $('matches-more').hidden=!Number.isInteger(matches.next);$('matches-more').disabled=matches.loading;
+}
+async function loadMatches(id,append=false){
+  if(matches.loading||id!==familyId())return;const request=++matchesRequest,boot=state.boot,offset=append?matches.next:0;if(!Number.isInteger(offset)||offset<0)return;matches.loading=true;renderMatches();textStatus('matches-status','loading');
+  try{const data=await api('/families/'+encodeURIComponent(id)+'/matches?offset='+offset+'&limit=20');if(request!==matchesRequest||boot!==state.boot||id!==familyId())return;
+    const items=matchGroups(data.items).flatMap(g=>g.records),merged=append?[...matches.items,...items]:items;matches.items=matchGroups(merged).flatMap(g=>g.records);matches.coverage=Array.isArray(data.coverage)?data.coverage:[];matches.returned=Number.isInteger(data.returned_count)?data.returned_count:null;matches.next=Number.isInteger(data.next_offset)&&data.next_offset>offset?data.next_offset:null;matches.loaded=true;textStatus('matches-status','');
+  }catch(error){if(request===matchesRequest&&id===familyId())textStatus('matches-status','matches_unavailable');}
+  finally{if(request===matchesRequest){matches.loading=false;renderMatches();}}
+}
+function syncMatches(family){
+  if(!family.matches_available){if(matches.family!==family.answer_family_id)resetMatches();return;}
+  const phase=pendingStates.has(jobState(family.short))?'pending':'settled';
+  if(matches.family!==family.answer_family_id||matches.phase!==phase){resetMatches();matches.family=family.answer_family_id;matches.phase=phase;loadMatches(matches.family);}else renderMatches();
+}
 
 function renderFamily(family) {
-  if(family.short?.error_code==='generation_waiting_capacity'){clearClarification();state.family=null;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('capacity-state').hidden=false;textStatus('capacity-message','generation_waiting_capacity');setURL();return;}
+  if(family.short?.error_code==='generation_waiting_capacity'&&!family.matches_available){clearClarification();state.family=null;resetMatches();$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('capacity-state').hidden=false;textStatus('capacity-message','generation_waiting_capacity');setURL();return;}
   if(['clarification','clarification_required'].includes(family.short?.answer_kind)){const language=family.short?.clarification_code==='input_language_required';showClarification({code:language?'input_language_required':'focus_required',fields:[language?'input_language':'focus']});return;}
   clearClarification();
   state.family=family;$('answer-model').textContent=modelText(family.short);$('long-model').textContent=modelText(family.long);$('answer-card').hidden=false;$('empty-state').hidden=true;$('new-question').hidden=false;$('revision-notice').hidden=!family.revised&&!family.short?.supersedes_run_id;$('locale-note').hidden=family.locale===state.locale;
+  renderGenerationNotice();syncMatches(family);
   if(acceptedStates.has(jobState(family.short))||['rejected','failed','cancelled'].includes(jobState(family.short))){renderText(family.short,'short',$('short-answer'));sourceButtons(family.short,'short',$('short-sources'));renderFeedback(family.short,'short',$('short-feedback'));recordDelivered(family.short,false).then(()=>{if(family.short?.run_id===state.family?.short?.run_id)renderFeedback(family.short,'short',$('short-feedback'));}).catch(()=>textStatus('answer-status','feedback_pending'));}else{clear($('short-answer'));clear($('short-sources'));clear($('short-feedback'));}
   $('expand-button').disabled=!acceptedStates.has(jobState(family.short))||isCpuTask(family.task)||jobState(family.short)==='no_hit'||(family.short?.historical_evidence&&!family.long);$('compare-button').disabled=$('expand-button').disabled||Boolean(family.short?.historical_evidence)||state.capabilities.comparisons===false;$('compare-button').hidden=state.capabilities.comparisons===false;
   $('long-section').hidden=!state.longOpen;$('expand-button').setAttribute('aria-expanded',String(state.longOpen));$('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
@@ -125,17 +165,17 @@ function renderFamily(family) {
 }
 async function loadFamily(id) {const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=state.longOpen||acceptedStates.has(jobState(data.long));renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
 async function loadFeedback(){const data=await api('/feedback');for(const f of data.feedback||data.items||data||[])if(f.run_id)state.feedback.set(f.run_id,f);}
-function setJob(job,tier) {state.job={...job,tier};$('job-state').hidden=false;$('job-state').setAttribute('aria-busy',String(pendingStates.has(jobState(job))));$('cancel-job').hidden=!pendingStates.has(jobState(job));$('retry-job').hidden=true;const code=jobState(job),label=code==='queued'?'queued':code==='validating'?'validating':code==='loading_model'||code==='waiting_model'?'loading_model':isCpuTask(state.family?.task)?'deterministic_working':tier==='long'?'generating_long':'generating_short';textStatus('job-message',label);if(job.position)textStatus('job-message','queued_position',{position:job.position});const model=job.model||state.family?.model,observed=state.capabilities.generation?.models?.[model];if(model&&state.family?.task==='reference'){$('job-message').textContent+=' · '+(model==='gemma'?'Gemma':'Qwen');if(observed?.device==='cpu'||observed?.cpu?.available)$('job-message').textContent+=' — '+t('cpu_slower');}}
+function setJob(job,tier) {state.job={...job,tier};$('job-state').hidden=false;$('job-state').setAttribute('aria-busy',String(pendingStates.has(jobState(job))));$('cancel-job').hidden=!pendingStates.has(jobState(job));$('retry-job').hidden=true;const label=progressLabel(job,state.family?.task,tier);textStatus('job-message',label);if(job.position)textStatus('job-message','queued_position',{position:job.position});const model=job.model||state.family?.model,observed=state.capabilities.generation?.models?.[model];if(model&&state.family?.task==='reference'){$('job-message').textContent+=' · '+(model==='gemma'?'Gemma':'Qwen');if(observed?.device==='cpu'||observed?.cpu?.available)$('job-message').textContent+=' — '+t('cpu_slower');}}
 async function pollJob(id,idFamily,tier) {
   if(state.polling.has(id))return;setJob({job_id:id,state:'queued'},tier);let cancelled=false;const boot=state.boot;state.polling.set(id,()=>{cancelled=true;});
-  try{while(!cancelled&&boot===state.boot){try{const data=await api('/jobs/'+encodeURIComponent(id)),job=data.job||data;if(cancelled||boot!==state.boot)return;setJob({...job,job_id:id},tier);if(!pendingStates.has(jobState(job))){await loadFeedback();if(idFamily===familyId())renderFamily(unwrapFamily(await api('/families/'+encodeURIComponent(idFamily))));$('job-state').hidden=true;state.job=null;break;}}catch(error){if(error.status===401||error.status===404)throw error;textStatus('job-message','reconnecting');$('retry-job').hidden=false;}
+  try{while(!cancelled&&boot===state.boot){try{const data=await api('/jobs/'+encodeURIComponent(id)),job=data.job||data;if(cancelled||boot!==state.boot)return;setJob({...job,job_id:id},tier);if(job.progress?.stage==='generation'&&idFamily===familyId()&&!state.family?.matches_available)renderFamily(unwrapFamily(await api('/families/'+encodeURIComponent(idFamily))));if(!pendingStates.has(jobState(job))){await loadFeedback();if(idFamily===familyId())renderFamily(unwrapFamily(await api('/families/'+encodeURIComponent(idFamily))));$('job-state').hidden=true;state.job=null;break;}}catch(error){if(error.status===401||error.status===404)throw error;textStatus('job-message','reconnecting');$('retry-job').hidden=false;}
     await new Promise(resolve=>setTimeout(resolve,1200));}
   }catch(error){$('global-status').textContent=errorText(error);}finally{state.polling.delete(id);}
 }
 async function submitQuestion(button,overrides={}) {
   const question=overrides.question||$('question').value;if(!question.trim()){textStatus('global-status','question_required');$('question').focus();return;}
   await action(button,async()=>{
-    textStatus('global-status','');for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
+    textStatus('global-status','');resetMatches();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
     const locale=overrides.locale||$('answer-locale').value;
     const payload={question,locale,interface_locale:state.locale,input_language:['text_check','morphology','reference'].includes($('task').value)&&['sl','it'].includes($('input-language').value)?$('input-language').value:'und',model:overrides.model||$('model').value,task:$('task').value};
     if($('task').value==='reference'&&$('focus').value.trim())payload.focus=$('focus').value.trim();
@@ -159,9 +199,11 @@ async function expand(button) {
   await action(button,async()=>{const result=await api('/families/'+encodeURIComponent(familyId())+'/expand',{method:'POST',body:{idempotency_key:keyFor('expand:'+familyId())}});if(result.family)renderFamily(result.family);else if(result.answer_family_id)renderFamily(result);const id=result.job?.job_id||result.job?.id||state.family.long?.job_id;if(id)pollJob(id,familyId(),'long');});
 }
 async function openSource(tier,id,kind,reference={}) {
+  const request=++sourceRequest,boot=state.boot,targetFamily=familyId();
+  const current=()=>request===sourceRequest&&boot===state.boot&&targetFamily===familyId()&&$('source-dialog').open;
   clear($('source-content'));$('source-title').textContent=t('source_detail');$('source-content').append(el('p',t('loading')));showDialog('source-dialog');
   try{let data;if(reference.comparisonId)data=await api('/comparisons/'+encodeURIComponent(reference.comparisonId)+'/sources/'+encodeURIComponent(id)+'?side='+encodeURIComponent(reference.side)+'&tier='+kind);else if(id)data=await api('/families/'+encodeURIComponent(familyId())+'/sources/'+encodeURIComponent(id)+'?tier='+kind);else throw Error();
-    data=data.source||data;clear($('source-content'));$('source-title').textContent=data.source_label||data.label||sourceLabel({source_key:reference.sourceKey}).label;
+    if(!current())return;data=data.source||data;clear($('source-content'));$('source-title').textContent=data.source_label||data.label||sourceLabel({source_key:reference.sourceKey}).label;
     if(data.title)$('source-content').append(el('h3',data.title));
     const loc=readableLocator(data.locator,{page:t('source_page'),topic:t('source_topic')});if(loc)$('source-content').append(el('p',loc,{class:'source-locator'}));
     if(data.edition)$('source-content').append(el('p',t('edition')+' '+String(data.edition),{class:'source-locator'}));
@@ -169,12 +211,12 @@ async function openSource(tier,id,kind,reference={}) {
     if(data.annual_scope||data.publication_scope==='annual_additions')$('source-content').append(el('p',t('annual_scope'),{class:'source-qualifier'}));
     const excerpt=sourceExcerptPresentation(data);
     $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
-    if(tier.run_id&&!reference.comparisonId)$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));
+    if(tier.run_id&&!reference.comparisonId&&!reference.unusedMatch)$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));
     const link=safeSourceLink(data.url||data.original_url);if(link)$('source-content').append(el('a',t('open_original'),{href:link,target:'_blank',rel:'noopener noreferrer',class:'plain'}));
     const selectedEvidence=evidenceFor(tier).find(item=>evidenceId(item)===id),related=evidenceFor(tier).filter(item=>sourceKey(item)===sourceKey(selectedEvidence));
     if(selectedEvidence&&related.length>1){const more=el('details'),summary=el('summary',t('other_used_passages'));more.append(summary);for(const [index,item]of related.entries()){const choice=el('button',t('source_number',{number:item.local_number||item.number||index+1}),{type:'button',class:'plain'});choice.addEventListener('click',()=>openSource(tier,evidenceId(item),kind,reference));choice.disabled=evidenceId(item)===id;more.append(choice);}$('source-content').append(more);}
     if(data.bibliography){const details=el('details',null,{class:'source-bibliography'}),summary=el('summary',t('source_bibliography'));details.append(summary);const bib=typeof data.bibliography==='string'?data.bibliography:Object.entries(data.bibliography).map(([key,value])=>key+': '+String(value)).join('\n');details.append(el('p',bib));if(excerpt.attributionHidden){details.append(el('p',t('original_source_excerpt')));details.append(el('pre',excerpt.original,{class:'source-original'}));}$('source-content').append(details);}
-  }catch(error){clear($('source-content'));$('source-content').append(el('p',t('source_unavailable'),{class:'error'}));}
+  }catch(error){if(!current())return;clear($('source-content'));$('source-content').append(el('p',t('source_unavailable'),{class:'error'}));}
 }
 function captureSelection() {
   const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount)return;const range=selection.getRangeAt(0),start=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement,end=range.endContainer.nodeType===1?range.endContainer:range.endContainer.parentElement,block=start.closest('[data-block-id]');if(!block||end.closest('[data-block-id]')!==block)return;
@@ -226,8 +268,9 @@ function bind() {
   $('task').addEventListener('change',()=>{clearClarification();taskControls();});$('model').addEventListener('change',capacityControls);$('answer-locale').addEventListener('change',()=>{state.answerLocaleExplicit=true;});taskControls();
   $('capacity-sources').addEventListener('click',()=>{$('task').value='source_search';clearClarification();taskControls();$('ask-button').focus();});
   $('capacity-tools').addEventListener('click',()=>{$('task').value='terminology';clearClarification();taskControls();$('question').focus();});
+  $('matches-source').addEventListener('change',renderMatches);$('matches-more').addEventListener('click',()=>loadMatches(familyId(),true));
   $('options-toggle').addEventListener('click',()=>{const open=$('options').hidden;$('options').hidden=!open;$('options-toggle').setAttribute('aria-expanded',String(open));});$('history-toggle').addEventListener('click',toggleHistory);
-  $('new-question').addEventListener('click',()=>{state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;$('question').value='';$('focus').value='';clearClarification();setURL();$('question').focus();});
+  $('new-question').addEventListener('click',()=>{resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;$('question').value='';$('focus').value='';clearClarification();setURL();$('question').focus();});
   $('expand-button').addEventListener('click',event=>expand(event.currentTarget));$('translate-answer').addEventListener('click',event=>submitQuestion(event.currentTarget,{question:state.family.question,locale:state.locale,model:state.family.model}));
   $('copy-answer').addEventListener('click',event=>action(event.currentTarget,async()=>{try{await navigator.clipboard.writeText($('short-answer').textContent);textStatus('answer-status','copied');}catch{ textStatus('answer-status','copy_failed');}}));
   $('cancel-job').addEventListener('click',event=>action(event.currentTarget,async()=>{if(state.job?.job_id)await api('/jobs/'+encodeURIComponent(state.job.job_id)+'/cancel',{method:'POST'});textStatus('job-message','cancelled');}));$('retry-job').addEventListener('click',()=>{if(state.job?.job_id)pollJob(state.job.job_id,familyId(),state.job.tier);});

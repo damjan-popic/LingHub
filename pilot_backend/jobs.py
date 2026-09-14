@@ -22,7 +22,7 @@ def render_result(value):
     if not isinstance(value,dict):raise Failure('invalid_answer',502)
     status=value.get('status')
     if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
-    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code'}
+    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress'}
     out={k:v for k,v in value.items()if k in allowed}
     for field in ('short_answer','answer_md'):
         if not isinstance(out.get(field,''),str)or len(out.get(field,''))>100000:raise Failure('invalid_answer',502)
@@ -34,7 +34,9 @@ def render_result(value):
     blocks=out.get('display_blocks')or out.get('blocks')
     if blocks:
         if not isinstance(blocks,list)or len(blocks)>100 or any(not isinstance(b,dict)or not isinstance(b.get('text'),str)for b in blocks):raise Failure('invalid_answer',502)
-        blocks=[{'block_id':str(b.get('block_id',f'b{i}')),'text':b['text']}for i,b in enumerate(blocks)]
+        for b in blocks:
+            if 'evidence_ids'in b and(not isinstance(b['evidence_ids'],list)or len(b['evidence_ids'])>256 or any(not isinstance(eid,str)for eid in b['evidence_ids'])):raise Failure('invalid_answer',502)
+        blocks=[{'block_id':str(b.get('block_id',f'b{i}')),'text':b['text'],**({'evidence_ids':list(b['evidence_ids'])}if'evidence_ids'in b else{})}for i,b in enumerate(blocks)]
         if len({b['block_id']for b in blocks})!=len(blocks):raise Failure('invalid_answer',502)
     else:blocks=[{'block_id':'answer','text':out['answer_md']or out['short_answer']}]
     out['blocks']=blocks
@@ -76,7 +78,10 @@ class Jobs:
                 parent=db.execute('SELECT result FROM runs WHERE id=?',(r['parent_run_id'],)).fetchone()if r['parent_run_id']else None
                 focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(f['id'],)).fetchone()
                 if focus:f['focus']=focus[0]
-            if f['task']=='reference'and hasattr(self.adapter,'require_generation'):self.adapter.require_generation([r['model']])
+            is_unified=f['task']=='reference'and getattr(self.adapter,'unified_answers',False)
+            if is_unified:
+                with self.store.tx()as db:db.execute('UPDATE runs SET result=? WHERE id=?',(canonical({'progress':{'stage':'retrieval'if not f['bundle']else'generation'}}),rid))
+            if f['task']=='reference'and not is_unified and hasattr(self.adapter,'require_generation'):self.adapter.require_generation([r['model']])
             if not f['bundle']:
                 freeze_started=time.monotonic()
                 frozen=self.adapter.freeze(f,policy)
@@ -90,10 +95,13 @@ class Jobs:
                     bundle=json.loads(current[0]);observation=json.loads(current[1]).get('freeze_observation')
             else:
                 bundle=json.loads(f['bundle']);observation=json.loads(f['identity']or'{}').get('freeze_observation')
+            if is_unified:
+                with self.store.tx()as db:db.execute('UPDATE runs SET result=? WHERE id=?',(canonical({'progress':{'stage':'generation'},'retrieval':bundle.get('retrieval',{})}),rid))
             generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
             validation_started=time.monotonic()
             result,display=render_result(generated)
             result['capability']=f['task'];result['answer_method']=method(result)
+            if is_unified:result['progress']={'stage':'complete'}
             presentation_ms=(time.monotonic()-validation_started)*1000
             timings=result.setdefault('timings',{})
             # Reuse retains the historical observation in the family, but does not

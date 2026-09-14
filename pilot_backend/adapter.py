@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,urlencode,quote
 import httpx
 from .security import Failure
-from . import terminology, collation, morphology, editorial
+from . import terminology, collation, morphology, editorial, unified
 
 
 def private_url(url):
@@ -12,10 +12,12 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None):
+    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None,unified_answers=False):
         self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
         if type(editorial_full_records)is not bool:raise ValueError('Editorial full-record capability must be boolean')
+        if type(unified_answers)is not bool:raise ValueError('Unified answers capability must be boolean')
         self.editorial_full_records=editorial_full_records
+        self.unified_answers=unified_answers
         if editorial_operator_policy_id is not None and (editorial_operator_policy_id!=editorial.OPERATOR_POLICY_ID or not editorial_full_records or not self.klikai_url):raise ValueError('Invalid local editorial operator policy')
         self.editorial_operator_policy_id=editorial_operator_policy_id
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
@@ -32,6 +34,7 @@ class Gateway:
                     data=json.loads(content)
                     if not isinstance(data,dict):raise Failure('answer_unavailable',503)
                     return data
+        except httpx.TimeoutException:raise Failure('source_timeout'if base else'answer_unavailable',503)from None
         except (httpx.HTTPError,ValueError,TypeError):raise Failure('answer_unavailable',503)from None
     def capabilities(self):
         """Short, read-only readiness observation; never probes by generating text."""
@@ -84,6 +87,8 @@ class Gateway:
         observed=self.capabilities()
         if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
     def freeze(self,family,policy):
+        if family['task']=='reference'and self.unified_answers:
+            return unified.freeze(self,family,policy)
         if family['task'] in editorial.SOURCES:
             if not self.klikai_url:raise Failure('task_unavailable',503)
             query=family['question']
@@ -127,6 +132,7 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('contract')==unified.CONTRACT:return unified.generate(self,bundle,tier,model,parent)
         if bundle.get('task')=='editorial_search':return editorial.answer(bundle,tier)
         if bundle.get('task')=='morphology':return morphology.answer(bundle,tier)
         if bundle.get('task')=='terminology':return terminology.answer(bundle,tier)
@@ -141,6 +147,7 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('contract')==unified.CONTRACT:return unified.source(bundle,evidence_id)
         if bundle.get('task')=='editorial_search':return editorial.source(bundle,evidence_id,tier)
         if bundle.get('task')=='morphology':return morphology.source(bundle,evidence_id,tier)
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)

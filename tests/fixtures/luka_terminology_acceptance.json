@@ -1,0 +1,313 @@
+{
+  "schema": "klikai.luka-terminology-acceptance-fixtures.v1",
+  "retained_release_id": "luka-nonloris-2026-08-24-dc0b18c2b883",
+  "release_manifest_sha256": "c8a2aca7499bb43778b05ee59231b132edbc4174804b65a9ee39838a040d0fbd",
+  "selection": "Independent retained-source inspection; all expectations fixed before live matrix requests. Missing fields are not inferred.",
+  "cases": [
+    {
+      "source_slug": "solska",
+      "query": "učiteljskemu zboru",
+      "expected": {
+        "source_slug": "solska",
+        "external_id": "solska:abdb6f2b0975",
+        "upstream_key": "abdb6f2b0975",
+        "record_kind": "terminology_decision",
+        "source_date": "2026-08-24",
+        "categories": [
+          "šolstvo"
+        ],
+        "subcategories": [
+          "inkluzija"
+        ],
+        "original_terms": [
+          "collegio dei docenti"
+        ],
+        "standardized_terms": [
+          "učiteljski zbor",
+          "profesorski zbor"
+        ],
+        "proposals": [],
+        "rationale": [
+          "V referenčnem prostoru obstaja primerljiva predmetnost. Na podlagi načel enoznačnosti, jasnosti (razumljivosti) in doslednosti predlagamo, da se tudi na lokalni ravni standardizira termina učiteljski zbor ali profesorski zbor.",
+          "Opozarjamo, da je leksem zbor učnega osebja neustrezen, saj je učno osebje prešibka kolokacija (se redko uporablja). Za pojem personale docente predlagamo slovenske prevedke pedagoški kader, pedagoško osebje, strokovni delavnci / strokovne delavke v vzgoji in izobraževanju. Imena organov se v slovenščini pišejo z malo začetnico."
+        ],
+        "examples": [],
+        "references": [],
+        "citation_id": "solska:abdb6f2b0975",
+        "source_display_name": "Šolska terminologija",
+        "source_badge": "ŠOLSKA",
+        "rights_mode": "restricted",
+        "trust_tier": 1
+      },
+      "expected_match": {
+        "field": "standardized",
+        "language": "sl",
+        "matched_query": "učiteljskemu zboru",
+        "term": "učiteljski zbor",
+        "match_tier": "morphology_exact",
+        "normalization": "morphology",
+        "ambiguity_cost": 0
+      },
+      "source_line": 19,
+      "source_file_sha256": "154969ee2e4d9656e8a562c5197db71d7322a1364b03e3aa7d3a5dc2a8c938b3",
+      "record_sha256": "030266018554d18ebfbcf0f4778b93376da33cdd43570a6a4bb25e6a2cc7a9a1",
+      "payload_content_hash": "ad19610e0960be4fc8eda136061480916291a023f4e3cd0caf3e50c9d91e8734",
+      "source_yaml_path": "data/sources/solska/source.yaml",
+      "source_yaml_sha256": "c31bbe3798c05d16048f097af63c57131c4d02d42a803c9cdcc86e7cc0120eb4",
+      "source_languages": [
+        "it",
+        "sl"
+      ],
+      "language_basis": "accepted importer projects original as it and standardized/proposals as sl",
+      "missing_provenance": {
+        "entry_publication_date": null,
+        "entry_update_date": null
+      },
+      "scope_note": "Representative record only."
+    },
+    {
+      "source_slug": "zvezek",
+      "query": "Belopeška kotlina",
+      "expected": {
+        "source_slug": "zvezek",
+        "external_id": "zvezek:8",
+        "upstream_key": "8",
+        "record_kind": "terminology_concept",
+        "source_date": "2026-06-29",
+        "categories": [
+          "Zemljepisna imena"
+        ],
+        "subcategories": [],
+        "original_terms": [
+          "Conca di Fusine"
+        ],
+        "standardized_terms": [
+          "Belopeška kotlina"
+        ],
+        "proposals": [],
+        "rationale": [],
+        "examples": [],
+        "references": [],
+        "citation_id": "zvezek:8",
+        "source_display_name": "Zvezek standardiziranih terminov",
+        "source_badge": "ZVEZEK",
+        "rights_mode": "restricted",
+        "trust_tier": 1
+      },
+      "expected_match": {
+        "field": "term",
+        "language": "sl",
+        "matched_query": "Belopeška kotlina",
+        "term": "Belopeška kotlina",
+        "match_tier": "exact",
+        "normalization": "raw"
+      },
+      "source_line": 8,
+      "source_file_sha256": "1071c96b47c710cbba0fb8d76c7269387d34f415cf5250f2f4595d0265d652cf",
+      "record_sha256": "144ca0d3750e19a9ac263147e2e42753574095534a518d62e01eca1cdad980bc",
+      "payload_content_hash": "26f09182af7354f39ceb1793d1627d68fc1a9e91626ac5752b29a146590aa150",
+      "source_yaml_path": "data/sources/zvezek/source.yaml",
+      "source_yaml_sha256": "4150deea9c2f5d7b0b58f4862cb7eaeb7ac0cae64e084c0659fb67e638b81e51",
+      "source_languages": [
+        "it",
+        "sl"
+      ],
+      "language_basis": "retained entry lang",
+      "missing_provenance": {
+        "entry_publication_date": null,
+        "entry_update_date": null
+      },
+      "scope_note": "Representative record only."
+    },
+    {
+      "source_slug": "crossterm",
+      "query": "presoja krajinske skladnosti",
+      "expected": {
+        "source_slug": "crossterm",
+        "external_id": "crossterm:6",
+        "upstream_key": "6",
+        "record_kind": "terminology_concept",
+        "source_date": "2026-06-29",
+        "categories": [
+          "urbanizem in gradbeništvo"
+        ],
+        "subcategories": [
+          "prostorsko načrtovanje"
+        ],
+        "original_terms": [
+          "accertamento di compatibilità paesaggistica",
+          "aciertament di compatibilitât paisagjistiche"
+        ],
+        "standardized_terms": [
+          "presoja krajinske skladnosti"
+        ],
+        "proposals": [],
+        "rationale": [],
+        "examples": [],
+        "references": [],
+        "citation_id": "crossterm:6",
+        "source_display_name": "CrossTerm",
+        "source_badge": "CROSSTERM",
+        "rights_mode": "restricted",
+        "trust_tier": 1
+      },
+      "expected_match": {
+        "field": "term",
+        "language": "sl",
+        "matched_query": "presoja krajinske skladnosti",
+        "term": "presoja krajinske skladnosti",
+        "match_tier": "exact",
+        "normalization": "raw"
+      },
+      "source_line": 6,
+      "source_file_sha256": "6baf42069e088befd9f33eb32932dff55768fcc5fc12cd88dda7380f1f903a77",
+      "record_sha256": "8de2af4cfce2e0f03d7b1b5ad9af33f1fa26ac5bbd327958f44ace51f0ba5bfa",
+      "payload_content_hash": "51567d10dd62c79bfa9e34efbf40421f7355c92468165994292be793c8711f02",
+      "source_yaml_path": "data/sources/crossterm/source.yaml",
+      "source_yaml_sha256": "67f94e3927831ea46a8910571322e9a4415d307f23374f869e709bf364f7f837",
+      "source_languages": [
+        "fu",
+        "it",
+        "sl"
+      ],
+      "language_basis": "retained entry lang",
+      "missing_provenance": {
+        "entry_publication_date": null,
+        "entry_update_date": null
+      },
+      "scope_note": "Slovenian raw exact query; Friulian term retained as supplied, no Friulian morphological retrieval tested."
+    },
+    {
+      "source_slug": "zkb",
+      "query": "addebito diretto SEPA",
+      "expected": {
+        "source_slug": "zkb",
+        "external_id": "zkb:a3e22841e512",
+        "upstream_key": "a3e22841e512",
+        "record_kind": "terminology_decision",
+        "source_date": "2026-08-14",
+        "categories": [],
+        "subcategories": [],
+        "original_terms": [
+          "addebito diretto SEPA"
+        ],
+        "standardized_terms": [
+          "SEPA direktna bremenitev (SDD)",
+          "SEPA direktna obremenitev (SDD)"
+        ],
+        "proposals": [],
+        "rationale": [
+          "SEPA direktna bremenitev (SDD) je debetna plačilna storitev za poravnavo tako enkratne (obremenitev) kot ponavljajočih se (bremenitev) obveznosti - npr. plačilo položnic za telefon, elektriko, komunalne storitve ... - v evrih na območju SEPA (Single Euro Payments Area). Placilno transakcijo SDD odredijo prejemniki plačila na podlagi predhodno podpisanega soglasja plačnika, izvrši pa se z direktno obremenitvijo računa plačnika pri njegovi banki."
+        ],
+        "examples": [],
+        "references": [
+          {
+            "label": null,
+            "url": "https://www.bsi.si/placila-in-infrastruktura/placilne-storitve-in-elektronski-denar/sepa"
+          }
+        ],
+        "citation_id": "zkb:a3e22841e512",
+        "source_display_name": "Terminološke odločitve ZKB",
+        "source_badge": "ZKB",
+        "rights_mode": "restricted",
+        "trust_tier": 1
+      },
+      "expected_match": {
+        "field": "original",
+        "language": "it",
+        "matched_query": "addebito diretto SEPA",
+        "term": "addebito diretto SEPA",
+        "match_tier": "exact",
+        "normalization": "raw"
+      },
+      "source_line": 1,
+      "source_file_sha256": "e9a1af858891e4f1ad941a55f831fa0bf9306247f95283401e0c5a81aa06fc55",
+      "record_sha256": "afbe11355f47c22cbd666f6b1e86d8a89f4909c7e663e6191cb71b852a33293a",
+      "payload_content_hash": "1b1a4474974ffd7e99fae2a9bb84a1d697850281b66b8fa2fc9d95af6d68e6a4",
+      "source_yaml_path": "data/sources/zkb/source.yaml",
+      "source_yaml_sha256": "f46d51901bc007e5e48b91b0b8b79ed0e96528ee2986a6907e014ae97f826270",
+      "source_languages": [
+        "it",
+        "sl"
+      ],
+      "language_basis": "accepted importer projects original as it and standardized/proposals as sl",
+      "missing_provenance": {
+        "entry_publication_date": null,
+        "entry_update_date": null
+      },
+      "scope_note": "Representative record only."
+    },
+    {
+      "source_slug": "tretji_sektor",
+      "query": "assemblea dei soci",
+      "expected": {
+        "source_slug": "tretji_sektor",
+        "external_id": "tretji_sektor:7747943aad41",
+        "upstream_key": "7747943aad41",
+        "record_kind": "terminology_decision",
+        "source_date": "2026-08-14",
+        "categories": [],
+        "subcategories": [],
+        "original_terms": [
+          "assemblea dei soci"
+        ],
+        "standardized_terms": [
+          "občni zbor",
+          "skupščina"
+        ],
+        "proposals": [
+          "zbor članov",
+          "občni zbor",
+          "skupščina",
+          "zbor"
+        ],
+        "rationale": [
+          "V RS se uporablja termin zbor članov, vendar je ta termin sporen, ker ne upošteva smernic za spolno občutljivo rabo jezika (vključujoč termin bi bil zbor članov in članic).",
+          "Občni zbor je s tega vidika ustreznejši, poleg tega pa je že uveljavljen in splošno razumljiv. Uporablja se za društva, neprofitne organizacije nasploh in vse zadruge.",
+          "Za gospodarske družbe: skupščina (družbenikov in družbenic, delničarjev in delničark).",
+          "Za druge organe: zbor (npr. assemblea dei condomini = zbor (etažnih) lastnikov in lastnic)."
+        ],
+        "examples": [],
+        "references": [
+          {
+            "label": null,
+            "url": "https://www.jeziknaklik.it/glosar-zkb/"
+          },
+          {
+            "label": null,
+            "url": "https://www.jeziknaklik.it/zvezek/"
+          }
+        ],
+        "citation_id": "tretji_sektor:7747943aad41",
+        "source_display_name": "Terminologija tretjega sektorja",
+        "source_badge": "TRETJI",
+        "rights_mode": "restricted",
+        "trust_tier": 1
+      },
+      "expected_match": {
+        "field": "original",
+        "language": "it",
+        "matched_query": "assemblea dei soci",
+        "term": "assemblea dei soci",
+        "match_tier": "exact",
+        "normalization": "raw"
+      },
+      "source_line": 1,
+      "source_file_sha256": "3a5cfd1cd2c4b4e5643903eeb60d57b1365968ce134d442d4e4747c43add6650",
+      "record_sha256": "61a41863279fbe887c2a6271bf50b066aecb70971893fa7e8a90d0c141fc9e5d",
+      "payload_content_hash": "2576d6d09f14f2d0ea3fa7768cd9b6c4ba6cdfcb45995f79146144523d399e7d",
+      "source_yaml_path": "data/sources/tretji-sektor/source.yaml",
+      "source_yaml_sha256": "61780cc74c6aa3fa91893576066ec7c728fe3d58b00d1cb7ef7a7f8d90fb3e00",
+      "source_languages": [
+        "it",
+        "sl"
+      ],
+      "language_basis": "accepted importer projects original as it and standardized/proposals as sl",
+      "missing_provenance": {
+        "entry_publication_date": null,
+        "entry_update_date": null
+      },
+      "scope_note": "Representative record only."
+    }
+  ]
+}

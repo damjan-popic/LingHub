@@ -1,6 +1,6 @@
 """Bounded private HTTP adapter. No browser-supplied URL, bundle or secret."""
 import json
-from urllib.parse import urlsplit,urlencode
+from urllib.parse import urlsplit,urlencode,quote
 import httpx
 from .security import Failure
 from . import terminology, collation, morphology, editorial
@@ -12,8 +12,10 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None,klikai_url=None):
+    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False):
         self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
+        if type(editorial_full_records)is not bool:raise ValueError('Editorial full-record capability must be boolean')
+        self.editorial_full_records=editorial_full_records
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
@@ -84,7 +86,14 @@ class Gateway:
             query=family['question']
             if not 2<=len(query)<=500:raise Failure('invalid_request')
             path='/api/search?'+urlencode({'q':query,'sources':family['task'],'limit':editorial.LIMIT})
-            return editorial.freeze(self.request(path,None,self.klikai_url),query,family['task'],family['locale'])
+            frozen=editorial.freeze(self.request(path,None,self.klikai_url),query,family['task'],family['locale'])
+            if self.editorial_full_records and frozen['bundle']['hits']:
+                # Discovery is validated before a bounded detail call per record.
+                # A denial/error never falls back to a stale discovery excerpt.
+                records=[self.request('/api/editorial/records/'+quote(family['task'],safe='')+'/'+quote(hit['resource_id'],safe=''),None,self.klikai_url)
+                         for hit in frozen['bundle']['hits']]
+                return editorial.freeze_records(frozen['bundle'],records)
+            return frozen
         if family['task']=='morphology':
             if not self.linghub_url:raise Failure('task_unavailable',503)
             lang=family.get('input_language');tokens=family['question'].split()

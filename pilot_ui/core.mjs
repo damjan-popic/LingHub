@@ -23,12 +23,23 @@ export function isCpuTask(task) {
   return ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'].includes(task);
 }
 export function progressLabel(job, task, tier='short') {
+  if (jobState(job) === 'cancelled') return 'cancelled';
+  if (job?.cancel_requested === true && pendingStates.has(jobState(job))) return job.cancellation_mode === 'stop_before_generation' ? 'cancelling_before_generation' : 'cancelling_current_operation';
   if (jobState(job) === 'queued') return 'queued';
   if (job?.progress?.stage === 'retrieval') return 'retrieving_sources';
   if (job?.progress?.stage === 'generation') return 'generating_grounded';
-  if (jobState(job) === 'validating') return 'validating';
+  if (job?.progress?.stage === 'validation' || jobState(job) === 'validating') return 'validating';
   if (['loading_model','waiting_model'].includes(jobState(job))) return 'loading_model';
   return isCpuTask(task) ? 'deterministic_working' : tier === 'long' ? 'generating_long' : 'generating_short';
+}
+export function settledMatchUsage(items, family) {
+  if (['short','long'].some(tier => family?.[tier] && pendingStates.has(jobState(family[tier])))) return items;
+  const used = new Set(['short','long'].flatMap(tier => family?.[tier]?.state === 'complete' ? family[tier].evidence || [] : [])
+    .map(item => item.evidence_id || item.citation_id));
+  return items.map(item => ({...item,used_in_answer:used.has(item.evidence_id)}));
+}
+export function matchUseLabel(item, pending) {
+  return pending ? 'match_pending' : item.used_in_answer === true ? 'match_used' : 'match_other';
 }
 export function matchGroups(items, source='') {
   const groups = new Map(), seen = new Set();

@@ -155,7 +155,9 @@ class Domain:
             for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):
                 latest[row['tier']]=json.loads(row['result'])if row['result']else{}
             used={unified.evidence_id(e)for result in latest.values()for e in result.get('evidence',[])if isinstance(e,dict)}
-            return unified.matches_page(bundle,used,offset,limit)
+            page=unified.matches_page(bundle,used,offset,limit)
+            page['usage_final']=not bool(db.execute("SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND state IN ('queued','running') LIMIT 1",(fid,)).fetchone())
+            return page
     def job(self,owner,jid):
         with self.store.connect()as db:
             j=self.owned(db,'jobs',jid,owner);r=self.run(db,j['run_id'],owner)
@@ -164,7 +166,8 @@ class Domain:
                 terminal=db.execute("SELECT count(*)FROM runs WHERE assignment_id=?AND tier=?AND state IN ('complete','failed','cancelled')",(a['id'],r['tier'])).fetchone()[0]
                 if a['blind']and not a['revealed']and terminal<2:return {'job_id':jid,'state':'queued','family_id':r['family_id'],'tier':r['tier'],'position':None,'error_code':None,'pair_state':'preparing'}
             result=json.loads(r['result'])if r['result']else{}
-            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress')}
+            cancellation_mode='queued_removed'if j['state']=='cancelled'and j['started']is None else'stop_before_generation'if result.get('progress',{}).get('stage')=='retrieval'else'finish_current_operation'
+            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress'),'cancel_requested':bool(j['cancel_requested']),'cancellation_mode':cancellation_mode if j['cancel_requested']else None,'provider_interruption_supported':False}
     def cancel(self,owner,jid):
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)

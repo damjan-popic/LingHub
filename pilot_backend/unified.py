@@ -17,6 +17,7 @@ from .store import canonical, digest
 CONTRACT = 'klikai.pilot.unified-capture.v1'
 PACKET = 'klikai.unified-evidence.v1'
 MAX_BYTES = 2 * 1024 * 1024
+DETAIL_WORKERS = 4
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 
@@ -81,14 +82,30 @@ def registry(gateway):
     return result
 
 
-def collect_source(gateway, family, definition):
+def fetch_editorial_detail(gateway, slug, rid):
+    """One existing bounded HTTP request, measured independently of rendering."""
+    started = time.monotonic()
+    try:
+        record = gateway.request('/api/editorial/records/' + slug + '/' + quote(rid, safe=''), None, gateway.klikai_url)
+        return record, None, round((time.monotonic() - started) * 1000, 3)
+    except Exception as error:
+        return None, error, round((time.monotonic() - started) * 1000, 3)
+
+
+def collect_source(gateway, family, definition, detail_pool=None):
+    if detail_pool is None:
+        with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
+            return collect_source(gateway, family, definition, pool)
     started = time.monotonic()
     slug, adapter = definition['slug'], definition['adapter_key']
     query, locale = family['question'], family['locale']
     limit = 20 if adapter in TERM_ADAPTERS else 3 if slug in editorial.SOURCES else 10
     coverage = {'family': slug, 'source_label': definition['display_name'], 'status': 'unavailable', 'returned_count': 0,
-                'limit': limit, 'has_more': None, 'elapsed_ms': 0.0}
+                'limit': limit, 'has_more': None, 'elapsed_ms': 0.0,
+                'search_ms': 0.0, 'detail_ms': 0.0, 'detail_requests': 0,
+                'detail_reused': 0, 'details': []}
     matches = []
+    detail_started = None
     try:
         if definition.get('source_type') == 'tool' or adapter in NON_DOCUMENTARY:
             coverage['status'] = 'not_documentary'
@@ -96,17 +113,42 @@ def collect_source(gateway, family, definition):
         if not 2 <= len(query) <= 500:
             coverage.update(status='unsupported', reason='query_outside_search_bound')
             return matches, coverage
-        if adapter in TERM_ADAPTERS:
-            params = {'q': query, 'sources': slug, 'limit': limit,
-                      'allow_partial': 'true', 'include_prose': 'true', 'use_morphology': 'true'}
-            data = gateway.request('/api/terminology/lookup?' + urlencode(params), None, gateway.klikai_url)
-        else:
-            data = gateway.request('/api/search?' + urlencode({'q': query, 'sources': slug, 'limit': limit}), None, gateway.klikai_url)
+        search_started = time.monotonic()
+        try:
+            if adapter in TERM_ADAPTERS:
+                params = {'q': query, 'sources': slug, 'limit': limit,
+                          'allow_partial': 'true', 'include_prose': 'true', 'use_morphology': 'true'}
+                data = gateway.request('/api/terminology/lookup?' + urlencode(params), None, gateway.klikai_url)
+            else:
+                data = gateway.request('/api/search?' + urlencode({'q': query, 'sources': slug, 'limit': limit}), None, gateway.klikai_url)
+        finally:
+            coverage['search_ms'] = round((time.monotonic() - search_started) * 1000, 3)
         hits = data.get('hits')
         if (data.get('query') != query or data.get('sources') != [slug] or not isinstance(hits, list)
                 or len(hits) > limit or type(data.get('count')) is not int or data['count'] != len(hits)):
             raise Failure('invalid_answer', 502)
         coverage['returned_count'] = len(hits)
+        details = {}
+        if adapter not in TERM_ADAPTERS and slug in editorial.SOURCES and gateway.editorial_full_records:
+            # Independent full-record reads used to run serially after discovery.
+            # Share four workers across this query's sources, and fetch a repeated
+            # identity once. This cache ends with the capture; no answers or source
+            # editions are reused across requests or users.
+            for hit in hits:
+                try:
+                    editorial.freeze(dict(data, hits=[hit], count=1), query, slug, locale)
+                except Failure:
+                    # The ordered consumer below retains the existing invalid-hit
+                    # boundary and any preceding valid matches.
+                    break
+                rid = hit['resource_id']
+                if rid in details:
+                    coverage['detail_reused'] += 1
+                    continue
+                if detail_started is None:
+                    detail_started = time.monotonic()
+                details[rid] = detail_pool.submit(fetch_editorial_detail, gateway, slug, rid)
+            coverage['detail_requests'] = len(details)
         for hit in hits:
             if (not isinstance(hit, dict) or hit.get('source_slug') != slug or
                     hit.get('rights_mode') not in {'owned', 'open', 'restricted', 'linked_only'}):
@@ -125,24 +167,31 @@ def collect_source(gateway, family, definition):
                 # Preserve discovery on individual detail failure. It remains
                 # browsable but is not submitted as complete editorial evidence.
                 discovery = editorial.freeze(dict(data, hits=[hit], count=1), query, slug, locale)['bundle']
+                detail = {'external_id': hit['resource_id'], 'status': 'unavailable', 'elapsed_ms': 0.0}
                 try:
                     if not gateway.editorial_full_records:
                         raise Failure('task_unavailable', 503)
-                    record = gateway.request('/api/editorial/records/' + slug + '/' + quote(hit['resource_id'], safe=''), None, gateway.klikai_url)
+                    record, error, detail['elapsed_ms'] = details[hit['resource_id']].result()
+                    if error is not None:
+                        raise error
                     frozen = editorial.freeze_records(discovery, [record], gateway.editorial_operator_policy_id)['bundle']
                     item = editorial.record_evidence(frozen)[0]
                     source = editorial.record_source(frozen, item['evidence_id'])
                     rendered = editorial.full_record_text(frozen, record)
                     matches.append(match(record, 'editorial_record', frozen['source_label'], rendered, source, locale, hit.get('score')))
-                except Failure as error:
+                    detail['status'] = 'ok'
+                except Exception as error:
                     source = {'title': hit['title'], 'source_label': definition['display_name'],
                               'excerpt': editorial.notice(locale) + '\n\n' + hit['snippet'],
                               'url': hit.get('url'), 'bibliography': {'rights_mode': hit['rights_mode']}}
                     item = match(hit, 'resource_record', definition['display_name'], hit['title'] + '\n\n' + hit['snippet'], source, locale, hit.get('score'))
                     item['context_eligible'] = False
-                    item['detail_status'] = 'timeout' if error.code == 'source_timeout' else 'unavailable'
+                    item['detail_status'] = 'timeout' if isinstance(error, Failure) and error.code == 'source_timeout' else 'unavailable'
                     matches.append(item)
                     coverage['status'] = 'partial'
+                    detail.update(status=item['detail_status'], **diagnostic(error, 'editorial_detail'))
+                finally:
+                    coverage['details'].append(detail)
             else:
                 if not isinstance(hit.get('snippet'), str) or not hit['snippet'].strip():
                     raise Failure('invalid_answer', 502)
@@ -166,6 +215,8 @@ def collect_source(gateway, family, definition):
         coverage.update(diagnostic(error, 'source_retrieval'))
         return matches, coverage
     finally:
+        if detail_started is not None:
+            coverage['detail_ms'] = round((time.monotonic() - detail_started) * 1000, 3)
         coverage['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
 
 
@@ -192,6 +243,8 @@ def collect_tools(gateway, family):
 
 def freeze(gateway, family, policy):
     started = time.monotonic()
+    stage_started = started
+    timings = {}
     coverage, found = [], []
     try:
         definitions = registry(gateway) if gateway.klikai_url else []
@@ -200,15 +253,19 @@ def freeze(gateway, family, policy):
     except Exception as error:
         definitions = []
         coverage.append({'family': 'configured_sources', 'status': 'timeout' if isinstance(error,Failure)and error.code == 'source_timeout' else 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'source_registry')})
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    timings['registry_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
+    stage_started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as details, ThreadPoolExecutor(max_workers=8) as pool:
         tool_future=pool.submit(collect_tools,gateway,family)
-        futures = [pool.submit(collect_source, gateway, family, row) for row in definitions]
+        futures = [pool.submit(collect_source, gateway, family, row, details) for row in definitions]
         for future in as_completed(futures):
             matches, status = future.result()
             found.extend(matches)
             coverage.append(status)
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
+    timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
+    stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.
     dedup = {}
     for item in sorted(found, key=lambda x: (-x['score'], x['source_slug'], x['external_id'], x['capture_sha256'])):
@@ -220,7 +277,9 @@ def freeze(gateway, family, policy):
     packet = {'version': PACKET, 'matches': external, 'retrieval': coverage}
     if len(canonical(packet).encode()) > MAX_BYTES:
         raise Failure('unified_capture_too_large', 413)
+    timings['evidence_preparation_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     child = None
+    stage_started = time.monotonic()
     try:
         response = gateway.request('/internal/pilot/freeze', {'question': family['question'],
             'context': family.get('context', ''), 'locale': family['locale'], 'task': 'reference',
@@ -260,9 +319,11 @@ def freeze(gateway, family, policy):
             coverage.extend(row for row in extra if isinstance(row, dict) and row.get('family') not in known)
     except (Failure, KeyError, TypeError, ValueError) as error:
         coverage.append({'family': 'reference_gateway', 'status': 'timeout' if isinstance(error, Failure) and error.code == 'source_timeout' else 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'gateway_freeze')})
+    timings['gateway_freeze_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     statuses = {row['status'] for row in coverage}
     retrieval = {'status': 'partial' if statuses & {'partial', 'timeout', 'unavailable', 'unsupported'} else 'complete',
-                 'coverage': coverage, 'elapsed_ms': round((time.monotonic() - started) * 1000, 3), 'returned_count': len(found)}
+                 'coverage': coverage, 'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
+                 'returned_count': len(found), 'timings': timings}
     if not found and retrieval['status'] == 'partial':retrieval['status'] = 'unavailable'
     body = {'contract': CONTRACT, 'task': 'reference', 'query': family['question'], 'locale': family['locale'],
             'matches': found, 'retrieval': retrieval, 'gateway_bundle': child}
@@ -271,7 +332,7 @@ def freeze(gateway, family, policy):
     pin = digest(body)
     return {'bundle': dict(body, snapshot_sha256=pin),
             'identity': {'contract': CONTRACT, 'captured_response_sha256': pin},
-            'timings': {'retrieval_and_freeze_ms': retrieval['elapsed_ms']}}
+            'timings': {'retrieval_and_freeze_ms': retrieval['elapsed_ms'], **timings}}
 
 
 def fallback(bundle, status, elapsed=0.0, error=None):

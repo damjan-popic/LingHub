@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {progressLabel,matchGroups,generationNotice,blockTextPresentation} from '../pilot_ui/core.mjs';
+import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,blockTextPresentation} from '../pilot_ui/core.mjs';
 
 test('normal question selectors are optional and default to the existing reference/Qwen route',()=>{
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
@@ -17,6 +17,24 @@ test('public progress distinguishes retrieval from generation without inventing 
   assert.equal(progressLabel({state:'running',progress:{stage:'retrieval'}},'reference'),'retrieving_sources');
   assert.equal(progressLabel({state:'running',progress:{stage:'generation'}},'reference'),'generating_grounded');
   assert.equal(progressLabel({state:'running'},'jezikovna_posta'),'deterministic_working');
+  assert.equal(progressLabel({state:'running',progress:{stage:'validation'}},'reference'),'validating');
+});
+test('cancellation distinguishes requested stage boundary from completed cancellation',()=>{
+  assert.equal(progressLabel({state:'running',cancel_requested:true,cancellation_mode:'stop_before_generation',progress:{stage:'retrieval'}},'reference'),'cancelling_before_generation');
+  assert.equal(progressLabel({state:'running',cancel_requested:true,cancellation_mode:'finish_current_operation'},'reference'),'cancelling_current_operation');
+  assert.equal(progressLabel({state:'cancelled',cancel_requested:true},'reference'),'cancelled');
+});
+test('early matches remain undecided and final usage updates all loaded pages without replacing captures',()=>{
+  const items=[{evidence_id:'first',snippet:'Frozen first',used_in_answer:false},{evidence_id:'page-two',snippet:'Frozen second',used_in_answer:false}];
+  const pending={short:{state:'running'}};
+  assert.equal(matchUseLabel(items[0],true),'match_pending');
+  assert.equal(settledMatchUsage(items,pending),items);
+  const final=settledMatchUsage(items,{short:{state:'complete',evidence:[{evidence_id:'page-two'}]}});
+  assert.deepEqual(final.map(item=>[item.evidence_id,item.snippet,item.used_in_answer]),[['first','Frozen first',false],['page-two','Frozen second',true]]);
+  assert.equal(items[1].used_in_answer,false);
+  assert.equal(matchUseLabel(final[1],false),'match_used');
+  assert.equal(matchUseLabel(final[0],false),'match_other');
+  assert(settledMatchUsage(final,{short:{state:'cancelled'}}).every(item=>item.used_in_answer===false));
 });
 test('match grouping preserves distinct sources and record identities without inventing used evidence',()=>{
   const record={evidence_id:'owned-a',source_slug:'jezikovna_posta',title:'Title <img onerror=x>',snippet:'Literal [1]',used_in_answer:false};

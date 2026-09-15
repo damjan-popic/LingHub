@@ -164,7 +164,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             else:r=db.execute('SELECT *FROM runs WHERE family_id=?AND tier=?AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1',(fid,tier)).fetchone()
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             is_unified=bundle.get('contract')==unified.CONTRACT and aid is None
-            if not r or(r['state']!='complete'and not(is_unified and r['state']=='running')):raise Failure('not_found',404)
+            if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)
             evidence=bundle['matches']if is_unified else json.loads(r['result']).get('evidence',[])
             if not any(unified.evidence_id(e)==eid for e in evidence):raise Failure('not_found',404)
             retained=historical_source(db,fid,r['id'],owner,eid)

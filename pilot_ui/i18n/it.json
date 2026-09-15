@@ -288,5 +288,8 @@
   "generation_no_support": "Non è stato trovato materiale sufficiente per una risposta supportata dalle fonti. Puoi consultare i risultati restituiti qui sotto.",
   "connected_resource": "Risorsa collegata",
   "retrieval_status_partial": "risultati parziali o dettagli incompleti",
-  "retrieval_status_not_documentary": "strumento linguistico o supporto; non è una fonte documentaria"
+  "retrieval_status_not_documentary": "strumento linguistico o supporto; non è una fonte documentaria",
+  "cancelling_before_generation": "Annullamento richiesto. Attendo la ricerca in corso; la risposta non verrà generata.",
+  "cancelling_current_operation": "Annullamento richiesto. L’operazione in corso deve terminare; la sua risposta sarà scartata.",
+  "match_pending": "Risultato restituito; l’utilizzo nella risposta non è ancora definito."
 }

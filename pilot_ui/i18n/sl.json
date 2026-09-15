@@ -288,5 +288,8 @@
   "generation_no_support": "Ni bilo najdenega dovolj podpornega gradiva za odgovor z viri. Vrnjene zadetke lahko pregledate spodaj.",
   "connected_resource": "Povezani vir",
   "retrieval_status_partial": "delni zadetki ali nepopolne podrobnosti",
-  "retrieval_status_not_documentary": "jezikovno orodje ali podpora; ni dokumentarni vir"
+  "retrieval_status_not_documentary": "jezikovno orodje ali podpora; ni dokumentarni vir",
+  "cancelling_before_generation": "Preklic je zahtevan. Končujem tekoče iskanje; priprava odgovora se ne bo začela.",
+  "cancelling_current_operation": "Preklic je zahtevan. Tekoča operacija se še zaključuje; njen odgovor bo zavržen.",
+  "match_pending": "Vrnjeni zadetek; uporaba v odgovoru še ni določena."
 }

@@ -1,0 +1,1129 @@
+{
+  "schema": "klikai.unified-answer-quality-baseline.v1",
+  "baseline_date": "2026-09-15",
+  "purpose": "Preserve the working CPU milestone and define later comparisons; no generation was performed for this baseline.",
+  "summary": {
+    "case_count": 12,
+    "historical_observations": 2,
+    "not_run": 10,
+    "new_model_calls": 0,
+    "linguistic_quality_passes_claimed": 0
+  },
+  "deployed_code_from_saved_receipt": {
+    "klikai": "90e909eae1bfd43de0374238a0badf74764997fc",
+    "linghub": "de9465b295dd2f75a915e333cac2149ac6fd0f6c"
+  },
+  "distribution_scope": "Curated test queries, complete authorized test outputs, record identities/hashes and review notes only. No credentials, accounts, family IDs, raw operational receipt or complete source-dataset dumps.",
+  "canonical_hash_encoding": "UTF-8 JSON ensure_ascii=False, sort_keys=True, separators=(comma, colon), no newline; ordinary file SHA-256 for file pins.",
+  "source_provenance_limits": [
+    "Retained normalized Luka records do not prove that all original XLSX/DOCX bytes survive.",
+    "source_date is retained metadata, not automatically the original question publication date.",
+    "A capture hash is not a live database-edition identity.",
+    "NOT_RUN expectations pin relevant source records, not current ranking or exhaustive retrieval.",
+    "The discrepancy case reports one independently inspected historical source’s explicit SP2001 rule/dictionary distinction, not an invented inter-source dispute."
+  ],
+  "review_dimensions": {
+    "retrieval_relevance": "Find relevant pinned record/sense through the normal reference route; separate irrelevant hits and do not infer corpus recall.",
+    "answer_correctness_completeness": "Check practical answer and necessary conditions against originals, independently of fluency.",
+    "citation_support": "Every factual claim must resolve to exact frozen support; distinguish cited records from other returned matches.",
+    "preservation_of_qualifications": "Retain sense/domain, variants, exceptions, draft/proposal status, uncertainty and historical date limits.",
+    "slovene_quality": "Review grammar, idiom, terminology, clarity and scope independently from mechanics.",
+    "latency": "Separate retrieval, generation and complete UI elapsed milliseconds; TTFT is unobserved for non-streaming responses."
+  },
+  "resources": {
+    "luka_release": {
+      "release_id": "luka-nonloris-2026-08-24-dc0b18c2b883",
+      "manifest": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/release-manifest.json",
+        "sha256": "c8a2aca7499bb43778b05ee59231b132edbc4174804b65a9ee39838a040d0fbd"
+      }
+    },
+    "svetovalnica": {
+      "manifest": {
+        "path": "/data/datasets/processed/lingstack/zrc/jezikovna-svetovalnica/releases/da0d1aaaff1fed68ea3e723cb7c2aa42b35197d1bbfa7203b144dddb853c025c/manifest.json",
+        "sha256": "63a31e8e3282ccc6a43da06c024b8510eea1466eedb93f4ff7c2cea87e8cdcb7"
+      }
+    },
+    "epravopis_2025": {
+      "manifest": {
+        "path": "/data/datasets/processed/lingstack/zrc/epravopis-2025/releases/1482975b3b520665a42766e5f778b05129da72a63a695b87db898b2bfb8bfa63/release-manifest.json",
+        "sha256": "e9f624ee74588fe494495a4a208c15fa7af3407d969b09bf701f1a10e634612c"
+      }
+    },
+    "matching_reference_manifest": {
+      "manifest": {
+        "path": "/data/scratch/damjan/zrc-model-sprint-20260910/fulltext/releases/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6/manifest.json",
+        "sha256": "93f18bf542acdad8a0185a29040feb2c05141bc462f6435cd89b6ba24e8f428b"
+      },
+      "scope": "Selected source_revision values match this retained fulltext manifest. Active runtime selection is a separate checkpoint-manifest observation."
+    },
+    "active_reference_configuration": {
+      "config_path": "/data/services/lingstack/releases/platform-control/unified-20260914-r3/config/gateway.json",
+      "safe_selected_fields": {
+        "source_release": "/data/services/lingstack/resources/zrc/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6-e8fedba1d58270a0/source/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6",
+        "vector_release": "/data/services/lingstack/resources/zrc/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6-e8fedba1d58270a0/dense/e8fedba1d58270a0e88e77a90718541e580ac010bb570cd0b4f324c3fb69a5c4",
+        "common_context_limit": 32768,
+        "collection_passages": 3578,
+        "collection_chunking_versions": [
+          "epravopis-annual-native-columns-v4",
+          "svetovalnica-public-body-v1"
+        ]
+      },
+      "manifest": {
+        "path": "/data/services/lingstack/resources/zrc/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6-e8fedba1d58270a0/source/8c4348c655fffd774276f5a520575c92e757f6b69d92679cb0b7775e510cbac6/manifest.json",
+        "sha256": "93f18bf542acdad8a0185a29040feb2c05141bc462f6435cd89b6ba24e8f428b"
+      },
+      "verification": "Existing configuration and manifest inspected without database queries, service or model calls; pinned source revisions match."
+    }
+  },
+  "source_records": {
+    "jezikovna_posta::jezikovna_posta:14101af6b312": {
+      "source_slug": "jezikovna_posta",
+      "source_label": "Jezikovna pošta / Druga pomoč",
+      "record_id": "jezikovna_posta:14101af6b312",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/jezikovna_posta.jsonl",
+        "sha256": "b67cde8bb8b577b9d992665ad8b5cd2e7e80e4adf1f2e09de3eb3f57d9657bf3"
+      },
+      "line": 117,
+      "canonical_record_sha256": "dcee43ef23cd12a67706e6c96babd1a849cf2f68d86a52dae8c0193966660885",
+      "source_date": "2026-08-14",
+      "record_kind": "qa",
+      "payload_content_sha256": "f5dd624d86024f9d4d2996d97e3ecfddf7ed31d5708deb50bb951bf1ce1b3261",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/jezikovna-posta/source.yaml",
+        "sha256": "dddffad19d92fe0e4c84b6dd3ee84f55b7092111af4125a18c555d4e1439e2e6"
+      }
+    },
+    "jezikovna_urgenca::jezikovna_urgenca:ebfbf8e8e6d8": {
+      "source_slug": "jezikovna_urgenca",
+      "source_label": "Jezikovna urgenca",
+      "record_id": "jezikovna_urgenca:ebfbf8e8e6d8",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/jezikovna_urgenca.jsonl",
+        "sha256": "01c293734c73d5d8fb49b7c7ec32bac7236af7ed861cfeb8da800108e792100c"
+      },
+      "line": 531,
+      "canonical_record_sha256": "ecd48197fbf396a3b07cefe958a2462141b65a22ef3d8d7c2c2d93b324bb32a4",
+      "source_date": "2026-08-11",
+      "record_kind": "qa",
+      "payload_content_sha256": "a7c92754bbf8e75cf148c01d4129661b9657cc47a914716347373753c4400fba",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/jezikovna-urgenca/source.yaml",
+        "sha256": "6bd9c0cbf538d26b5e121865170cb6f57a51cb001928ef18c60a23a61c1ee03b"
+      }
+    },
+    "jezikovna_urgenca::jezikovna_urgenca:35c24850cdc6": {
+      "source_slug": "jezikovna_urgenca",
+      "source_label": "Jezikovna urgenca",
+      "record_id": "jezikovna_urgenca:35c24850cdc6",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/jezikovna_urgenca.jsonl",
+        "sha256": "01c293734c73d5d8fb49b7c7ec32bac7236af7ed861cfeb8da800108e792100c"
+      },
+      "line": 390,
+      "canonical_record_sha256": "9f4f544612039e954688c7047e8602ac85706d8acfd5153e582f9198fffacc5a",
+      "source_date": "2026-08-11",
+      "record_kind": "qa",
+      "payload_content_sha256": "94718466b3a8da90f8535de6b4a611f0b4c9a97dd13c4ba449fc8dd98bc955af",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/jezikovna-urgenca/source.yaml",
+        "sha256": "6bd9c0cbf538d26b5e121865170cb6f57a51cb001928ef18c60a23a61c1ee03b"
+      }
+    },
+    "zkb::zkb:5c1f051f009d": {
+      "source_slug": "zkb",
+      "source_label": "Terminološke odločitve ZKB",
+      "record_id": "zkb:5c1f051f009d",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/zkb.jsonl",
+        "sha256": "e9a1af858891e4f1ad941a55f831fa0bf9306247f95283401e0c5a81aa06fc55"
+      },
+      "line": 45,
+      "canonical_record_sha256": "0f42cd6985337078f89e81d83f9c29fe60005432f303f3c37a9f2a3c342b088d",
+      "source_date": "2026-08-14",
+      "record_kind": "terminology_decision",
+      "payload_content_sha256": "10c4f7ede36622e4a094ab235c9bc9a7a55c37624fb4158e39e21d12cb372a2e",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/zkb/source.yaml",
+        "sha256": "f46d51901bc007e5e48b91b0b8b79ed0e96528ee2986a6907e014ae97f826270"
+      }
+    },
+    "solska::solska:abdb6f2b0975": {
+      "source_slug": "solska",
+      "source_label": "Šolska terminologija",
+      "record_id": "solska:abdb6f2b0975",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/solska.jsonl",
+        "sha256": "154969ee2e4d9656e8a562c5197db71d7322a1364b03e3aa7d3a5dc2a8c938b3"
+      },
+      "line": 19,
+      "canonical_record_sha256": "030266018554d18ebfbcf0f4778b93376da33cdd43570a6a4bb25e6a2cc7a9a1",
+      "source_date": "2026-08-24",
+      "record_kind": "terminology_decision",
+      "payload_content_sha256": "ad19610e0960be4fc8eda136061480916291a023f4e3cd0caf3e50c9d91e8734",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/solska/source.yaml",
+        "sha256": "c31bbe3798c05d16048f097af63c57131c4d02d42a803c9cdcc86e7cc0120eb4"
+      }
+    },
+    "zvezek::zvezek:8": {
+      "source_slug": "zvezek",
+      "source_label": "Zvezek standardiziranih terminov",
+      "record_id": "zvezek:8",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/zvezek.jsonl",
+        "sha256": "1071c96b47c710cbba0fb8d76c7269387d34f415cf5250f2f4595d0265d652cf"
+      },
+      "line": 8,
+      "canonical_record_sha256": "144ca0d3750e19a9ac263147e2e42753574095534a518d62e01eca1cdad980bc",
+      "source_date": "2026-06-29",
+      "record_kind": "terminology_concept",
+      "payload_content_sha256": "26f09182af7354f39ceb1793d1627d68fc1a9e91626ac5752b29a146590aa150",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/zvezek/source.yaml",
+        "sha256": "4150deea9c2f5d7b0b58f4862cb7eaeb7ac0cae64e084c0659fb67e638b81e51"
+      }
+    },
+    "crossterm::crossterm:6": {
+      "source_slug": "crossterm",
+      "source_label": "CrossTerm",
+      "record_id": "crossterm:6",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/crossterm.jsonl",
+        "sha256": "6baf42069e088befd9f33eb32932dff55768fcc5fc12cd88dda7380f1f903a77"
+      },
+      "line": 6,
+      "canonical_record_sha256": "8de2af4cfce2e0f03d7b1b5ad9af33f1fa26ac5bbd327958f44ace51f0ba5bfa",
+      "source_date": "2026-06-29",
+      "record_kind": "terminology_concept",
+      "payload_content_sha256": "51567d10dd62c79bfa9e34efbf40421f7355c92468165994292be793c8711f02",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/crossterm/source.yaml",
+        "sha256": "67f94e3927831ea46a8910571322e9a4415d307f23374f869e709bf364f7f837"
+      }
+    },
+    "jezikovna_urgenca::jezikovna_urgenca:15a446ebb9a5": {
+      "source_slug": "jezikovna_urgenca",
+      "source_label": "Jezikovna urgenca",
+      "record_id": "jezikovna_urgenca:15a446ebb9a5",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/jezikovna_urgenca.jsonl",
+        "sha256": "01c293734c73d5d8fb49b7c7ec32bac7236af7ed861cfeb8da800108e792100c"
+      },
+      "line": 2,
+      "canonical_record_sha256": "438ffdc7dd4b9c36f66e976494f461423972903f97b934e72dcac86442766d48",
+      "source_date": "2026-08-11",
+      "record_kind": "qa",
+      "payload_content_sha256": "653438496450d49678d6679302aaedf220d4b6a89bdf10ed05285e7bf8b5d972",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/jezikovna-urgenca/source.yaml",
+        "sha256": "6bd9c0cbf538d26b5e121865170cb6f57a51cb001928ef18c60a23a61c1ee03b"
+      }
+    },
+    "tretji_sektor::tretji_sektor:7747943aad41": {
+      "source_slug": "tretji_sektor",
+      "source_label": "Terminologija tretjega sektorja",
+      "record_id": "tretji_sektor:7747943aad41",
+      "file": {
+        "path": "/data/datasets/raw/lingstack/klikai/luka-nonloris/releases/luka-nonloris-2026-08-24-dc0b18c2b883/normalized/tretji_sektor.jsonl",
+        "sha256": "3a5cfd1cd2c4b4e5643903eeb60d57b1365968ce134d442d4e4747c43add6650"
+      },
+      "line": 1,
+      "canonical_record_sha256": "61a41863279fbe887c2a6271bf50b066aecb70971893fa7e8a90d0c141fc9e5d",
+      "source_date": "2026-08-14",
+      "record_kind": "terminology_decision",
+      "payload_content_sha256": "2576d6d09f14f2d0ea3fa7768cd9b6c4ba6cdfcb45995f79146144523d399e7d",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/tretji-sektor/source.yaml",
+        "sha256": "61780cc74c6aa3fa91893576066ec7c728fe3d58b00d1cb7ef7a7f8d90fb3e00"
+      }
+    },
+    "zadrege::ODG-A1C4": {
+      "source_slug": "zadrege",
+      "source_label": "Ontologija KLIKai: jezikovne zadrege in odgovori",
+      "record_id": "ODG-A1C4",
+      "file": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/zadrege/processed/answers.v1.jsonl",
+        "sha256": "9b4aeed3fc0d8a1b95464805460e7b297d0184e0171afa5b6718cae54b298ccf"
+      },
+      "line": 2,
+      "canonical_record_sha256": "9f849f2becbd899e223f84780747763ce3881442fe08601b2dff52ab620859fb",
+      "review_status": "osnutek – potreben partnerski/uredniški pregled",
+      "primary_code": "A1c4",
+      "source_text_sha256": "1c01e043208e87352420060d551a55804b8218cf73d4f5feaa4b83009ee2bb7c",
+      "source_config": {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/data/sources/zadrege/source.yaml",
+        "sha256": "35658be683eab9afa9c8c85a90f7e85790762a9a30c2e3c282174d855ba8ba4b"
+      }
+    },
+    "jezikovna_svetovalnica::jezikovna_svetovalnica:13:post:13:chars:0-732:59f27b993448fdf6": {
+      "source_slug": "jezikovna_svetovalnica",
+      "source_label": "Jezikovna svetovalnica",
+      "record_id": "jezikovna_svetovalnica:13:post:13:chars:0-732:59f27b993448fdf6",
+      "file": {
+        "path": "/data/datasets/processed/lingstack/zrc/jezikovna-svetovalnica/releases/da0d1aaaff1fed68ea3e723cb7c2aa42b35197d1bbfa7203b144dddb853c025c/passages.jsonl",
+        "sha256": "b18c6bc6845d62a116985d1d91404be853a43186ab21427e6af96b8903235d04"
+      },
+      "line": 6,
+      "canonical_record_sha256": "f0da510f81c36aabfaf481d58ba1b71248395eb29a81691fdfb25b79f321b79f",
+      "source_id": "jezikovna_svetovalnica:13",
+      "source_revision": "59f27b993448fdf6de5d2c903c364150f81ec5a50c6b91ece8f76d6ac6d0cc7d",
+      "date": "2016-09-19T12:34:01.019Z",
+      "signed_date_text": [
+        "september 2014"
+      ],
+      "edition": null,
+      "role": "expert_answer",
+      "url": "https://svetovalnica.zrc-sazu.si/topic/13/samostalnik-referent-v-pomenu-nanosnik",
+      "source_text_sha256": "5daa21f73aba991cc3ca81cb2b57e2854b8810fd5ae1b6f8a61a4f5170a9ca64"
+    },
+    "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:0-906:559f0cce04c6ae75": {
+      "source_slug": "jezikovna_svetovalnica",
+      "source_label": "Jezikovna svetovalnica",
+      "record_id": "jezikovna_svetovalnica:10:post:10:chars:0-906:559f0cce04c6ae75",
+      "file": {
+        "path": "/data/datasets/processed/lingstack/zrc/jezikovna-svetovalnica/releases/da0d1aaaff1fed68ea3e723cb7c2aa42b35197d1bbfa7203b144dddb853c025c/passages.jsonl",
+        "sha256": "b18c6bc6845d62a116985d1d91404be853a43186ab21427e6af96b8903235d04"
+      },
+      "line": 1,
+      "canonical_record_sha256": "12955a5ad5e554d25a88ae5b2902192e2d0f5c8b3117b62701f0b5982cf7e6df",
+      "source_id": "jezikovna_svetovalnica:10",
+      "source_revision": "559f0cce04c6ae75c07355db5761418e68c24e9ddf05924b558c5437c86dafc0",
+      "date": "2016-09-19T12:23:16.249Z",
+      "signed_date_text": [
+        "januar 2014"
+      ],
+      "edition": null,
+      "role": "expert_answer",
+      "url": "https://svetovalnica.zrc-sazu.si/topic/10/zapis-pridevnikov-na-ov-ev-oz-in-iz-imen-v-stalnih-besednih-zvezah",
+      "source_text_sha256": "310ef32e7fc6a36e4f34e9d23b22b06f5880d30b26b8c44e65a81c3ee6d3e595"
+    },
+    "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:765-1700:559f0cce04c6ae75": {
+      "source_slug": "jezikovna_svetovalnica",
+      "source_label": "Jezikovna svetovalnica",
+      "record_id": "jezikovna_svetovalnica:10:post:10:chars:765-1700:559f0cce04c6ae75",
+      "file": {
+        "path": "/data/datasets/processed/lingstack/zrc/jezikovna-svetovalnica/releases/da0d1aaaff1fed68ea3e723cb7c2aa42b35197d1bbfa7203b144dddb853c025c/passages.jsonl",
+        "sha256": "b18c6bc6845d62a116985d1d91404be853a43186ab21427e6af96b8903235d04"
+      },
+      "line": 2,
+      "canonical_record_sha256": "d3f89f8111a5faedd770f1e26e0c11ee1a4caf9739794c1baec830b9f1b64825",
+      "source_id": "jezikovna_svetovalnica:10",
+      "source_revision": "559f0cce04c6ae75c07355db5761418e68c24e9ddf05924b558c5437c86dafc0",
+      "date": "2016-09-19T12:23:16.249Z",
+      "signed_date_text": [
+        "januar 2014"
+      ],
+      "edition": null,
+      "role": "expert_answer",
+      "url": "https://svetovalnica.zrc-sazu.si/topic/10/zapis-pridevnikov-na-ov-ev-oz-in-iz-imen-v-stalnih-besednih-zvezah",
+      "source_text_sha256": "52bc557595b81062fcc9a09b8f53a4610368e65c641bd458d506a2652b30d063"
+    },
+    "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:1547-2463:559f0cce04c6ae75": {
+      "source_slug": "jezikovna_svetovalnica",
+      "source_label": "Jezikovna svetovalnica",
+      "record_id": "jezikovna_svetovalnica:10:post:10:chars:1547-2463:559f0cce04c6ae75",
+      "file": {
+        "path": "/data/datasets/processed/lingstack/zrc/jezikovna-svetovalnica/releases/da0d1aaaff1fed68ea3e723cb7c2aa42b35197d1bbfa7203b144dddb853c025c/passages.jsonl",
+        "sha256": "b18c6bc6845d62a116985d1d91404be853a43186ab21427e6af96b8903235d04"
+      },
+      "line": 3,
+      "canonical_record_sha256": "09dbfae9567b33c1e76ae109889c7c26a1723ec4930749418c7e5a39edbf9f52",
+      "source_id": "jezikovna_svetovalnica:10",
+      "source_revision": "559f0cce04c6ae75c07355db5761418e68c24e9ddf05924b558c5437c86dafc0",
+      "date": "2016-09-19T12:23:16.249Z",
+      "signed_date_text": [
+        "januar 2014"
+      ],
+      "edition": null,
+      "role": "expert_answer",
+      "url": "https://svetovalnica.zrc-sazu.si/topic/10/zapis-pridevnikov-na-ov-ev-oz-in-iz-imen-v-stalnih-besednih-zvezah",
+      "source_text_sha256": "5872175bf1b929584e19d75d0c0a7b8e5cd57608b4c7b5282002b921e30e3635"
+    },
+    "epravopis::epravopis:annual_pdf_2025:entry:p10:c0:l0:passage:458c14a847a16aacd8d0": {
+      "source_slug": "epravopis",
+      "source_label": "ePravopis 2025",
+      "record_id": "epravopis:annual_pdf_2025:entry:p10:c0:l0:passage:458c14a847a16aacd8d0",
+      "file": {
+        "path": "/data/datasets/processed/lingstack/zrc/epravopis-2025/releases/1482975b3b520665a42766e5f778b05129da72a63a695b87db898b2bfb8bfa63/passages.jsonl",
+        "sha256": "a95a0cebfaf62de2e4dd8fb5aa2df6319bed25b603b6ee08a68c37bcd1fc6fee"
+      },
+      "line": 24,
+      "canonical_record_sha256": "1e5091d477e8014023c3e0639bddf01b645656a966b5b0f29db62dc0eb1a66f3",
+      "source_id": "epravopis:annual_pdf_2025:entry:p10:c0:l0",
+      "source_revision": "0d6e0688a2e14329cbcf953d7e24a4b276fc238b412700cad930d607c3eacffd",
+      "date": "2026-06-30",
+      "edition": "2025",
+      "source_status": "Predlog",
+      "role": "dictionary_entry",
+      "coverage": "annual_additions",
+      "cumulative_dictionary": false,
+      "pravopis_8_rules_collection": false,
+      "url": "https://omp.zrc-sazu.si/zalozba/catalog/book/2271",
+      "source_text_sha256": "1685535b81b9d88c297f4b8f724d5ac5d48de82e00bacbcca4087b85304eb3a4"
+    }
+  },
+  "retrieval_and_context_limits": {
+    "scope": "Pinned code and saved r3 coverage; runtime overrides belong to checkpoint configuration.",
+    "source_pins": [
+      {
+        "path": "/data/projects/lingstack-dev/linghub-human-testing-20260911/pilot_backend/unified.py",
+        "sha256": "28ca49719f4ad997df64bc021a03faf2eebcc38d8b8172d0a9cc866e7f0dbbdc"
+      },
+      {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/tools/zrc_reference/pilot_runtime.py",
+        "sha256": "55e30d6d58f742fb6a91cd278edbf700435a6a0702495b32acf6d3648fc94765"
+      },
+      {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/tools/zrc_reference/pilot_contracts.py",
+        "sha256": "84162a5bc17b6e4264aa3cce3a88a5113220f34dcc00a0e3cbc026beacf16eea"
+      },
+      {
+        "path": "/data/projects/lingstack-dev/klikai-human-testing-20260911/tools/zrc_reference/pilot_cpu_input.py",
+        "sha256": "a5fa7317dce3c20d156e72f797f029511240c1c80d6c0e8dfd86302ac724b3c4"
+      }
+    ],
+    "per_source_return_caps": {
+      "terminology": 20,
+      "posta": 3,
+      "urgenca": 3,
+      "answer_bank_and_other_documentary": 10,
+      "reference_gateway_reported_per_family_upper_bound": 38
+    },
+    "pagination": {
+      "ui_page_size": 20,
+      "owned_api_limit_range": [
+        1,
+        50
+      ],
+      "corpus_total": null,
+      "meaning": "Only frozen returned matches are paginated, not the whole upstream corpus."
+    },
+    "signed_evidence": {
+      "context_passage_limit_default": 10,
+      "context_passage_limit_allowed_range": [
+        6,
+        16
+      ],
+      "short_character_budget": 14000,
+      "long_character_budget": 30000
+    },
+    "cpu_compact_input": {
+      "profile": "complete-source-groups-compact-supports-v1",
+      "short_maximum_source_revision_groups": 2,
+      "short_maximum_prompt_tokens": 4096,
+      "long_maximum_source_revision_groups": 3,
+      "long_maximum_prompt_tokens": 6144,
+      "meaning": "Only selected complete source-revision groups reach the CPU prompt; all returned matches remain saved/browsable. Selection may shrink under token/validity constraints."
+    },
+    "short_generation_bounds": {
+      "target_words": [
+        40,
+        100
+      ],
+      "max_visible_words": 120,
+      "max_claims": 4,
+      "max_output_tokens": 768,
+      "reasoning_token_budget": 0
+    },
+    "common_context_limit": 32768,
+    "long_generation_bounds": {
+      "target_words": [
+        400,
+        900
+      ],
+      "max_visible_words": 1100,
+      "max_output_tokens": 4096
+    }
+  },
+  "future_execution": {
+    "status": "OPT_IN_NOT_EXECUTED",
+    "reuse_plan": "After explicit generation authorization, use the existing signed-in normal UI or pilot harness: submit these unchanged queries with reference/default provider, capture full answer, actual provider/artifact, citations/returned identities and separate timings; apply all six review dimensions against pinned originals. Save new observations separately. Existing unified-acceptance is a fixed two-case operational smoke, not a twelve-case quality runner. Do not replay deployment/update requests for evaluation."
+  },
+  "cases": [
+    {
+      "case_id": "U01",
+      "query": "agriturismo",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "cross-source editorial",
+      "expected_evidence": [
+        "jezikovna_posta::jezikovna_posta:14101af6b312",
+        "jezikovna_urgenca::jezikovna_urgenca:ebfbf8e8e6d8"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Translate the establishment as turistična kmetija, distinguish kmečki turizem as a tourism type/figurative establishment, and keep azienda agricola separate.",
+      "prohibited_overclaims": [
+        "Do not claim fresh current-law verification.",
+        "Do not transfer the preceding azienda-agricola recommendation to agriturismo."
+      ],
+      "observation_status": "HISTORICAL_OBSERVATION",
+      "review": {
+        "retrieval_relevance": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Both cited editorial records are directly relevant; two returned matches were recorded."
+        },
+        "answer_correctness_completeness": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "The practical translation is supported. Legal wording is source-derived, not independently verified as current law."
+        },
+        "citation_support": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Saved citation mechanics passed. The embedded Pošta quotation starts with a sentence about azienda agricola, creating a scope risk next to agriturismo."
+        },
+        "preservation_of_qualifications": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Tourism-type versus metaphorical-establishment distinction is omitted; the recommendation is repeated and today is not explicitly attributed to the historical source."
+        },
+        "slovene_quality": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Understandable Slovene; repeated conclusion and copied sentence-boundary spacing weaken clarity."
+        },
+        "latency": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "One historical sample: retrieval 9438.236 ms; generation 194054.364 ms; browser 204141 ms. TTFT unavailable."
+        }
+      },
+      "historical_observation": {
+        "receipt": {
+          "path": "/data/scratch/damjan/klikai-human-testing-20260911/linghub/editorial-live-delivery-unified-20260914-r3.json",
+          "sha256": "e0ebf1238b3cca56b4e14108d8438417864455b722d984e009f0155fcb46e900"
+        },
+        "json_pointer": "/acceptance/cases/0",
+        "mechanics_status": "PASS",
+        "generated_answer_text": "Strokovni termin za italijanski izraz agriturismo je turistična kmetija, kar je tudi definicija v zakonu.\n\nVir navaja (izvirno): «Če gre za uradno in informativno besedilo za javno rabo svetujemo prvo možnost.Za agriturismo so v preteklosti pogosteje uporabljali izraz kmečki turizem, danes pa svetujemo različico turistična kmetija, vendar ne zaradi njene elegantnosti.»\n\nDanes se za obrate svetuje uporaba različice turistična kmetija, ne zaradi njene elegantnosti, ampak zaradi uveljavljenosti v zakonodaji.",
+        "generated_answer_utf8_sha256": "2afb813e9ccad7d9140ad57405139c836c9dcd36b4caed60eb496c36d02be19c",
+        "actual_provider": {
+          "device": "cpu",
+          "dtype": "bfloat16",
+          "repository": "Qwen/Qwen3.8-27B",
+          "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+          "runtime": "transformers"
+        },
+        "retrieval_ms": 9438.236,
+        "generation_ms": 194054.364,
+        "browser_total_ms": 204141,
+        "time_to_first_generated_content_ms": null,
+        "returned_match_count": 2,
+        "uncited_returned_match_count": 0,
+        "cited_evidence": [
+          {
+            "source_slug": "jezikovna_posta",
+            "record_id": "jezikovna_posta:14101af6b312",
+            "evidence_id": "unified:4ac4df017af5ad214b5bfcfa91f996a2dcb7794b356c6ccee322996f03df1b15",
+            "local_number": 1,
+            "capture_sha256": "1ed7a6de3143c8689e6a56492cd9fa9005276b171f13f2973c450d69f2634082"
+          },
+          {
+            "source_slug": "jezikovna_urgenca",
+            "record_id": "jezikovna_urgenca:ebfbf8e8e6d8",
+            "evidence_id": "unified:3a40b8efa500b231dafead1404e9bfdf276d03c4db2b7dd0a7df413eccd99bde",
+            "local_number": 2,
+            "capture_sha256": "6ec16f658ea2c6496043a73689bdc5da39e57f6293dbe2478dd4bde3cf924fd5"
+          }
+        ],
+        "saved_original_checks": [
+          {
+            "source_slug": "jezikovna_posta",
+            "resource_id": "jezikovna_posta:14101af6b312",
+            "original_content_verified": true,
+            "frozen_reopen": true
+          }
+        ],
+        "frozen_reopen_status": "PASS",
+        "quality_status": "PRELIMINARY_SOURCE_REVIEW_WITH_CONCERNS_NOT_A_PASS"
+      }
+    },
+    {
+      "case_id": "U02",
+      "query": "consiglio d'amministrazione",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "cross-source institutional terminology",
+      "expected_evidence": [
+        "jezikovna_urgenca::jezikovna_urgenca:35c24850cdc6",
+        "zkb::zkb:5c1f051f009d"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Use upravni odbor for the queried body; preserve one-/two-tier governance distinctions and the possible separate advisory sense of upravni svet.",
+      "prohibited_overclaims": [
+        "Do not prohibit upravni svet in every context.",
+        "Do not interchange nadzorni odbor/nadzorni svet across systems."
+      ],
+      "observation_status": "HISTORICAL_OBSERVATION",
+      "review": {
+        "retrieval_relevance": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Urgenca and ZKB are relevant. Thirty-six other returned matches were unused; some concern other council senses."
+        },
+        "answer_correctness_completeness": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "The direct translation is supported. The concise answer omits ZKB governance-system distinctions."
+        },
+        "citation_support": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Both cited records support upravni odbor for this query; citation mechanics do not establish a universal prohibition of upravni svet."
+        },
+        "preservation_of_qualifications": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "The unqualified second sentence needs the query’s scope: Urgenca allows a distinct advisory body and ZKB distinguishes systems."
+        },
+        "slovene_quality": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "Clear, grammatical but terse; explicitly scoped wording would preserve qualifications better."
+        },
+        "latency": {
+          "status": "PRELIMINARY_SOURCE_REVIEW",
+          "note": "One historical sample: retrieval 9732.888 ms; generation 110130.332 ms; browser 120802 ms. TTFT unavailable."
+        }
+      },
+      "historical_observation": {
+        "receipt": {
+          "path": "/data/scratch/damjan/klikai-human-testing-20260911/linghub/editorial-live-delivery-unified-20260914-r3.json",
+          "sha256": "e0ebf1238b3cca56b4e14108d8438417864455b722d984e009f0155fcb46e900"
+        },
+        "json_pointer": "/acceptance/cases/1",
+        "mechanics_status": "PASS",
+        "generated_answer_text": "Consiglio d'amministrazione se prevede kot upravni odbor.\n\nRaba termina upravni svet ni ustrezna.",
+        "generated_answer_utf8_sha256": "8b481eac5c10e6e4aff89160d25f5dae6b021f2532bfe89b16972a5584a4b8ed",
+        "actual_provider": {
+          "device": "cpu",
+          "dtype": "bfloat16",
+          "repository": "Qwen/Qwen3.8-27B",
+          "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+          "runtime": "transformers"
+        },
+        "retrieval_ms": 9732.888,
+        "generation_ms": 110130.332,
+        "browser_total_ms": 120802,
+        "time_to_first_generated_content_ms": null,
+        "returned_match_count": 38,
+        "uncited_returned_match_count": 36,
+        "cited_evidence": [
+          {
+            "source_slug": "jezikovna_urgenca",
+            "record_id": "jezikovna_urgenca:35c24850cdc6",
+            "evidence_id": "unified:5556d5cf7f7b558b691a48c3278db4293298ca63eb640043aba3e0e8d12cb1c4",
+            "local_number": 1,
+            "capture_sha256": "7bb520a3d7e8624204c4819cdc5ebf6bc77114a426290788abd409512262272b"
+          },
+          {
+            "source_slug": "zkb",
+            "record_id": "zkb:5c1f051f009d",
+            "evidence_id": "unified:2c361d874e93d0309ee074cef68138998fbfcd542a7969da03b507c81d70dbe5",
+            "local_number": 2,
+            "capture_sha256": "fa6d496eec1bf7c0825e6409e00b0a2205037a818d0ef97c86057af7c8490fe6"
+          }
+        ],
+        "saved_original_checks": [
+          {
+            "source_slug": "zkb",
+            "resource_id": "zkb:5c1f051f009d",
+            "original_content_verified": true,
+            "frozen_reopen": true
+          },
+          {
+            "source_slug": "jezikovna_urgenca",
+            "resource_id": "jezikovna_urgenca:35c24850cdc6",
+            "original_content_verified": true,
+            "frozen_reopen": true
+          }
+        ],
+        "frozen_reopen_status": "PASS",
+        "quality_status": "PRELIMINARY_SOURCE_REVIEW_WITH_CONCERNS_NOT_A_PASS"
+      }
+    },
+    {
+      "case_id": "U03",
+      "query": "učiteljskemu zboru",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "inflected Šolska terminology",
+      "expected_evidence": [
+        "solska::solska:abdb6f2b0975"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Find učiteljski zbor from the inflected form; preserve profesorski zbor as a source alternative and lowercase body names.",
+      "prohibited_overclaims": [
+        "Do not conflate collegio dei docenti with all personale docente.",
+        "Prior source-specific acceptance is not a default-route generated observation."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null,
+      "prior_evidence_note": "Prior source-specific terminology lookup evidence exists; the default-route generated case remains NOT_RUN."
+    },
+    {
+      "case_id": "U04",
+      "query": "Belopeška kotlina",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "exact geographic terminology",
+      "expected_evidence": [
+        "zvezek::zvezek:8"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Preserve the Conca di Fusine / Belopeška kotlina equivalence and geographic scope.",
+      "prohibited_overclaims": [
+        "Do not invent declensions, IPA, official status or other geographic facts."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null,
+      "prior_evidence_note": "Prior source-specific terminology lookup evidence exists; the default-route generated case remains NOT_RUN."
+    },
+    {
+      "case_id": "U05",
+      "query": "presoja krajinske skladnosti",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "domain-specific CrossTerm terminology",
+      "expected_evidence": [
+        "crossterm::crossterm:6"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Preserve the urbanism/planning equivalence and the distinct Italian and Friulian language labels if shown.",
+      "prohibited_overclaims": [
+        "Do not claim Friulian morphology was performed.",
+        "Do not infer current legal procedure from a retained definition."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null,
+      "prior_evidence_note": "Prior source-specific terminology lookup evidence exists; the default-route generated case remains NOT_RUN."
+    },
+    {
+      "case_id": "U06",
+      "query": "Kako naj prevedemo rifiuti da demolizione?",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "full natural-language editorial question",
+      "expected_evidence": [
+        "jezikovna_urgenca::jezikovna_urgenca:15a446ebb9a5"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Answer the exact original question with the retained Gradbeni odpadki translation and original drawer.",
+      "prohibited_overclaims": [
+        "Do not invent waste classifications or legal guidance beyond this brief source."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U07",
+      "query": "Kako pišemo imena dogodkov, prireditev in srečanj?",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "connected non-Luka answer bank / draft",
+      "expected_evidence": [
+        "zadrege::ODG-A1C4"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Retrieve the connected draft; distinguish proper event/festival names from generic event types and keep review-required status.",
+      "prohibited_overclaims": [
+        "Do not call the draft approved or final normative advice.",
+        "Do not flatten all event names to one capitalization rule."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U08",
+      "query": "Ali za referent v pomenu nanosnik velja kategorija živosti?",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "connected ZRC reference / uncertainty",
+      "expected_evidence": [
+        "jezikovna_svetovalnica::jezikovna_svetovalnica:13:post:13:chars:0-732:59f27b993448fdf6"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Preserve animate usage in specialist works and the source uncertainty about the missing dictionary label.",
+      "prohibited_overclaims": [
+        "Do not turn morda po pomoti into a proven dictionary error.",
+        "Do not generalize to unrelated senses of referent."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U09",
+      "query": "Kako sklanjamo ime 24 ur Le Mansa?",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "ePravopis / proposal status",
+      "expected_evidence": [
+        "epravopis::epravopis:annual_pdf_2025:entry:p10:c0:l0:passage:458c14a847a16aacd8d0"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Use only displayed plural paradigms and explicitly retain Predlog and the annual 2025 edition.",
+      "prohibited_overclaims": [
+        "Do not promote a proposal to final normative validity.",
+        "Do not call annual additions a cumulative dictionary or Pravopis 8 rules.",
+        "Do not invent stress or phonetic analysis."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U10",
+      "query": "assemblea dei soci",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "institutional ambiguity / qualifications",
+      "expected_evidence": [
+        "tretji_sektor::tretji_sektor:7747943aad41"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Distinguish občni zbor for associations/nonprofits/cooperatives, skupščina for companies, and contextual zbor; preserve inclusive-language qualifications.",
+      "prohibited_overclaims": [
+        "Do not give one institution-independent equivalent.",
+        "Do not call every proposal a standardized term."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U11",
+      "query": "Kako pišemo pitagorov izrek in parkinsonova bolezen?",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "historical source-reported discrepancy",
+      "expected_evidence": [
+        "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:0-906:559f0cce04c6ae75",
+        "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:765-1700:559f0cce04c6ae75",
+        "jezikovna_svetovalnica::jezikovna_svetovalnica:10:post:10:chars:1547-2463:559f0cce04c6ae75"
+      ],
+      "expectation_status": "PINNED_RETAINED_SOURCE",
+      "intended_behaviour": "Explain the historical source’s explicit SP2001 rules/dictionary divergence, semantic categories, variants and exceptions.",
+      "prohibited_overclaims": [
+        "Do not invent disagreement between Luka sources.",
+        "Do not claim the historical source is a fresh 2026 norm check.",
+        "Do not reduce its distinctions to always uppercase or always lowercase."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    },
+    {
+      "case_id": "U12",
+      "query": "zzqv_baseline_neizpričani_izraz_20260915",
+      "request": {
+        "task": "reference",
+        "model": "qwen",
+        "locale": "sl",
+        "source_selection": null
+      },
+      "coverage": "weak/missing evidence limitation control",
+      "expected_evidence": [],
+      "expectation_status": "NEGATIVE_CONTROL_NO_KNOWN_SOURCE",
+      "intended_behaviour": "If no relevant frozen support exists, state the limit; if incidental matches exist, explain why they do not establish a meaning.",
+      "prohibited_overclaims": [
+        "Do not invent meaning, translation, etymology, frequency or citations.",
+        "Do not assert exhaustive absence from all collections without evidence."
+      ],
+      "observation_status": "NOT_RUN",
+      "review": {
+        "retrieval_relevance": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "answer_correctness_completeness": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "citation_support": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "preservation_of_qualifications": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "slovene_quality": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        },
+        "latency": {
+          "status": "NOT_REVIEWED",
+          "note": null
+        }
+      },
+      "historical_observation": null
+    }
+  ]
+}

@@ -13,7 +13,7 @@ VERSION_FIELDS=('evidence_packet_hash','source_snapshot_ids','vector_snapshot_id
 PROVIDER_SCOPES={'shared','own'}
 PROVIDER_SELECTIONS={'auto','qwen','gemma'}
 PROVIDER_ROUTE_REASONS={'shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback'}
-PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','selected_provider_unavailable','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
+PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','provider_terminal_rejection','selected_provider_unavailable','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
 
 def public_routing(execution):
     """Only fixed routing labels, never endpoint or authentication metadata."""

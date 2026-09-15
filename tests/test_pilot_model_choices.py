@@ -175,6 +175,29 @@ def test_attempt_diagnostics_are_bounded_and_ignore_unknown_fields():
     assert provider_diagnostics({'provider_failure':{'code':{},'selection':[]}})=={}
 
 
+def test_explicit_own_terminal_rejection_keeps_safe_failure_and_one_attempt(tmp_path):
+    gateway=ChoiceGateway();app=app_choices(tmp_path,gateway);request=gateway.request
+    attempt={'route':'own_cpu','model':'synthetic-own-Qwen','stage':'generation','status':'rejected','http_code':422}
+    def rejected(path,payload,base=None):
+        result=request(path,payload,base)
+        if path=='/internal/pilot/generate':
+            result.update(answer_kind='source_only',provider_failure={'code':'provider_terminal_rejection','selection':'qwen'},
+                provider_attempts=[{**attempt,'private_body':'PRIVATE_BODY'}])
+        return result
+    gateway.request=rejected
+    with TestClient(app,base_url=ORIGIN)as client:
+        family,job=submit(app,client,login(client),'qwen')
+        assert family['model']=='qwen'and family['short']['generation_status']=='not_generated'
+        assert family['short']['generation']['error_code']=='provider_terminal_rejection'
+        assert family['matches_available']
+        assert [payload['model']for path,payload,_ in gateway.calls if path=='/internal/pilot/generate']==['qwen']
+        with app.state.store.connect()as db:
+            stored=json.loads(db.execute('SELECT result FROM runs WHERE id=?',(job['run_id'],)).fetchone()[0])
+        assert stored['provider_attempts']==[attempt]
+        assert stored['provider_failure']=={'code':'provider_terminal_rejection','selection':'qwen'}
+        assert 'PRIVATE_BODY'not in json.dumps(stored)and'provider_attempts'not in family['short']
+
+
 @pytest.mark.parametrize('body,expected',[
     ({'error':{'code':'ambiguous_remote_generation','message':'PRIVATE_TOKEN'}},'ambiguous_remote_generation'),
     ({'detail':{'code':'selected_provider_unavailable','traceback':'PRIVATE_ENDPOINT'}},'selected_provider_unavailable'),

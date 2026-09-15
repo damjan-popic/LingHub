@@ -235,6 +235,8 @@ def freeze(gateway, family, policy):
                 raise Failure('invalid_answer', 502)
             view=item['source']
             item['source']={key:deepcopy(view[key])for key in ('title','url','locator','status','edition','publication_scope','annual_scope')if key in view}
+            if 'status' not in view and 'source_status' in view:
+                item['source']['status']=deepcopy(view['source_status'])
             item['source'].update(source_label=view.get('source_label')or item.get('source_label')or item['source_slug'],
                 excerpt=view.get('excerpt',view.get('snippet','')),
                 bibliography=deepcopy(view.get('bibliography',view.get('bibliographic',{}))))
@@ -302,6 +304,11 @@ def generate(gateway, bundle, tier, model, parent=None):
         if (not isinstance(evidence, list) or not isinstance(citations, list) or any(
                 not isinstance(row, dict) or evidence_id(row) not in known for row in evidence + citations)):
             raise Failure('unknown_citation', 502)
+        for row in evidence + citations:
+            aliases = [row[key] for key in ('evidence_id', 'passage_id', 'citation_id')
+                       if row.get(key) is not None and row[key] != '']
+            if any(not isinstance(value, str) or value != evidence_id(row) for value in aliases):
+                raise Failure('unknown_citation', 502)
         # A successful transport or an excerpt with badges is not generation.
         generated = result.get('answer_kind') in {'generated', 'mixed'} and result.get('status') in {'validated', 'partial'}
         if generated and not evidence:raise Failure('unknown_citation', 502)
@@ -310,6 +317,10 @@ def generate(gateway, bundle, tier, model, parent=None):
             markers=set(re.findall(r'\[(\d{1,3})\]',result.get('answer_md','')))
             if not markers<=numbers:raise Failure('unknown_citation',502)
             for i,row in enumerate(evidence):
+                # The producer's source view uses citation_id. Expose the same
+                # validated identity to canonical UI/probe consumers without
+                # removing its aliases or changing signed prose/source metadata.
+                row['evidence_id']=evidence_id(row)
                 row['local_number']=row.get('local_number')or row.get('number')or i+1
             # The gateway's signed generated prose uses claim-to-source mappings,
             # not necessarily textual [n] markers. Preserve its signed answer;

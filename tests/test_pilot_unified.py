@@ -205,6 +205,48 @@ def test_generation_failures_preserve_retrieved_results_without_generated_succes
         assert client.get('/api/pilot/families/'+fid+'/sources/'+page['items'][0]['evidence_id']).status_code==200
 
 
+@pytest.mark.parametrize('aliases', [
+    {'evidence_id':'known'}, {'citation_id':'known'}, {'passage_id':'known'},
+    {'evidence_id':'known','citation_id':'known','passage_id':'known'},
+])
+def test_generated_evidence_normalizes_validated_alias_without_rewriting_source_or_prose(aliases):
+    from types import SimpleNamespace
+    evidence=dict(aliases,source_slug='synthetic',external_id='original-id',
+        source_revision='retained-revision',bibliographic={'date':'2026-09-14'},snippet='Exact original.')
+    result={'status':'validated','answer_kind':'generated','answer_md':'Exact signed claim.',
+        'short_answer':'Exact signed claim.','display_sha256':'signed-display-pin',
+        'display_blocks':[{'block_id':'C1','text':'Exact signed claim.','evidence_ids':['known']}],
+        'evidence':[deepcopy(evidence)],'citations':[{'claim_id':'C1','evidence_id':'known'}]}
+    before=deepcopy(result)
+    body={'contract':unified.CONTRACT,'locale':'sl','matches':[{'evidence_id':'known'}],
+        'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
+    output=unified.generate(SimpleNamespace(request=lambda *args:result),
+        dict(body,snapshot_sha256=digest(body)),'short','qwen')
+    assert output['generation']['status']=='generated'
+    assert output['evidence']==[dict(evidence,evidence_id='known',local_number=1)]
+    for key in ('answer_md','short_answer','display_sha256','display_blocks','citations'):
+        assert output[key]==before[key]
+    assert {eid for block in output['display_blocks']for eid in block['evidence_ids']}=={
+        row['evidence_id']for row in output['evidence']}
+    assert all(type(row['local_number'])is int for row in output['evidence'])
+
+
+@pytest.mark.parametrize('field', ['evidence','citations'])
+@pytest.mark.parametrize('conflict', ['other-known','unknown',17])
+def test_generated_evidence_rejects_conflicting_aliases_even_when_preferred_id_is_frozen(field,conflict):
+    from types import SimpleNamespace
+    result={'status':'validated','answer_kind':'generated','answer_md':'Claim [1].',
+        'evidence':[{'evidence_id':'known'}],'citations':[{'evidence_id':'known'}]}
+    result[field][0]['citation_id']=conflict
+    body={'contract':unified.CONTRACT,'locale':'sl','matches':[{'evidence_id':'known'},{'evidence_id':'other-known'}],
+        'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
+    output=unified.generate(SimpleNamespace(request=lambda *args:result),
+        dict(body,snapshot_sha256=digest(body)),'short','qwen')
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+    assert output['evidence']==[]and output['generation_status']=='not_generated'
+
+
 def test_source_timeout_is_partial_and_does_not_suppress_other_sources_or_generation(tmp_path):
     gateway=UnifiedGateway(source_failure='solska');app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as client:
@@ -283,6 +325,34 @@ def test_missing_explicit_tool_context_preserves_other_retrieval(tmp_path):
         assert 'tool_evidence'not in next(payload for path,payload,_ in gateway.calls if path=='/internal/pilot/freeze')
 
 
+@pytest.mark.parametrize('status', ['Predlog',None])
+def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypatch,status):
+    from pathlib import Path
+    from types import SimpleNamespace
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from tools.zrc_reference.pilot_evidence import source_views
+    passage={'source_slug':'epravopis','title':'Synthetic dictionary entry','url':None,
+        'text':'Synthetic original source text.','passage_id':'synthetic-entry-passage',
+        'source_id':'synthetic-entry','source_revision':'a'*64,'span':{},
+        'edition':'2025','source_status':status}
+    view=source_views([passage])[0][0]
+    assert view['source_status']==status and 'status'not in view
+    response={'bundle':{'synthetic':True},'matches':[{'evidence_id':view['citation_id'],
+        'source_slug':'epravopis','source':view}]}
+    def request(path,payload):
+        assert path=='/internal/pilot/freeze'
+        return deepcopy(response)
+    monkeypatch.setattr(unified,'registry',lambda gateway:[])
+    monkeypatch.setattr(unified,'collect_tools',lambda gateway,family:(None,None))
+    gateway=SimpleNamespace(klikai_url='synthetic-unused',request=request)
+    frozen=unified.freeze(gateway,{'question':'synthetic','locale':'sl'}, {})['bundle']
+    drawer=unified.source(frozen,view['citation_id'])
+    assert drawer['status']==status
+    assert drawer['excerpt']==passage['text']and drawer['edition']=='2025'
+    assert view==source_views([passage])[0][0]
+
+
 def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_path,monkeypatch):
     """Real producer→signed gateway→validated composition→owned pilot consumer.
 
@@ -291,7 +361,7 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
     """
     from pathlib import Path
     from unittest.mock import Mock
-    import sys
+    import subprocess,sys
     root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
@@ -327,7 +397,9 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
                 raw=composition()
                 raw['claims'][0]['support_ids']=ids
                 clients['qwen'].post.return_value['choices'][0]['message']['content']=json.dumps(raw)
-                return runtime.generate(GenerateRequest(**payload))
+                result=runtime.generate(GenerateRequest(**payload))
+                self.producer_result=deepcopy(result)
+                return result
             return super().request(path,payload,base)
 
     gateway=ActualContractGateway()
@@ -340,6 +412,32 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
         assert clients['qwen'].post.call_count==1 and clients['gemma'].post.call_count==0
         assert short['blocks'][0]['evidence_ids']==[row['evidence_id']for row in short['citations']]
         assert '['not in short['answer_md']
+        # Exercise the real source_views producer shape, rather than replacing it
+        # with the canonical evidence_id shape used by synthetic browser fixtures.
+        original=gateway.producer_result
+        assert original['evidence']and all('citation_id'in row and'evidence_id'not in row for row in original['evidence'])
+        assert short['evidence']==[dict(row,evidence_id=row['citation_id'],local_number=i+1)
+                                  for i,row in enumerate(original['evidence'])]
+        for field in ('answer_md','short_answer','citations'):
+            assert short[field]==original[field]
+        assert short['blocks']==original['display_blocks']
+        helper=Path(__file__).resolve().parents[1]/'pilot_ui/core.mjs'
+        rendered=subprocess.run(['node','--input-type=module','-e',
+            "import fs from 'node:fs';"
+            "const {blockTextPresentation}=await import(process.argv[1]);"
+            "const tier=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "process.stdout.write(JSON.stringify(tier.blocks.map(block=>{"
+            "const view=blockTextPresentation(tier,block);return {"
+            "text:view.parts.map(part=>part.text).join(''),"
+            "citations:(view.separateCitations||[]).map(part=>({"
+            "evidence_id:part.evidence.evidence_id,citation_id:part.evidence.citation_id,number:part.number}))};})));",
+            helper.as_uri()],input=json.dumps(short),text=True,capture_output=True,check=True,timeout=10)
+        rendered=json.loads(rendered.stdout)
+        assert [row['text']for row in rendered]==[row['text']for row in original['display_blocks']]
+        for block,row in zip(short['blocks'],rendered):
+            assert [citation['evidence_id']for citation in row['citations']]==block['evidence_ids']
+            assert all(citation['evidence_id']==citation['citation_id']and type(citation['number'])is int
+                       for citation in row['citations'])
         rows=user.get('/api/pilot/families/'+fid+'/matches').json()['items']
         assert len(rows)>len(short['evidence'])and sum(row['used_in_answer']for row in rows)==2
         assert {row['capture_sha256']for row in gateway.frozen['matches']if row['capture_sha256']}=={
@@ -352,5 +450,6 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
                 drawer=response.json()
                 assert 'A necessary qualification absent from the snippet.'in drawer['excerpt']
                 assert 'draft'in drawer['excerpt']and drawer['bibliography']['source_status']=='draft'
+                assert drawer['status']=='draft'
         login(user,'unified-other')
         assert user.get('/api/pilot/families/'+fid+'/matches').status_code==404

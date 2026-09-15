@@ -29,6 +29,8 @@ class Domain:
     def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
         self.unified_answers=unified_answers
+        self.default_model='auto'if'auto'in self.models else'qwen'if'qwen'in self.models else self.models[0]
+        self.comparison_models=tuple(model for model in self.models if model in {'qwen','gemma'})
     def require_generation(self,models):
         if self.generation_admission:self.generation_admission(models)
     def answer_actions(self,run):
@@ -73,7 +75,7 @@ class Domain:
     def create_family(self,owner,payload):
         fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key'})
         original_question=text(payload.get('question'),5000);q=original_question.strip();context=text(payload.get('context',''),3000)
-        locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model','qwen')
+        locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model',self.default_model)
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
         if not q or locale not in {'sl','it'}or interface not in {'sl','it'}or input_language not in {'sl','it','mixed','und'}or task not in self.tasks or model not in self.models:raise Failure('invalid_request')
         checked_key(payload.get('idempotency_key'))
@@ -193,15 +195,15 @@ class Domain:
         fields(payload,{'family_id','blind','tier','idempotency_key'})
         if not isinstance(payload.get('family_id'),str):raise Failure('invalid_request')
         fid=payload.get('family_id');blind=payload.get('blind',True)
-        if type(blind)is not bool or payload.get('tier','short')!='short' or set(self.models)!={'qwen','gemma'}:raise Failure('comparison_unavailable')
+        if type(blind)is not bool or payload.get('tier','short')!='short' or set(self.comparison_models)!={'qwen','gemma'}:raise Failure('comparison_unavailable')
         with self.store.tx()as db:
             f=self.owned(db,'families',fid,owner)
             if f['task']!='reference':raise Failure('comparison_unavailable')
             def action():
                 parent=db.execute("SELECT *FROM runs WHERE family_id=?AND tier='short'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
                 if parent and parent['state']=='complete'and not self.answer_actions(parent):raise Failure('comparison_unavailable',409)
-                self.require_generation(self.models)
-                self.admit(db,owner,2);aid=uid();mapping=dict(zip(('A','B'),secrets.SystemRandom().sample(list(self.models),2)))
+                self.require_generation(self.comparison_models)
+                self.admit(db,owner,2);aid=uid();mapping=dict(zip(('A','B'),secrets.SystemRandom().sample(list(self.comparison_models),2)))
                 prior=bool(db.execute('SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND delivered IS NOT NULL',(fid,)).fetchone()or db.execute('SELECT 1 FROM assignments a JOIN runs r ON r.assignment_id=a.id WHERE a.family_id=?AND (a.revealed IS NOT NULL OR a.blind=0)AND r.delivered IS NOT NULL',(fid,)).fetchone())
                 db.execute('INSERT INTO assignments VALUES(?,?,?,?,?,?,?,?,?)',(aid,owner,fid,int(blind),canonical(mapping),None,int(prior),'short',stamp()))
                 for side,model in mapping.items():

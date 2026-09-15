@@ -22,6 +22,27 @@ export function tierBlocks(tier, kind = 'short') {
 export function isCpuTask(task) {
   return ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'].includes(task);
 }
+export function modelChoiceKey(model) {
+  return {auto:'model_auto',qwen:'model_qwen',gemma:'model_gemma'}[model] || 'model';
+}
+export function modelAvailabilityKey(observed) {
+  if (!observed || typeof observed.available !== 'boolean') return 'model_readiness_unknown';
+  if (observed.status === 'CPU_LOADING') return 'model_loading';
+  if (observed.status === 'CPU_BUSY') return 'model_queue_busy';
+  if (!observed.available) return 'model_not_available';
+  if (observed.status === 'SHARED_READY' || observed.provider_scope === 'shared' && observed.device === 'gpu') return 'model_shared_ready';
+  return observed.device === 'cpu' ? observed.cpu?.loaded === false && observed.cpu?.availability === 'lazy' ? 'model_cpu_lazy' : 'model_cpu_ready' : observed.device === 'gpu' ? 'model_own_gpu_ready' : 'model_ready';
+}
+export function savedProvider(tier) {
+  // A reopened answer uses its saved result, never today's readiness/routing.
+  const provider=tier?.generation?.provider || {}, identity=tier?.model_identity || {}, execution=tier?.execution || {};
+  const actual=provider.repository || provider.model_id || identity.repository || identity.model_id || '';
+  const device=provider.device || execution.device, scope=provider.provider_scope || execution.provider_scope;
+  const backend=device === 'gpu' ? scope === 'shared' ? 'backend_shared_gpu' : scope === 'own' ? 'backend_own_gpu' : 'backend_gpu' : device === 'cpu' ? 'backend_cpu' : null;
+  const reason=provider.route_reason || execution.route_reason;
+  const reasons=new Set(['shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback']);
+  return {model:typeof actual === 'string' ? actual : '',backend,reason:reasons.has(reason) ? 'route_'+reason : null};
+}
 export function progressLabel(job, task, tier='short') {
   if (jobState(job) === 'cancelled') return 'cancelled';
   if (job?.cancel_requested === true && pendingStates.has(jobState(job))) return job.cancellation_mode === 'stop_before_generation' ? 'cancelling_before_generation' : 'cancelling_current_operation';
@@ -56,6 +77,7 @@ export function matchGroups(items, source='') {
 }
 export function generationNotice(tier) {
   const status = tier?.generation?.status;
+  if (tier?.generation?.error_code === 'ambiguous_remote_generation') return 'generation_outcome_unknown';
   if (status === 'generated') return 'generated_grounded';
   if (status === 'failed' || status === 'unavailable') return 'generation_fallback';
   if (status === 'no_support') return 'generation_no_support';

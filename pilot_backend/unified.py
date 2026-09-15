@@ -40,9 +40,13 @@ def score(value):
 def diagnostic(error, stage):
     """Fixed public classifications; exception messages may contain private data."""
     codes = {'answer_unavailable', 'source_timeout', 'invalid_answer', 'unknown_citation',
-             'incomplete_unified_capture', 'resource_changed'}
+             'incomplete_unified_capture', 'resource_changed', 'generation_waiting_capacity',
+             'provider_identity_missing', 'provider_selection_mismatch'}
+    from .human_feedback import PROVIDER_FAILURE_CODES
+    codes |= PROVIDER_FAILURE_CODES
     code = error.code if isinstance(error, Failure) and error.code in codes else 'invalid_gateway_response'
-    return {'error_code': code, 'stage': stage}
+    status=getattr(error,'http_status',None)
+    return {'error_code': code, 'stage': stage, **({'http_status':status}if type(status)is int and 100<=status<=599 else{})}
 
 
 def match(capture, kind, label, text, source, locale, weight=0):
@@ -354,6 +358,7 @@ def generate(gateway, bundle, tier, model, parent=None):
     if bundle['gateway_bundle'] is None:return fallback(bundle, 'unavailable')
     started = time.monotonic()
     stage = 'provider_request'
+    result = None
     try:
         result = gateway.request('/internal/pilot/generate', {'bundle': bundle['gateway_bundle'],
             'tier': tier, 'model': model, 'parent_answer': parent})
@@ -372,6 +377,17 @@ def generate(gateway, bundle, tier, model, parent=None):
                 raise Failure('unknown_citation', 502)
         # A successful transport or an excerpt with badges is not generation.
         generated = result.get('answer_kind') in {'generated', 'mixed'} and result.get('status') in {'validated', 'partial'}
+        if generated:
+            stage='provider_identity'
+            execution=result.get('execution',{});identity=result.get('model_identity',{})
+            if not isinstance(execution,dict)or not isinstance(identity,dict):raise Failure('provider_identity_missing',502)
+            selection=execution.get('selection');scope=execution.get('provider_scope')
+            if model=='auto':
+                if selection!='auto'or scope not in {'shared','own'}or not(identity.get('repository')or identity.get('model_id')):
+                    raise Failure('provider_identity_missing',502)
+            elif selection is not None or scope is not None:
+                if selection!=model or scope!='own':raise Failure('provider_selection_mismatch',502)
+            stage='citation_validation'
         if generated and not evidence:raise Failure('unknown_citation', 502)
         if generated:
             numbers={str(row.get('local_number')or row.get('number')or i+1)for i,row in enumerate(evidence)}
@@ -399,7 +415,10 @@ def generate(gateway, bundle, tier, model, parent=None):
                         raise Failure('unknown_citation',502)
         elapsed = round((time.monotonic() - started) * 1000, 3)
         if not generated:
-            out = fallback(bundle, 'failed', elapsed, {'error_code':'generation_not_admitted','stage':'provider_result'})
+            from .human_feedback import provider_diagnostics
+            diagnostics=provider_diagnostics(result)
+            out = fallback(bundle, 'failed', elapsed, {'error_code':diagnostics.get('provider_failure',{}).get('code','generation_not_admitted'),'stage':'provider_result'})
+            out.update(diagnostics)
             for key in ('model_identity', 'execution', 'usage'):
                 if key in result:out[key] = result[key]
             from .human_feedback import public_execution
@@ -414,7 +433,11 @@ def generate(gateway, bundle, tier, model, parent=None):
         result['generation']['provider'] = {**public.get('model_identity', {}), **public.get('execution', {})}
         return result
     except (Failure, KeyError, TypeError, ValueError) as error:
-        return fallback(bundle, 'failed', round((time.monotonic() - started) * 1000, 3), diagnostic(error,stage))
+        out = fallback(bundle, 'failed', round((time.monotonic() - started) * 1000, 3), diagnostic(error,stage))
+        if isinstance(result, dict):
+            from .human_feedback import provider_diagnostics
+            out.update(provider_diagnostics(result))
+        return out
 
 
 def source(bundle, eid):

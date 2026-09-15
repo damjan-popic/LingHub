@@ -90,8 +90,8 @@ def probe_candidate_adoption(store_path, *, operator_password, new_signing_key,
             assert response.status_code == 200
             fid = response.json()['family']['answer_family_id']
             # Only the probe-created job is run; no retained work is dispatched.
-            with store.connect() as db:
-                job = dict(db.execute('SELECT * FROM jobs WHERE id=?', (response.json()['job']['job_id'],)).fetchone())
+            job = app.state.jobs.claim('model')
+            assert job and job['id'] == response.json()['job']['job_id'], 'Unexpected disposable probe job'
             app.state.jobs.execute(job)
             response = client.get('/api/pilot/families/'+fid, headers=edge)
             assert response.status_code == 200 and response.json()['short']['state'] == 'complete'

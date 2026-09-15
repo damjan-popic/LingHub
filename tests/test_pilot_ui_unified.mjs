@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,blockTextPresentation} from '../pilot_ui/core.mjs';
+import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,modelChoiceKey,modelAvailabilityKey,savedProvider,generationNotice,blockTextPresentation} from '../pilot_ui/core.mjs';
 
-test('normal question selectors are optional and default to the existing reference/Qwen route',()=>{
+test('normal question selectors are optional and default to reference and offer automatic or exact own-model choices',()=>{
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
   const options=html.slice(html.indexOf('<div id="options"'),html.indexOf('</form>',html.indexOf('<div id="options"')));
   assert(options.startsWith('<div id="options" class="composer-options" hidden>'));
   for(const name of ['model','task','input-language'])assert(options.includes('id="'+name+'"'),name);
   assert.match(options,/<select id="task"><option value="reference"/);
-  assert.match(options,/<select id="model"><option value="qwen"/);
+  assert.match(options,/<select id="model"><option value="auto"/);
+  for(const value of ['qwen','gemma'])assert(options.includes('value="'+value+'"'));
+  assert(options.includes('Qwen3.8-27B')&&options.includes('Gemma-4-31B-it'));
   assert.equal((html.match(/id="question"/g)||[]).length,1);
 });
 test('public progress distinguishes retrieval from generation without inventing streaming',()=>{
@@ -18,6 +20,25 @@ test('public progress distinguishes retrieval from generation without inventing 
   assert.equal(progressLabel({state:'running',progress:{stage:'generation'}},'reference'),'generating_grounded');
   assert.equal(progressLabel({state:'running'},'jezikovna_posta'),'deterministic_working');
   assert.equal(progressLabel({state:'running',progress:{stage:'validation'}},'reference'),'validating');
+});
+test('optional model readiness distinguishes shared GPU, own CPU and bounded loading',()=>{
+  assert.equal(modelChoiceKey('auto'),'model_auto');
+  assert.equal(modelChoiceKey('qwen'),'model_qwen');
+  assert.equal(modelChoiceKey('gemma'),'model_gemma');
+  assert.equal(modelAvailabilityKey({available:true,status:'SHARED_READY',device:'gpu'}),'model_shared_ready');
+  assert.equal(modelAvailabilityKey({available:true,status:'CPU_READY',device:'cpu'}),'model_cpu_ready');
+  assert.equal(modelAvailabilityKey({available:true,status:'CPU_LOADING',device:'cpu'}),'model_loading');
+  assert.equal(modelAvailabilityKey({available:true,status:'CPU_READY',device:'cpu',cpu:{loaded:false,availability:'lazy'}}),'model_cpu_lazy');
+  assert.equal(modelAvailabilityKey({available:false,status:'CPU_BUSY',device:'cpu'}),'model_queue_busy');
+  assert.equal(modelAvailabilityKey({available:false,status:'GENERATION_WAITING_CAPACITY'}),'model_not_available');
+});
+test('answer provider labels come only from the saved actual result, not its selected alias',()=>{
+  assert.deepEqual(savedProvider({model:'auto'}),{model:'',backend:null,reason:null});
+  assert.deepEqual(savedProvider({model:'qwen'}),{model:'',backend:null,reason:null});
+  const saved={model:'auto',generation:{provider:{model_id:'synthetic-shared-model',device:'gpu',provider_scope:'shared',route_reason:'shared_ready'}}};
+  assert.deepEqual(savedProvider(saved),{model:'synthetic-shared-model',backend:'backend_shared_gpu',reason:'route_shared_ready'});
+  assert.deepEqual(savedProvider({model:'gemma',generation:{provider:{repository:'synthetic-own-gemma',device:'cpu',provider_scope:'own',route_reason:'own_cpu_fallback'}}}),{model:'synthetic-own-gemma',backend:'backend_cpu',reason:'route_own_cpu_fallback'});
+  assert.equal(savedProvider({model:'auto',execution:{device:'gpu',route_reason:'PRIVATE_ENDPOINT'},model_identity:{repository:'synthetic'}}).reason,null);
 });
 test('cancellation distinguishes requested stage boundary from completed cancellation',()=>{
   assert.equal(progressLabel({state:'running',cancel_requested:true,cancellation_mode:'stop_before_generation',progress:{stage:'retrieval'}},'reference'),'cancelling_before_generation');
@@ -48,6 +69,7 @@ test('provider failure and no support are not called generated answers',()=>{
   assert.equal(generationNotice({generation:{status:'generated'}}),'generated_grounded');
   for(const status of ['failed','unavailable'])assert.equal(generationNotice({generation:{status}}),'generation_fallback');
   assert.equal(generationNotice({generation:{status:'no_support'}}),'generation_no_support');
+  assert.equal(generationNotice({generation:{status:'failed',error_code:'ambiguous_remote_generation'}}),'generation_outcome_unknown');
   assert.equal(generationNotice({generation_status:'not_generated'}),null);
 });
 test('only resolved citation numbers acquire source controls',()=>{

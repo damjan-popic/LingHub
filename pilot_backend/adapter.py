@@ -26,7 +26,24 @@ class Gateway:
             with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
                 editorial_auth=bool(self.editorial_operator_policy_id and base==self.klikai_url and path.startswith('/api/editorial/records/'))
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
-                    if response.status_code!=200:raise Failure('answer_unavailable',503)
+                    if response.status_code!=200:
+                        failure=Failure('answer_unavailable',503)
+                        if base is None and path=='/internal/pilot/generate':
+                            # Preserve useful classifications without retaining an
+                            # upstream response body, URL, credential or traceback.
+                            from .human_feedback import PROVIDER_FAILURE_CODES
+                            raw=bytearray()
+                            for chunk in response.iter_bytes():
+                                raw.extend(chunk[:32769-len(raw)])
+                                if len(raw)>32768:break
+                            try:
+                                data=json.loads(raw)if len(raw)<=32768 else{}
+                                detail=(data.get('error')or data.get('detail')or data.get('provider_failure')or{})if isinstance(data,dict)else{}
+                                code=detail.get('code')if isinstance(detail,dict)else None
+                                if isinstance(code,str)and code in PROVIDER_FAILURE_CODES:failure=Failure(code,503)
+                            except (ValueError,TypeError):pass
+                            failure.http_status=response.status_code
+                        raise failure
                     content=bytearray()
                     for chunk in response.iter_bytes():
                         content.extend(chunk)
@@ -38,7 +55,7 @@ class Gateway:
         except (httpx.HTTPError,ValueError,TypeError):raise Failure('answer_unavailable',503)from None
     def capabilities(self):
         """Short, read-only readiness observation; never probes by generating text."""
-        unavailable={'generation':{'status':'GENERATION_WAITING_CAPACITY','models':{name:{'available':False,'status':'GENERATION_WAITING_CAPACITY'}for name in ('qwen','gemma')}},'dense':{'available':False,'status':'DENSE_ENCODING_WAITING_CAPACITY'},'lexical':{'available':False},'tools':self.tool_capabilities()}
+        unavailable={'generation':{'status':'GENERATION_WAITING_CAPACITY','models':{name:{'available':False,'status':'GENERATION_WAITING_CAPACITY'}for name in ('auto','qwen','gemma')}},'dense':{'available':False,'status':'DENSE_ENCODING_WAITING_CAPACITY'},'lexical':{'available':False},'tools':self.tool_capabilities()}
         try:
             with httpx.Client(base_url=self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(2,connect=.5))as client:
                 with client.stream('GET','/internal/pilot/capabilities',headers={'X-Pilot-Internal-Token':self.token})as response:
@@ -48,12 +65,14 @@ class Gateway:
                         raw.extend(chunk)
                         if len(raw)>32768:return unavailable
                     value=json.loads(raw)
-            for name in ('qwen','gemma'):
+            for name in ('auto','qwen','gemma'):
                 item=value.get('generation',{}).get('models',{}).get(name,{})
                 ready=item.get('available')is True
-                safe={'available':ready,'status':item.get('status')if item.get('status')in {'AVAILABLE','CPU_LOADING','CPU_BUSY','CPU_READY','GENERATION_WAITING_CAPACITY'}else'AVAILABLE'if ready else'GENERATION_WAITING_CAPACITY','device':item.get('device')if item.get('device')in {'cpu','gpu'}else None,'gpu_available':item.get('gpu_available')is True}
+                safe={'available':ready,'status':item.get('status')if item.get('status')in {'AVAILABLE','SHARED_READY','CPU_LOADING','CPU_BUSY','CPU_READY','GENERATION_WAITING_CAPACITY'}else'AVAILABLE'if ready else'GENERATION_WAITING_CAPACITY','device':item.get('device')if item.get('device')in {'cpu','gpu'}else None,'gpu_available':item.get('gpu_available')is True}
+                from .human_feedback import public_routing
+                safe.update(public_routing(item))
                 cpu=item.get('cpu',{})
-                if isinstance(cpu,dict):safe['cpu']={k:v for k,v in cpu.items()if(k=='available'and type(v)is bool)or(k=='phase'and isinstance(v,str)and v in {'ready','loading','running','idle','busy','unavailable'})or(k in {'queued_or_running','queue_capacity'}and type(v)is int and 0<=v<=100)}
+                if isinstance(cpu,dict):safe['cpu']={k:v for k,v in cpu.items()if(k in {'available','loaded'}and type(v)is bool)or(k=='availability'and v=='lazy')or(k=='phase'and isinstance(v,str)and v in {'ready','loading','running','generating','idle','busy','unavailable'})or(k in {'queued_or_running','queue_capacity'}and type(v)is int and 0<=v<=100)}
                 unavailable['generation']['models'][name]=safe
             if any(m['available']for m in unavailable['generation']['models'].values()):unavailable['generation']['status']='AVAILABLE'
             for name in ('dense','lexical'):

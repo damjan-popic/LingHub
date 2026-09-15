@@ -36,6 +36,8 @@ def config_checked(config):
     c.setdefault('unified_answers',False)
     if type(c['unified_answers'])is not bool:raise ValueError('Unified answers capability must be boolean')
     if c['unified_answers']and not c.get('klikai_url'):raise ValueError('Unified answers require a configured KLIKai API')
+    if not isinstance(c['models'],(list,tuple))or not c['models']or any(not isinstance(model,str)or model not in {'auto','qwen','gemma'}for model in c['models'])or len(set(c['models']))!=len(c['models']):raise ValueError('Configure explicit supported model choices')
+    if'auto'in c['models']and not c['unified_answers']:raise ValueError('Automatic model choice requires unified answers')
     if type(c['editorial_full_records'])is not bool:raise ValueError('Editorial full-record capability must be boolean')
     c.setdefault('editorial_operator_policy_id',None)
     if c['editorial_operator_policy_id']is not None and(c['editorial_operator_policy_id']!=OPERATOR_POLICY_ID or not c['editorial_full_records']or not c.get('klikai_url')):raise ValueError('Invalid local editorial operator policy')
@@ -104,7 +106,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if not password_gate.acquire(blocking=False):raise Failure('login_busy',429)
         try:return await run_in_threadpool(fn,*args)
         finally:password_gate.release()
-    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change'])},'capabilities':{'tasks':list(domain.tasks),'models':list(domain.models),'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.models)=={'qwen','gemma'}}}
+    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change'])},'capabilities':{'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}}
     def set_session(token,s):
         result=JSONResponse(session_result(s));result.set_cookie(cookie,token,httponly=True,secure=config['secure_cookies'],samesite='strict',path=base+'/'if base else'/',max_age=auth.absolute);return result
     @app.get(base+'/health')
@@ -136,7 +138,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/capabilities')
     async def capabilities(request:Request):
         user(request)
-        result={'tasks':list(domain.tasks),'models':list(domain.models),'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.models)=={'qwen','gemma'}}
+        result={'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
         if hasattr(adapter,'capabilities'):result.update(await run_in_threadpool(adapter.capabilities))
         return result
     @app.post(api+'/families')

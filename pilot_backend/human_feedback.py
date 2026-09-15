@@ -3,12 +3,44 @@ import json
 import hashlib
 import csv
 import io
+import re
 from pathlib import Path
 from .store import canonical,digest
 
 SCALE='answer-quality-1-5-v1'
 DISPLAY_VERSION='pilot-paragraph-display-v1'
 VERSION_FIELDS=('evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','generation_profile_id','family_basis_hash','model_identity','execution')
+PROVIDER_SCOPES={'shared','own'}
+PROVIDER_SELECTIONS={'auto','qwen','gemma'}
+PROVIDER_ROUTE_REASONS={'shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback'}
+PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','selected_provider_unavailable','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
+
+def public_routing(execution):
+    """Only fixed routing labels, never endpoint or authentication metadata."""
+    if not isinstance(execution,dict):return {}
+    allowed={'provider_scope':PROVIDER_SCOPES,'selection':PROVIDER_SELECTIONS,'route_reason':PROVIDER_ROUTE_REASONS}
+    return {key:value for key,value in execution.items()if key in allowed and isinstance(value,str)and value in allowed[key]}
+
+def provider_diagnostics(result):
+    """Bounded attempt accounting; response bodies and credentials are excluded."""
+    out={};attempts=result.get('provider_attempts')
+    if isinstance(attempts,list)and len(attempts)<=2:
+        safe=[]
+        for attempt in attempts:
+            if not isinstance(attempt,dict):continue
+            row={key:value for key,value in attempt.items()if
+                 (key=='route'and isinstance(value,str)and value in {'shared','own_cpu','own_gpu'})or
+                 (key=='status'and isinstance(value,str)and value in {'started','completed','rejected','unknown'})or
+                 (key=='http_code'and type(value)is int and 100<=value<=599)or
+                 (key=='stage'and isinstance(value,str)and value in {'generation'})or
+                 (key=='model'and isinstance(value,str)and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_. /-]{0,299}',value))}
+            if row:safe.append(row)
+        out['provider_attempts']=safe
+    failure=result.get('provider_failure')
+    if isinstance(failure,dict)and isinstance(failure.get('code'),str)and failure.get('code')in PROVIDER_FAILURE_CODES:
+        out['provider_failure']={'code':failure['code']}
+        if isinstance(failure.get('selection'),str)and failure.get('selection')in PROVIDER_SELECTIONS:out['provider_failure']['selection']=failure['selection']
+    return out
 
 def display_paragraphs(result,tier,locale):
     paragraphs=[]
@@ -60,6 +92,7 @@ def public_execution(result):
     execution=result.get('execution')
     if isinstance(execution,dict):
         out['execution']={k:v for k,v in execution.items()if (k=='device'and isinstance(v,str)and v in {'cpu','gpu'})or(k in {'dtype','runtime','revision'}and isinstance(v,str)and len(v)<=100)}
+        out['execution'].update(public_routing(execution))
     return out
 
 def csv_export(data):

@@ -1,9 +1,43 @@
 # Ordinary question and retained matches
 
 The normal composer contains one question field and submit action. It uses the
-existing `reference` task and Qwen provider selection. Model, source-specific
+existing `reference` task. When automatic routing is configured, **Samodejno** is
+the default selection; legacy configurations without it retain their configured
+own-model default. Model, source-specific
 lookup tools and language overrides remain under **More options**. The deployed
 runtime enables unified retrieval; users do not select an extra generation mode.
+
+The optional model choices are **Samodejno**, **Qwen3.8-27B**, and
+**Gemma-4-31B-it**. Automatic routing prefers the compatible, ready shared model,
+then the project's own Qwen. Explicit Qwen and Gemma choices remain own-model
+requests and do not silently switch to another model. An unavailable configured
+choice remains selectable with a readiness explanation and an action to choose
+an alternative. A ready CPU backend may load the selected model on demand; its
+label does not claim GPU readiness. Ordinary queries still use one generator.
+
+The selection (`auto`, `qwen`, or `gemma`) uses the existing model text fields in
+families, runs and jobs. No database migration is required. Existing comparisons
+continue to use the two own-model choices; automatic routing is not a comparison
+model. The gateway handles provider admission, readiness and fallback.
+
+Actual answer labels come only from the saved `generation.provider` and
+`execution` metadata: actual repository/model ID, shared or own scope, CPU/GPU
+device, and an allowlisted routing explanation. Reading an old answer cannot
+relabel it from current readiness or trigger another generation. Automatic
+generated results require an actual identity and routing scope; a reported
+selection mismatch or a shared response to an explicit own-model request fails
+closed while preserving the frozen matches. Endpoint URLs and credentials are
+not part of the browser routing metadata.
+CPU readiness retains the worker's `loaded` flag and explicit `availability:
+lazy` observation, so a resident model and a model available for loading are not
+confused. Public readiness never acquires GPU/device access in the browser.
+
+The existing private run result retains at most two provider attempts with only
+route, model ID, status, stage and HTTP status. The public result exposes an
+allowlisted failure code instead of response bodies. In particular,
+`ambiguous_remote_generation` says that the previous remote request may still be
+running and that no replacement generation was started for that question. This
+is not ordinary unavailability or evidence of a completed answer.
 
 The browser uses the existing family/job routes and displays their public
 `progress.stage` as retrieval, generation or final validation. This is status

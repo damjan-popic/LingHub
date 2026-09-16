@@ -18,6 +18,12 @@ PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response
 PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
 VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed'}
+VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','limitations',
+    'code','scope','claim_ids','no_sufficient_evidence','correction_required'}
+VALIDATION_ERROR_TYPES={'model_type','missing','extra_forbidden','string_type','string_too_short','string_too_long',
+    'string_pattern_mismatch','list_type','too_long','too_short','literal_error','bool_type','bool_parsing',
+    'value_error','int_type','int_parsing'}
+VALIDATION_SCOPE_REASONS={'claim_limitation_missing_claim_ids','answer_limitation_has_claim_ids'}
 VALIDATION_REASONS={
     'invalid_independent_claim_schema','invalid_final_prose','unresolved_support_id','unresolved_inline_citation_alias',
     'generated_bracketed_form_differs_from_original','silent_letter_interpretation_not_explicit_in_selected_support',
@@ -58,6 +64,20 @@ def generation_validation_diagnostics(result):
         if isinstance(validation.get('status'),str)and validation['status']in VALIDATION_STATUSES:safe['status']=validation['status']
         if validation.get('semantic_entailment_certified')is False:safe['semantic_entailment_certified']=False
         if validation.get('error_type')in ('ValueError','KeyError','TypeError','ValidationError'):safe['error_type']=validation['error_type']
+        errors=validation.get('pydantic_errors')
+        if isinstance(errors,list):
+            safe['pydantic_errors']=[]
+            for row in errors[:32]:
+                if not isinstance(row,dict)or not isinstance(row.get('type'),str)or row['type']not in VALIDATION_ERROR_TYPES:continue
+                loc=row.get('loc')
+                if not isinstance(loc,list):continue
+                detail={'type':row['type'],'loc':[
+                    value if type(value)is int and 0<=value<=1024 or isinstance(value,str)and value in VALIDATION_ERROR_FIELDS
+                    else 'other_field'for value in loc[:12]]}
+                reason=row.get('reason')
+                if (row['type']=='value_error'and len(loc)==2 and loc[0]=='limitations'and type(loc[1])is int
+                        and 0<=loc[1]<=1024 and isinstance(reason,str)and reason in VALIDATION_SCOPE_REASONS):detail['reason']=reason
+                safe['pydantic_errors'].append(detail)
         if safe:out['validation']=safe
     def bounded_rows(value):return value[:14]if isinstance(value,list)else []
     def claim_identity(value):

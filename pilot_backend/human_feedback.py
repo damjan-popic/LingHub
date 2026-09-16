@@ -17,6 +17,84 @@ PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_
 PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response_shape','hidden_reasoning','completion_stop','response_json','correction','usage','token_budget','source_verification'}
 PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
+VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed'}
+VALIDATION_REASONS={
+    'invalid_independent_claim_schema','invalid_final_prose','unresolved_support_id','unresolved_inline_citation_alias',
+    'generated_bracketed_form_differs_from_original','silent_letter_interpretation_not_explicit_in_selected_support',
+    'mentioned_name_form_not_in_selected_support','example_does_not_establish_adjective_definition',
+    'entry_presence_does_not_establish_publication_change','uncertain_causal_support_became_unqualified',
+    'syntactic_category_not_explicit_in_selected_support','unsupported_notation_interpretation',
+    'visible_word_budget_exceeded','duplicate_supported_content','competing_specialist_concepts',
+    'specialist_concept_inside_quotation','specialist_translation_subject_not_established','specialist_word_count_translation',
+    'explicit_gender_number_form_not_in_complete_source_table','applicable_dictionary_entry_occurrence_ambiguous',
+    'comparative_polarity_changed','frequency_domain_not_preserved','frequency_predicate_negation_changed',
+    'measurement_date_not_established','historical_current_norm_not_attributed','source_uncertainty_not_preserved',
+    'qualified_domain_not_preserved','attached_exception_lost','literal_sense_transferred_to_term',
+    'pattern_normality_not_established','frequency_scope_not_established','frequency_numbers_not_in_selected_support'}
+VALIDATION_ACTIONS={'accepted','withhold','omit','source_supported_partial','mixed_generated_and_source_partial',
+    'supported_claim_fragment','deterministic_repair','deterministic_glossary_repair','deterministic_temporal_attribution'}
+VALIDATION_LIMITATION_REASONS={'model_found_insufficient_evidence','no_supported_generated_claims',
+    'invalid_or_inconsistently_scoped_composition','native_tokenizer_unavailable','empty_indexed_evidence',
+    'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested'}
+
+
+def generation_validation_diagnostics(result):
+    """Technical composition outcomes only; model prose and source spans are excluded."""
+    if not isinstance(result,dict):return {}
+    nested=isinstance(result.get('generation_validation'),dict)
+    raw=result['generation_validation']if nested else result
+    out={}
+    fields={
+        'gateway_status':('status',{'validated','partial','failed','no_hit','source_only','rejected','no_answer'}),
+        'gateway_answer_kind':('answer_kind',{'generated','mixed','source_only','clarification'}),
+        'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial'}),
+        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial'})}
+    for key,(original,allowed)in fields.items():
+        value=raw.get(key if nested else original)
+        if isinstance(value,str)and value in allowed:out[key]=value
+    validation=raw.get('validation')
+    if isinstance(validation,dict):
+        safe={}
+        if isinstance(validation.get('status'),str)and validation['status']in VALIDATION_STATUSES:safe['status']=validation['status']
+        if validation.get('semantic_entailment_certified')is False:safe['semantic_entailment_certified']=False
+        if validation.get('error_type')in ('ValueError','KeyError','TypeError','ValidationError'):safe['error_type']=validation['error_type']
+        if safe:out['validation']=safe
+    def bounded_rows(value):return value[:14]if isinstance(value,list)else []
+    def claim_identity(value):
+        safe={};cid=value.get('claim_id');index=value.get('claim_index')
+        if isinstance(cid,str)and re.fullmatch(r'C(?:[1-9]|1[0-4])',cid):safe['claim_id']=cid
+        if type(index)is int and 0<=index<14:safe['claim_index']=index
+        return safe
+    omitted=[]
+    for row in bounded_rows(raw.get('omitted_claims')):
+        if not isinstance(row,dict):continue
+        reason=row.get('reason')
+        if isinstance(reason,str)and reason in VALIDATION_REASONS:omitted.append({**claim_identity(row),'reason':reason})
+    if omitted:out['omitted_claims']=omitted
+    actions=[]
+    for row in bounded_rows(raw.get('quality_actions')):
+        if not isinstance(row,dict):continue
+        safe=claim_identity(row);action=row.get('action')
+        if isinstance(action,str)and action in VALIDATION_ACTIONS:safe['action']=action
+        issues=[]
+        for issue in bounded_rows(row.get('issues')):
+            if not isinstance(issue,dict):continue
+            code=issue.get('code')
+            if not isinstance(code,str)or code not in VALIDATION_REASONS:continue
+            item={'code':code};action=issue.get('action');index=issue.get('part_index')
+            if isinstance(action,str)and action in VALIDATION_ACTIONS:item['action']=action
+            if type(index)is int and 0<=index<1024:item['part_index']=index
+            issues.append(item)
+        if issues:safe['issues']=issues
+        for key in ('original_part_count','retained_part_count'):
+            value=row.get(key)
+            if type(value)is int and 0<=value<=1024:safe[key]=value
+        if 'action'in safe or issues:actions.append(safe)
+    if actions:out['quality_actions']=actions
+    reasons=raw.get('limitation_reasons')if nested else [row.get('reason')for row in bounded_rows(raw.get('limitations'))if isinstance(row,dict)]
+    reasons=[value for value in bounded_rows(reasons)if isinstance(value,str)and value in VALIDATION_LIMITATION_REASONS]
+    if reasons:out['limitation_reasons']=list(dict.fromkeys(reasons))
+    return out
 
 def provider_response_observation(value):
     """Keep technical response shape and counts; never model text or reasoning."""
@@ -60,6 +138,9 @@ def provider_diagnostics(result):
             if isinstance(failure.get(key),str)and failure[key]in allowed:out['provider_failure'][key]=failure[key]
         response=provider_response_observation(failure.get('response'))
         if response:out['provider_failure']['response']=response
+    if isinstance(result.get('generation_validation'),dict):
+        validation=generation_validation_diagnostics(result)
+        if validation:out['generation_validation']=validation
     return out
 
 def display_paragraphs(result,tier,locale):

@@ -128,8 +128,10 @@ class Domain:
                 if k in result:out[k]=result[k]
             if not blind:
                 out['display_sha256']=r['display_hash'];out['model']=r['model']
-                from .human_feedback import public_execution
+                from .human_feedback import public_execution,provider_diagnostics
                 out.update(public_execution(result))
+                validation=provider_diagnostics(result).get('generation_validation')
+                if validation:out['generation_validation']=validation
         if historical is not None:out['historical_evidence']={'status':'exact_retained_record','fresh_origin_assurance':False}
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.
         return out

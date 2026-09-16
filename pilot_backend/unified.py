@@ -415,8 +415,10 @@ def generate(gateway, bundle, tier, model, parent=None):
                         raise Failure('unknown_citation',502)
         elapsed = round((time.monotonic() - started) * 1000, 3)
         if not generated:
-            from .human_feedback import provider_diagnostics
+            from .human_feedback import provider_diagnostics,generation_validation_diagnostics
             diagnostics=provider_diagnostics(result)
+            validation=generation_validation_diagnostics(result)
+            if validation:diagnostics['generation_validation']=validation
             out = fallback(bundle, 'failed', elapsed, {'error_code':diagnostics.get('provider_failure',{}).get('code','generation_not_admitted'),'stage':'provider_result'})
             out.update(diagnostics)
             for key in ('model_identity', 'execution', 'usage'):

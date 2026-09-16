@@ -14,6 +14,22 @@ PROVIDER_SCOPES={'shared','own'}
 PROVIDER_SELECTIONS={'auto','qwen','gemma'}
 PROVIDER_ROUTE_REASONS={'shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback'}
 PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','provider_terminal_rejection','selected_provider_unavailable','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
+PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response_shape','hidden_reasoning','completion_stop','response_json','correction','usage','token_budget','source_verification'}
+PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
+PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
+
+def provider_response_observation(value):
+    """Keep technical response shape and counts; never model text or reasoning."""
+    if not isinstance(value,dict):return {}
+    out={}
+    enums={'finish_reason':{'stop','length','tool_calls','function_call','content_filter','missing','null','other'},
+           'content_type':{'missing','null','string','object','array','boolean','number','other'}}
+    counts={'choices_count','prompt_tokens','completion_tokens','total_tokens','reasoning_tokens','json_error_position'}
+    for key,item in value.items():
+        if key in enums and isinstance(item,str)and item in enums[key]:out[key]=item
+        elif key in counts and type(item)is int and 0<=item<=2**63-1:out[key]=item
+        elif key=='reasoning_present'and type(item)is bool:out[key]=item
+    return out
 
 def public_routing(execution):
     """Only fixed routing labels, never endpoint or authentication metadata."""
@@ -40,6 +56,10 @@ def provider_diagnostics(result):
     if isinstance(failure,dict)and isinstance(failure.get('code'),str)and failure.get('code')in PROVIDER_FAILURE_CODES:
         out['provider_failure']={'code':failure['code']}
         if isinstance(failure.get('selection'),str)and failure.get('selection')in PROVIDER_SELECTIONS:out['provider_failure']['selection']=failure['selection']
+        for key,allowed in (('stage',PROVIDER_FAILURE_STAGES),('reason',PROVIDER_FAILURE_REASONS),('error_type',PROVIDER_FAILURE_TYPES)):
+            if isinstance(failure.get(key),str)and failure[key]in allowed:out['provider_failure'][key]=failure[key]
+        response=provider_response_observation(failure.get('response'))
+        if response:out['provider_failure']['response']=response
     return out
 
 def display_paragraphs(result,tier,locale):

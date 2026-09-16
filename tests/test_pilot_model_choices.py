@@ -219,3 +219,43 @@ def test_generation_http_failure_preserves_status_and_only_known_code(monkeypatc
     observed=diagnostic(error.value,'provider_request')
     assert observed=={'error_code':expected,'stage':'provider_request','http_status':503}
     assert calls==['/internal/pilot/generate']
+
+
+def test_completed_response_diagnostic_survives_owned_fallback_without_private_fields(tmp_path):
+    detail={'code':'selected_provider_unavailable','selection':'auto','stage':'response_json',
+        'reason':'invalid_final_json','error_type':'JSONDecodeError',
+        'response':{'choices_count':1,'finish_reason':'stop','content_type':'string','reasoning_present':False,
+                    'completion_tokens':106,'json_error_position':0},
+        'message':'PRIVATE_EXCEPTION','raw_response':'PRIVATE_RESPONSE'}
+    class RejectedResponse(ChoiceGateway):
+        def request(self,path,payload,base=None):
+            result=super().request(path,payload,base)
+            if path=='/internal/pilot/generate':
+                result.update(status='failed',answer_kind='source_only',provider_failure=detail)
+                result['provider_failure']['response']['content']='PRIVATE_CONTENT'
+            return result
+    app=app_choices(tmp_path,RejectedResponse())
+    with TestClient(app,base_url=ORIGIN)as client:
+        family,job=submit(app,client,login(client),'auto')
+        assert family['short']['generation']['status']=='failed'
+        assert family['short']['generation']['error_code']=='selected_provider_unavailable'
+        with app.state.store.connect()as db:
+            stored=json.loads(db.execute('SELECT result FROM runs WHERE id=?',(job['run_id'],)).fetchone()[0])
+        diagnostic=stored['provider_failure']
+        assert diagnostic['reason']=='invalid_final_json'and diagnostic['stage']=='response_json'
+        assert diagnostic['error_type']=='JSONDecodeError'
+        assert diagnostic['response']['completion_tokens']==106
+        assert stored['provider_attempts'][0]['status']=='completed'
+        assert 'PRIVATE_'not in json.dumps(diagnostic)
+        assert 'PRIVATE_'not in json.dumps(family)
+        assert 'provider_failure'not in family['short']
+
+
+def test_provider_response_diagnostic_allowlist_rejects_untrusted_values():
+    from pilot_backend.human_feedback import provider_diagnostics
+    result=provider_diagnostics({'provider_failure':{'code':'selected_provider_unavailable','selection':'auto',
+        'stage':'PRIVATE_STAGE','reason':['PRIVATE_REASON'],'error_type':'PRIVATE_TYPE',
+        'response':{'choices_count':True,'completion_tokens':-1,'total_tokens':2**63,
+          'reasoning_tokens':'123','json_error_position':False,'finish_reason':'PRIVATE_CONTENT',
+          'content_type':{},'reasoning_present':1,'content':'PRIVATE_RESPONSE'}}})
+    assert result=={'provider_failure':{'code':'selected_provider_unavailable','selection':'auto'}}

@@ -205,6 +205,10 @@ def test_explicit_own_terminal_rejection_keeps_safe_failure_and_one_attempt(tmp_
     ({'error':{'code':'PILOT_TIMEOUT'}},'PILOT_TIMEOUT'),
     ({'error':{'code':'PILOT_FROZEN_RESOURCE_UNAVAILABLE'}},'PILOT_FROZEN_RESOURCE_UNAVAILABLE'),
     ({'error':{'code':'PILOT_INVALID_FROZEN_REQUEST'}},'PILOT_INVALID_FROZEN_REQUEST'),
+    ({'error':{'code':'malformed_provider_response'}},'malformed_provider_response'),
+    ({'error':{'code':'invalid_generated_content'}},'invalid_generated_content'),
+    ({'error':{'code':'invalid_application_composition'}},'invalid_application_composition'),
+    ({'error':{'code':'provider_identity_verification_failed'}},'provider_identity_verification_failed'),
     ({'error':{'code':'PRIVATE_TOKEN'}},'answer_unavailable'),
     ({'error':{'code':['PRIVATE_TOKEN']}},'answer_unavailable'),
     ({'padding':'x'*32769},'answer_unavailable')])
@@ -221,9 +225,17 @@ def test_generation_http_failure_preserves_status_and_only_known_code(monkeypatc
     assert calls==['/internal/pilot/generate']
 
 
-def test_completed_response_diagnostic_survives_owned_fallback_without_private_fields(tmp_path):
-    detail={'code':'selected_provider_unavailable','selection':'auto','stage':'response_json',
-        'reason':'invalid_final_json','error_type':'JSONDecodeError',
+@pytest.mark.parametrize('code,stage,reason,error_type',[
+    ('invalid_generated_content','response_json','invalid_final_json','JSONDecodeError'),
+    ('malformed_provider_response','response_shape','invalid_content_type','ValueError'),
+    ('invalid_application_composition','correction','correction_without_parent','ValueError'),
+    ('malformed_provider_response','response_shape','invalid_response_json','JSONDecodeError'),
+    ('malformed_provider_response','response_shape','invalid_execution_shape','ValueError'),
+    ('provider_identity_verification_failed','post_identity','post_generation_identity_mismatch','PilotUnavailable'),
+])
+def test_completed_response_diagnostic_survives_owned_fallback_without_private_fields(tmp_path,code,stage,reason,error_type):
+    detail={'code':code,'selection':'auto','stage':stage,
+        'reason':reason,'error_type':error_type,
         'response':{'choices_count':1,'finish_reason':'stop','content_type':'string','reasoning_present':False,
                     'completion_tokens':106,'json_error_position':0},
         'message':'PRIVATE_EXCEPTION','raw_response':'PRIVATE_RESPONSE'}
@@ -234,21 +246,34 @@ def test_completed_response_diagnostic_survives_owned_fallback_without_private_f
                 result.update(status='failed',answer_kind='source_only',provider_failure=detail)
                 result['provider_failure']['response']['content']='PRIVATE_CONTENT'
             return result
-    app=app_choices(tmp_path,RejectedResponse())
+    gateway=RejectedResponse();app=app_choices(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as client:
         family,job=submit(app,client,login(client),'auto')
         assert family['short']['generation']['status']=='failed'
-        assert family['short']['generation']['error_code']=='selected_provider_unavailable'
+        assert family['short']['generation']['error_code']==code
         with app.state.store.connect()as db:
             stored=json.loads(db.execute('SELECT result FROM runs WHERE id=?',(job['run_id'],)).fetchone()[0])
         diagnostic=stored['provider_failure']
-        assert diagnostic['reason']=='invalid_final_json'and diagnostic['stage']=='response_json'
-        assert diagnostic['error_type']=='JSONDecodeError'
+        assert diagnostic['reason']==reason and diagnostic['stage']==stage
+        assert diagnostic['error_type']==error_type
         assert diagnostic['response']['completion_tokens']==106
         assert stored['provider_attempts'][0]['status']=='completed'
         assert 'PRIVATE_'not in json.dumps(diagnostic)
         assert 'PRIVATE_'not in json.dumps(family)
         assert 'provider_failure'not in family['short']
+        assert sum(path=='/internal/pilot/generate'for path,_,_ in gateway.calls)==1
+
+
+@pytest.mark.parametrize('status,expected',[(422,422),(503,503),(True,None),(99,None),(600,None),('503',None)])
+def test_provider_http_status_is_retained_as_bounded_integer(status,expected):
+    from pilot_backend.human_feedback import provider_diagnostics
+    failure={'code':'provider_terminal_rejection','selection':'gemma','stage':'generation',
+        'reason':'generation_request_failed','error_type':'HTTPError','http_status':status,
+        'url':'PRIVATE_ENDPOINT','headers':{'Authorization':'PRIVATE_TOKEN'},'body':'PRIVATE_BODY'}
+    projected=provider_diagnostics({'provider_failure':failure})['provider_failure']
+    assert projected.get('http_status')==expected
+    assert ('http_status'in projected)==(expected is not None)
+    assert 'PRIVATE_'not in json.dumps(projected)
 
 
 def test_provider_response_diagnostic_allowlist_rejects_untrusted_values():

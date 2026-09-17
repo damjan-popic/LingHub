@@ -23,6 +23,7 @@ from test_pilot_model_choices import app_choices, submit
 @pytest.mark.parametrize('scope,claim_ids,reason', [
     ('claim', [], 'claim_limitation_missing_claim_ids'),
     ('answer', ['C1'], 'answer_limitation_has_claim_ids'),
+    ('claim', ['C2'], 'limitation_names_unknown_claims'),
 ])
 def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_error(
         runtime, tmp_path, scope, claim_ids, reason):
@@ -47,18 +48,23 @@ def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_
         short = family['short']
         assert short['state'] == 'complete' and short['generation_status'] == 'not_generated'
         assert short['generation'].get('error_code') == 'generation_not_admitted', (short['generation'], short.get('retrieval'), [row[0] for row in gateway.calls])
-        expected = {'type': 'value_error', 'loc': ['limitations', 0], 'reason': reason}
-        assert short['generation_validation']['validation']['pydantic_errors'] == [expected]
+        validation=short['generation_validation']['validation']
+        if reason=='limitation_names_unknown_claims':
+            assert validation['reason']==reason and validation['error_type']=='ValueError'
+            assert not validation.get('pydantic_errors')
+        else:
+            expected = {'type': 'value_error', 'loc': ['limitations', 0], 'reason': reason}
+            assert validation['pydantic_errors'] == [expected]
         fid = family['answer_family_id']
         with app.state.store.connect() as db:
             owner = db.execute('SELECT owner FROM families WHERE id=?', (fid,)).fetchone()[0]
             saved = json.loads(db.execute('SELECT result FROM runs WHERE id=?', (job['run_id'],)).fetchone()[0])
-        assert saved['generation_validation']['validation']['pydantic_errors'] == [expected]
+        assert saved['generation_validation']['validation'] == validation
         assert len(saved['provider_attempts']) == 1 and saved['provider_attempts'][0]['status'] == 'completed'
         spec = importlib.util.spec_from_file_location('validation_owned_probe', INFRA / 'scripts/pilot_editorial_probe.py')
         probe = importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
         detail = probe.saved_case_failure({'store': str(tmp_path / 'private/pilot.sqlite')}, owner, fid)
-        assert detail['generation_validation']['validation']['pydantic_errors'] == [expected]
+        assert detail['generation_validation']['validation'] == validation
         assert 'signature' not in json.dumps(detail) and 'synthetic-unified-test-password' not in json.dumps(detail)
         assert client.get('/api/pilot/families/' + fid).json() == family
         login(client, 'unified-other')
@@ -86,6 +92,26 @@ def test_validation_boundary_is_bounded_idempotent_and_drops_private_fields():
     assert errors[0] == {'type': 'value_error', 'loc': ['limitations', 0], 'reason': 'answer_limitation_has_claim_ids'}
     assert errors[1] == {'type': 'extra_forbidden', 'loc': ['other_field'] * 4}
     assert 'PRIVATE' not in json.dumps(projected)
+
+
+@pytest.mark.parametrize('reason',[
+    'invalid_composition_envelope','tier_claim_bound_exceeded','duplicate_claim_ids',
+    'requested_locale_differs','abstention_contradicts_claims','empty_supported_answer',
+    'limitation_names_unknown_claims','no_evidence_caveat_contradicts_claims','support_bytes_differ'])
+def test_fixed_validation_reasons_survive_without_raw_exception_or_claim_links(reason):
+    source={'validation':{'status':'invalid_composition_envelope','error_type':'ValueError','reason':reason,
+        'message':'PRIVATE_MESSAGE','claim_ids':['PRIVATE_ID'],'support_ids':['PRIVATE_SUPPORT']}}
+    result=generation_validation_diagnostics(source)
+    assert result=={'validation':{'status':'invalid_composition_envelope','error_type':'ValueError','reason':reason}}
+    assert generation_validation_diagnostics({'generation_validation':result})==result
+    assert 'PRIVATE'not in json.dumps(result)
+
+
+@pytest.mark.parametrize('reason',[None,[],{},True,17,'PRIVATE_MESSAGE'])
+def test_validation_reason_rejects_unknown_and_malformed_values(reason):
+    result=generation_validation_diagnostics({'validation':{
+        'status':'invalid_composition_envelope','error_type':'ValueError','reason':reason}})
+    assert result=={'validation':{'status':'invalid_composition_envelope','error_type':'ValueError'}}
 
 
 @pytest.mark.parametrize('errors', [None, 'PRIVATE_ERROR', {'type': 'value_error'}, [None, {'type': []}, {'type': 'value_error', 'loc': 'PRIVATE_LOCATION'}]])

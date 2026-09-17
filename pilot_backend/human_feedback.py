@@ -13,9 +13,9 @@ VERSION_FIELDS=('evidence_packet_hash','source_snapshot_ids','vector_snapshot_id
 PROVIDER_SCOPES={'shared','own'}
 PROVIDER_SELECTIONS={'auto','qwen','gemma'}
 PROVIDER_ROUTE_REASONS={'shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback'}
-PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','provider_terminal_rejection','selected_provider_unavailable','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
+PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_mismatch','provider_terminal_rejection','selected_provider_unavailable','malformed_provider_response','invalid_generated_content','invalid_application_composition','provider_identity_verification_failed','generation_waiting_capacity','provider_identity_missing','provider_selection_mismatch','PILOT_BUSY','PILOT_TIMEOUT','PILOT_FROZEN_RESOURCE_UNAVAILABLE','PILOT_INVALID_FROZEN_REQUEST'}
 PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response_shape','hidden_reasoning','completion_stop','response_json','correction','usage','token_budget','source_verification'}
-PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
+PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','invalid_response_json','invalid_execution_shape','invalid_content_type','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
 VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed'}
 VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','limitations',
@@ -24,6 +24,9 @@ VALIDATION_ERROR_TYPES={'model_type','missing','extra_forbidden','string_type','
     'string_pattern_mismatch','list_type','too_long','too_short','literal_error','bool_type','bool_parsing',
     'value_error','int_type','int_parsing'}
 VALIDATION_SCOPE_REASONS={'claim_limitation_missing_claim_ids','answer_limitation_has_claim_ids'}
+VALIDATION_FAILURE_REASONS={'invalid_composition_envelope','tier_claim_bound_exceeded','duplicate_claim_ids',
+    'requested_locale_differs','abstention_contradicts_claims','empty_supported_answer',
+    'limitation_names_unknown_claims','no_evidence_caveat_contradicts_claims','support_bytes_differ'}
 VALIDATION_REASONS={
     'invalid_independent_claim_schema','invalid_final_prose','unresolved_support_id','unresolved_inline_citation_alias',
     'generated_bracketed_form_differs_from_original','silent_letter_interpretation_not_explicit_in_selected_support',
@@ -64,6 +67,8 @@ def generation_validation_diagnostics(result):
         if isinstance(validation.get('status'),str)and validation['status']in VALIDATION_STATUSES:safe['status']=validation['status']
         if validation.get('semantic_entailment_certified')is False:safe['semantic_entailment_certified']=False
         if validation.get('error_type')in ('ValueError','KeyError','TypeError','ValidationError'):safe['error_type']=validation['error_type']
+        reason=validation.get('reason')
+        if isinstance(reason,str)and reason in VALIDATION_FAILURE_REASONS:safe['reason']=reason
         errors=validation.get('pydantic_errors')
         if isinstance(errors,list):
             safe['pydantic_errors']=[]
@@ -154,6 +159,8 @@ def provider_diagnostics(result):
     if isinstance(failure,dict)and isinstance(failure.get('code'),str)and failure.get('code')in PROVIDER_FAILURE_CODES:
         out['provider_failure']={'code':failure['code']}
         if isinstance(failure.get('selection'),str)and failure.get('selection')in PROVIDER_SELECTIONS:out['provider_failure']['selection']=failure['selection']
+        status=failure.get('http_status')
+        if type(status)is int and 100<=status<=599:out['provider_failure']['http_status']=status
         for key,allowed in (('stage',PROVIDER_FAILURE_STAGES),('reason',PROVIDER_FAILURE_REASONS),('error_type',PROVIDER_FAILURE_TYPES)):
             if isinstance(failure.get(key),str)and failure[key]in allowed:out['provider_failure'][key]=failure[key]
         response=provider_response_observation(failure.get('response'))

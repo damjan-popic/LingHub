@@ -267,6 +267,59 @@ def test_no_support_skips_generation_without_claiming_corpus_completeness(tmp_pa
         assert page['returned_count']==0 and page['corpus_total']is None
 
 
+@pytest.mark.parametrize('support_state',['empty','ineligible'])
+def test_no_eligible_support_never_invokes_provider_and_keeps_owned_results(tmp_path,support_state):
+    class AdmissionGateway(UnifiedGateway):
+        forbid_generation=False
+        generation_invocations=0
+        def request(self,path,payload,base=None):
+            if path=='/internal/pilot/generate':
+                self.generation_invocations+=1
+                assert not self.forbid_generation,'No eligible evidence may invoke a provider'
+            result=super().request(path,payload,base)
+            if path=='/internal/pilot/freeze'and self.forbid_generation and support_state=='ineligible':
+                for row in result['matches']:row['context_eligible']=False
+            return result
+    gateway=AdmissionGateway();app=app_for(tmp_path,gateway)
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client)
+        # A previous successful request must not count against this case's
+        # no-generation requirement, nor change its admission decision.
+        _,earlier=ask(app,client,headers,idempotency_key='eligible-control')
+        assert earlier['short']['generation_status']=='generated'
+        before=gateway.generation_invocations
+        assert before==1
+        gateway.forbid_generation=True
+        gateway.no_hits=support_state=='empty'
+        fid,family=ask(app,client,headers,idempotency_key='no-eligible-support')
+        short=family['short']
+        assert gateway.generation_invocations-before==0
+        assert short['state']=='complete'and short['status']=='no_hit'
+        assert short['generation']['status']=='no_support'and short['generation_status']=='not_generated'
+        assert short['short_answer']=='Ni bilo najdenih podpornih virov.'
+        assert short['evidence']==[]and short['source_badges']==[]
+        matches_route='/api/pilot/families/'+fid+'/matches'
+        page=client.get(matches_route).json()
+        assert page['corpus_total']is None
+        assert not any(row['used_in_answer']for row in page['items'])
+        drawers={}
+        if support_state=='empty':assert page['returned_count']==0
+        else:
+            assert page['returned_count']==7
+            for row in page['items']:
+                route='/api/pilot/families/'+fid+'/sources/'+row['evidence_id']
+                response=client.get(route)
+                assert response.status_code==200
+                drawers[route]=response.json()
+        gateway.blocked=True
+        assert client.get('/api/pilot/families/'+fid).json()==family
+        assert client.get(matches_route).json()==page
+        for route,original in drawers.items():assert client.get(route).json()==original
+        login(client,'unified-other')
+        for route in ['/api/pilot/families/'+fid,matches_route,*drawers]:
+            assert client.get(route).status_code==404
+
+
 def test_frozen_matches_are_available_during_generation(tmp_path):
     gateway=UnifiedGateway();app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as client:

@@ -341,7 +341,10 @@ def freeze(gateway, family, policy):
 
 def fallback(bundle, status, elapsed=0.0, error=None):
     it = bundle['locale'] == 'it'
-    message = ('Nessuna fonte di supporto trovata.' if it else 'Ni bilo najdenih podpornih virov.') if status == 'no_support' else (
+    no_support = ('I risultati trovati non offrono un sostegno sufficiente per rispondere alla domanda.' if it else
+                  'Najdeni zadetki ne dajejo dovolj podpore za odgovor na to vprašanje.') if bundle['matches'] else (
+                  'Nessuna fonte di supporto trovata.' if it else 'Ni bilo najdenih podpornih virov.')
+    message = no_support if status == 'no_support' else (
         'La risposta generata non è disponibile. Puoi consultare i risultati salvati.' if it else
         'Generirani odgovor ni na voljo. Pregledate lahko shranjene zadetke.')
     return {'status': 'no_hit' if status == 'no_support' else 'source_only', 'answer_kind': 'source_only',

@@ -296,7 +296,8 @@ def test_no_eligible_support_never_invokes_provider_and_keeps_owned_results(tmp_
         assert gateway.generation_invocations-before==0
         assert short['state']=='complete'and short['status']=='no_hit'
         assert short['generation']['status']=='no_support'and short['generation_status']=='not_generated'
-        assert short['short_answer']=='Ni bilo najdenih podpornih virov.'
+        assert short['short_answer']==('Ni bilo najdenih podpornih virov.' if support_state=='empty' else
+            'Najdeni zadetki ne dajejo dovolj podpore za odgovor na to vprašanje.')
         assert short['evidence']==[]and short['source_badges']==[]
         matches_route='/api/pilot/families/'+fid+'/matches'
         page=client.get(matches_route).json()

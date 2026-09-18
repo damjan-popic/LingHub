@@ -95,6 +95,54 @@ export function generationNotice(tier) {
   if (status === 'no_support') return 'generation_no_support';
   return null;
 }
+export function sourceStatusNotes(source) {
+  // These are views of saved metadata, not new statements about a source's
+  // present authority. A migration/upload date cannot replace a signed date.
+  const notes=[],status=source?.source_status || source?.status;
+  if(typeof status==='string' && /osnutek|draft|bozza|predlog|proposal|proposta/i.test(status)) {
+    const proposal=/predlog|proposal|proposta/i.test(status),bare=/^(draft|osnutek|bozza|predlog|proposal|proposta)$/i.test(status.trim());
+    notes.push({category:proposal?'proposal_status':'draft_status',key:bare?proposal?'source_proposal_note':'source_draft_note':'source_status_note',values:bare?{}:{status:status.trim()}});
+  }
+  if(source?.annual_scope || source?.publication_scope==='annual_additions')notes.push({category:'source_scope',key:'source_annual_note',values:{}});
+  const bib=source?.bibliographic || source?.bibliography;
+  if(source?.publication_scope==='individual_advisory_answer' && Array.isArray(bib?.signed_date_text)) {
+    const dates=[...new Set(bib.signed_date_text.filter(value=>typeof value==='string' && value.trim()).map(value=>value.trim()))];
+    if(dates.length)notes.push({category:'source_date',key:'source_signed_date_note',values:{date:dates.join('; ')}});
+  }
+  return notes;
+}
+export function answerNotes(tier) {
+  const notes=[],blocks=tierBlocks(tier),evidence=Array.isArray(tier?.evidence)?tier.evidence:[];
+  const eid=item=>item?.evidence_id || item?.citation_id || item?.passage_id;
+  const limitationKeys={partial_evidence:'limitation_partial_evidence',no_answer_evidence:'limitation_no_answer_evidence',
+    conflicting_evidence:'limitation_conflicting_evidence',source_scope:'limitation_source_scope',proposal_status:'source_proposal_note',
+    uncertain_entry_boundary:'limitation_uncertain_entry_boundary',unsupported_inference:'limitation_unsupported_inference'};
+  const add=note=>{const same=notes.find(old=>old.text===note.text && old.key===note.key && JSON.stringify(old.values)===JSON.stringify(note.values));
+    if(same){for(const item of note.evidence)if(!same.evidence.some(old=>eid(old)===eid(item)))same.evidence.push(item);}
+    else notes.push(note);};
+  for(const value of Array.isArray(tier?.limitations)?tier.limitations:[]) {
+    const text=typeof value==='string'?value:typeof value?.message==='string'?value.message:null;
+    if(text && blocks.some(block=>block.text.trim()===text.trim()))continue;
+    if(typeof value==='object' && value?.scope==='claim' && (!Array.isArray(value.claim_ids) || !value.claim_ids.some(id=>blocks.some(block=>block.block_id===id))))continue;
+    if(!text && !limitationKeys[value?.code])continue;
+    const ids=new Set(blocks.filter(block=>value?.scope!=='claim' || value.claim_ids.includes(block.block_id)).flatMap(block=>block.evidence_ids || []));
+    add({category:value?.code || 'limitation',...(text?{text}:{key:limitationKeys[value.code],values:{}}),evidence:evidence.filter(item=>ids.has(eid(item)))});
+  }
+  if(tier?.generation_status==='generated' || ['generated','mixed'].includes(tier?.answer_kind)) {
+    const seen=new Set();
+    for(const item of evidence) {
+      // Multiple passages from one record share a status/date. Do not repeat
+      // the same record's note or turn incidental search hits into support.
+      const record=JSON.stringify([item.source_slug,item.external_id || eid(item),item.source_revision]);
+      if(seen.has(record))continue;seen.add(record);
+      for(const note of sourceStatusNotes(item)) {
+        if(notes.some(old=>old.category===note.category && old.evidence.some(ref=>ref===item || ref.source_slug===item.source_slug && ref.external_id && ref.external_id===item.external_id)))continue;
+        add({...note,evidence:[item]});
+      }
+    }
+  }
+  return notes;
+}
 export function blockTextPresentation(tier, block) {
   const evidence = Array.isArray(tier?.evidence) ? tier.evidence : [];
   if (tier?.deterministic_result?.task === 'editorial_search') {

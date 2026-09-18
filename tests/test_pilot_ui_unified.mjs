@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,modelChoiceKey,modelAvailabilityKey,savedProvider,generationNotice,blockTextPresentation} from '../pilot_ui/core.mjs';
+import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,modelChoiceKey,modelAvailabilityKey,savedProvider,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation} from '../pilot_ui/core.mjs';
 
 test('normal question selectors are optional and default to reference and offer automatic or exact own-model choices',()=>{
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
@@ -87,4 +87,23 @@ test('validated block evidence IDs attach citations without editing signed gener
   assert.deepEqual(view.separateCitations.map(c=>[c.number,c.evidence.evidence_id]),[[2,'used']]);
   assert.equal(JSON.stringify(block),before);
   assert.deepEqual(blockTextPresentation(tier,{...block,text:'Claim [2]',evidence_ids:['used','second']}).separateCitations.map(c=>c.evidence.evidence_id),['second']);
+});
+test('saved source status and signed dates yield readable notes without rewriting claims or inventing current validity',()=>{
+  const draft={evidence_id:'draft',local_number:1,source_slug:'synthetic',external_id:'draft-1',source_status:'osnutek – potreben partnerski/uredniški pregled'},
+    history={evidence_id:'history-1',local_number:2,source_slug:'advice',external_id:'historical-record',publication_scope:'individual_advisory_answer',bibliographic:{date:'2026-01-01',signed_date_text:['januar 2014']}};
+  const tier={generation_status:'generated',blocks:[{block_id:'C1',text:'Exact answer.',evidence_ids:['draft','history-1']}],evidence:[draft,history,{...history,evidence_id:'history-2',local_number:3}],limitations:[{code:'unsupported_inference',scope:'claim',claim_ids:['C1']}]};
+  const before=JSON.stringify(tier),notes=answerNotes(tier);
+  assert.deepEqual(notes.map(note=>note.key),['limitation_unsupported_inference','source_status_note','source_signed_date_note']);
+  assert.deepEqual(notes[2].values,{date:'januar 2014'});assert.deepEqual(notes[2].evidence,[history]);
+  assert.equal(JSON.stringify(tier),before);
+  assert.deepEqual(sourceStatusNotes({...history,bibliographic:{date:'2026-01-01'}}),[],'An upload date does not establish the answer date');
+  assert.deepEqual(sourceStatusNotes({snippet:'This quoted source says osnutek and januar 2014.'}),[],'Do not infer metadata from source prose');
+});
+test('explicit limitations are shown once and supersede matching source status notes only for their own cited records',()=>{
+  const proposal={evidence_id:'proposal',local_number:1,source_slug:'dictionary',external_id:'entry',source_status:'Predlog',annual_scope:true};
+  const tier={generation_status:'generated',blocks:[{block_id:'C1',text:'Exact answer.',evidence_ids:['proposal']}],evidence:[proposal],limitations:[{code:'source_scope',message:'Annual addition, not the entire dictionary.',scope:'claim',claim_ids:['C1']},{code:'proposal_status',message:'This entry is a proposal.',scope:'claim',claim_ids:['C1']},{code:'proposal_status',message:'This entry is a proposal.',scope:'claim',claim_ids:['C1']},{code:'unsupported_inference',scope:'claim',claim_ids:['WITHHELD']}]};
+  assert.deepEqual(answerNotes(tier).map(note=>note.text),['Annual addition, not the entire dictionary.','This entry is a proposal.']);
+  assert.deepEqual(answerNotes({blocks:[{block_id:'status',text:'No eligible support.'}],limitations:['No eligible support.'],evidence:[proposal]}),[],'No duplicate fallback and no status from incidental hits');
+  const unrelated={...proposal,evidence_id:'other',external_id:'other-entry'};
+  assert.equal(answerNotes({...tier,evidence:[proposal,unrelated]}).filter(note=>note.key==='source_proposal_note').length,1);
 });

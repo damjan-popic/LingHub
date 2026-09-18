@@ -319,5 +319,17 @@
   "choose_available_model": "Scegli un altro modello",
   "model_cpu_lazy": "Disponibile su CPU; caricato alla richiesta",
   "attempted_model": "Modello del tentativo non riuscito:",
-  "generation_outcome_unknown": "L’esito del tentativo non è noto; la richiesta potrebbe essere ancora in esecuzione. Non è stata avviata una generazione sostitutiva per questa domanda. Puoi consultare i risultati conservati."
+  "generation_outcome_unknown": "L’esito del tentativo non è noto; la richiesta potrebbe essere ancora in esecuzione. Non è stata avviata una generazione sostitutiva per questa domanda. Puoi consultare i risultati conservati.",
+  "answer_notes": "Limiti e stato delle fonti",
+  "source_draft_note": "La fonte utilizzata è una bozza.",
+  "source_proposal_note": "La fonte utilizzata è contrassegnata come proposta.",
+  "source_status_note": "Stato della fonte citata: {status}.",
+  "source_annual_note": "La fonte utilizzata è un supplemento annuale, non l’intero dizionario.",
+  "source_signed_date_note": "La risposta nella fonte riporta la data «{date}»; le indicazioni vanno comprese in quel contesto temporale.",
+  "limitation_partial_evidence": "Le fonti sostengono solo una parte della risposta. Verifica l’ambito e le condizioni nei passaggi citati.",
+  "limitation_no_answer_evidence": "Le fonti non offrono un sostegno sufficiente per rispondere.",
+  "limitation_conflicting_evidence": "Le fonti citate differiscono su parte del contenuto. Verifica contesto e limiti.",
+  "limitation_source_scope": "La risposta è limitata all’ambito delle fonti citate.",
+  "limitation_uncertain_entry_boundary": "Il confine della voce originale non è certo. Verifica l’originale.",
+  "limitation_unsupported_inference": "Il sostegno per parte delle deduzioni nella risposta non è confermato. Verifica i passaggi originali citati."
 }

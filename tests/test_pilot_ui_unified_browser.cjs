@@ -6,7 +6,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {chromium}=require('/home/damjan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const {selectComposerOption}=require('./pilot_ui_options.cjs');
 const root=path.resolve(__dirname,'../pilot_ui'),origin='https://pilot.test';
-const report={scope:'isolated browser with synthetic API responses',live_requests:0,model_calls:0,checks:[],errors:[]};
+const report={scope:'isolated browser with intercepted API fixtures; optional saved answer payloads are replayed without generation',live_requests:0,model_calls:0,checks:[],errors:[]};
 let browser;
 async function scenario(mode){
   const context=await browser.newContext({viewport:{width:1100,height:900}}),page=await context.newPage();
@@ -104,4 +104,51 @@ async function scenario(mode){
     report.checks.push({mode,status:'PASS',primary_submissions:1,progress_observed:['retrieval','generation'],early_original_opened:true,early_pagination_preserved:true,browser_api_fixtures_only:true});
   }finally{await context.close();}
 }
-(async()=>{try{browser=await chromium.launch({headless:true,executablePath:'/opt/google/chrome/chrome',args:['--disable-dev-shm-usage']});for(const mode of ['generated','partial','failure','cancel','matches_retry'])await scenario(mode);assert.deepEqual(report.errors,[]);report.status='PASS';}catch(e){report.status='FAIL';report.error={name:e.name,message:e.message};process.exitCode=1;}finally{if(browser)await browser.close();console.log(JSON.stringify(report));}})();
+async function metadataScenario(label,tier,expected){
+  const context=await browser.newContext({viewport:{width:1100,height:900}}),page=await context.newPage(),before=JSON.stringify(tier),calls=[];
+  const family={answer_family_id:'saved-metadata',question:'Saved metadata display',task:'reference',model:'qwen',locale:'sl',unified_answers:true,matches_available:false,long:null,short:tier};
+  page.on('pageerror',e=>report.errors.push(e.message));
+  await context.route('**/*',async route=>{
+    const req=route.request(),url=new URL(req.url());assert.equal(url.origin,origin,'No external request is permitted');
+    const fulfill=data=>route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+    if(url.pathname.startsWith('/assets/')){const relative=url.pathname.slice('/assets/'.length);assert(!relative.includes('..'));return route.fulfill({contentType:relative.endsWith('.mjs')?'text/javascript':relative.endsWith('.css')?'text/css':'application/json',body:fs.readFileSync(path.join(root,relative))});}
+    if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(root,'index.html'),'utf8').replaceAll('__PILOT_BASE__','').replaceAll('__PILOT_LOCALE__','sl')});
+    const api=url.pathname.slice('/api/pilot'.length);calls.push({api,method:req.method()});
+    if(api==='/session')return fulfill({authenticated:true,csrf_token:'synthetic',user:{id:'synthetic-owner',username:'synthetic-owner',role:'tester',must_change_password:false},capabilities:{tasks:['reference'],models:['qwen','gemma'],comparisons:false,unified_answers:true}});
+    if(api==='/capabilities')return fulfill({unified_answers:true,generation:{models:{qwen:{available:true},gemma:{available:true}}}});
+    if(api==='/feedback')return fulfill({feedback:[]});
+    if(api==='/families/saved-metadata')return fulfill(family);
+    if(api.startsWith('/runs/')&&api.endsWith('/delivered'))return fulfill({acknowledged:true});
+    if(api.startsWith('/families/saved-metadata/sources/')){const eid=decodeURIComponent(api.split('/').at(-1)),source=tier.evidence.find(row=>(row.evidence_id||row.citation_id)===eid);assert(source);return fulfill({...source,source_label:source.source_label||source.source_slug,excerpt:source.snippet||'Synthetic original.',status:source.source_status,bibliography:source.bibliographic});}
+    throw Error('Unexpected metadata fixture request '+req.method()+' '+api);
+  });
+  try{
+    await page.goto(origin+'/?answer=saved-metadata');await page.locator('#short-answer [data-block-id]').first().waitFor();
+    assert.deepEqual(await page.locator('#short-answer [data-block-id]').allTextContents(),tier.blocks.map(block=>block.text),'Saved answer/feedback text must remain unchanged');
+    const notes=page.locator('#short-answer .answer-notes');assert.equal(await notes.count(),expected.length?1:0);
+    if(expected.length){
+      const text=await notes.innerText();for(const value of expected)assert(text.includes(value),label+': missing '+value);
+      assert(!text.includes('unsupported_inference'));assert.equal(await notes.locator('p[data-note-kind]').count(),expected.length,'Do not repeat record notes across source passages');
+      assert.equal(await notes.locator('[data-block-id]').count(),0,'Supplementary notes must not change canonical claim anchors');
+      const button=notes.locator('.citation').first();if(await button.count()){await button.click();await page.locator('#source-content blockquote').waitFor();await page.locator('[data-close=source-dialog]').click();}
+    }
+    await page.setViewportSize({width:360,height:800});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    assert.equal(JSON.stringify(tier),before);assert(!calls.some(call=>call.api==='/families'&&call.method==='POST'));
+    report.checks.push({mode:'saved-metadata',case:label,status:'PASS',notes:expected.length,saved_answer_text_unchanged:true,model_calls:0});
+  }finally{await context.close();}
+}
+async function metadataScenarios(){
+  const draft={evidence_id:'draft',local_number:1,source_slug:'synthetic',external_id:'draft-record',source_status:'osnutek – potreben partnerski/uredniški pregled'},history={evidence_id:'history',local_number:2,source_slug:'advice',external_id:'old-record',publication_scope:'individual_advisory_answer',bibliographic:{date:'2026-01-01',signed_date_text:['januar 2014']}};
+  await metadataScenario('synthetic-status-date',{state:'complete',status:'validated',run_id:'synthetic',generation_status:'generated',blocks:[{block_id:'C1',text:'Exact saved answer.',evidence_ids:['draft','history']}],evidence:[draft,history,{...history,evidence_id:'history2',local_number:3}],limitations:[{code:'unsupported_inference',scope:'claim',claim_ids:['C1']}]},['Podpora za del sklepanja','osnutek – potreben partnerski/uredniški pregled','januar 2014']);
+  // Optional replay reads private API captures in place; no source payload is
+  // committed to the public repository and no provider request is made.
+  if(process.env.KLIKAI_SAVED_QUALITY_REPORT){
+    const input=fs.readFileSync(process.env.KLIKAI_SAVED_QUALITY_REPORT),saved=JSON.parse(input);
+    report.saved_quality_report={path:process.env.KLIKAI_SAVED_QUALITY_REPORT,sha256:require('node:crypto').createHash('sha256').update(input).digest('hex')};
+    for(const row of saved.cases.filter(row=>['U07','U09','U11','U12'].includes(row.case_id))){
+      const expected=row.case_id==='U07'?['Podpora za del sklepanja','osnutek – potreben partnerski/uredniški pregled']:row.case_id==='U09'?['letni dodatek','predlog']:row.case_id==='U11'?['osnutek – potreben partnerski/uredniški pregled','januar 2014']:[];
+      await metadataScenario(row.case_id+'/'+row.selection,row.rendered_result,expected);
+    }
+  }
+}
+(async()=>{try{browser=await chromium.launch({headless:true,executablePath:'/opt/google/chrome/chrome',args:['--disable-dev-shm-usage']});for(const mode of ['generated','partial','failure','cancel','matches_retry'])await scenario(mode);await metadataScenarios();assert.deepEqual(report.errors,[]);report.status='PASS';}catch(e){report.status='FAIL';report.error={name:e.name,message:e.message};process.exitCode=1;}finally{if(browser)await browser.close();console.log(JSON.stringify(report));}})();

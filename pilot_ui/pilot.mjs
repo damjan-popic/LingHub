@@ -1,4 +1,4 @@
-import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
@@ -113,6 +113,15 @@ function renderText(tier,kind,node,reference={}) {
     }
     node.append(p);
   }
+  const notes=answerNotes(tier);
+  if(notes.length){
+    const aside=el('aside',null,{class:'answer-notes',lang:state.locale,'aria-label':t('answer_notes')});
+    aside.append(el('p',t('answer_notes'),{class:'answer-notes-heading'}));
+    for(const note of notes){const p=el('p',note.text||t(note.key,note.values),{'data-note-kind':note.category});
+      for(const evidence of note.evidence){const number=evidence.local_number||evidence.number;if(Number.isInteger(number)&&number>0)p.append(citationButton({text:'['+number+']',number,evidence}));}
+      aside.append(p);}
+    node.append(aside);
+  }
 }
 async function recordDelivered(tier,expanded) {
   if(!tier?.run_id||!tier.display_sha256)return;const key=tier.run_id+':'+expanded;if(state.delivered.has(key))return;
@@ -224,8 +233,7 @@ async function openSource(tier,id,kind,reference={}) {
     if(data.title)$('source-content').append(el('h3',data.title));
     const loc=readableLocator(data.locator,{page:t('source_page'),topic:t('source_topic')});if(loc)$('source-content').append(el('p',loc,{class:'source-locator'}));
     if(data.edition)$('source-content').append(el('p',t('edition')+' '+String(data.edition),{class:'source-locator'}));
-    if(/predlog|proposal/i.test(data.status||''))$('source-content').append(el('p',t('proposal_scope'),{class:'source-qualifier'}));
-    if(data.annual_scope||data.publication_scope==='annual_additions')$('source-content').append(el('p',t('annual_scope'),{class:'source-qualifier'}));
+    for(const note of sourceStatusNotes(data))$('source-content').append(el('p',t(note.key,note.values),{class:'source-qualifier'}));
     const excerpt=sourceExcerptPresentation(data);
     $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
     if(tier.run_id&&!reference.comparisonId&&!reference.unusedMatch)$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));

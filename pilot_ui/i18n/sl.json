@@ -319,5 +319,17 @@
   "choose_available_model": "Izberi drug model",
   "model_cpu_lazy": "Na voljo na CPU; naloži se ob zahtevi",
   "attempted_model": "Model v neuspelem poskusu:",
-  "generation_outcome_unknown": "Izid poskusa pri modelu ni znan; zahteva se morda še izvaja. Nadomestna generacija za to vprašanje ni bila zagnana. Ohranjene zadetke lahko pregledate."
+  "generation_outcome_unknown": "Izid poskusa pri modelu ni znan; zahteva se morda še izvaja. Nadomestna generacija za to vprašanje ni bila zagnana. Ohranjene zadetke lahko pregledate.",
+  "answer_notes": "Omejitve in status virov",
+  "source_draft_note": "Uporabljeni vir je osnutek.",
+  "source_proposal_note": "Uporabljeni vir je označen kot predlog.",
+  "source_status_note": "Status navedenega vira: {status}.",
+  "source_annual_note": "Uporabljeni vir je letni dodatek, ne celotni slovar.",
+  "source_signed_date_note": "Odgovor v viru je označen z datumom »{date}«; navedbe je treba razumeti v tem časovnem okviru.",
+  "limitation_partial_evidence": "Dokazila podpirajo le del odgovora. Preverite obseg in pogoje v navedenih odlomkih.",
+  "limitation_no_answer_evidence": "Za odgovor ni dovolj podpornih dokazil.",
+  "limitation_conflicting_evidence": "Navedeni viri se v delu vsebine razlikujejo. Preverite njihove okoliščine in omejitve.",
+  "limitation_source_scope": "Odgovor je omejen na obseg navedenih virov.",
+  "limitation_uncertain_entry_boundary": "Meja izvirnega zapisa ni zanesljivo določena. Preverite izvirnik.",
+  "limitation_unsupported_inference": "Podpora za del sklepanja v odgovoru ni potrjena. Preverite navedene izvirne odlomke."
 }

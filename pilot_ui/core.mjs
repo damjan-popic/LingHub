@@ -19,6 +19,18 @@ export function tierBlocks(tier, kind = 'short') {
   // Legacy text can be displayed, but does not acquire invented feedback block identities.
   return typeof value === 'string' && value ? [{block_id:null,text:value}] : [];
 }
+export function paragraphGroups(blocks) {
+  // Older captures retain their paragraph-per-block layout. A new paragraph
+  // groups only adjacent fragments; it never unions their citation scopes.
+  const groups=[];
+  for (const block of blocks) {
+    const id=typeof block.paragraph_id==='string' && /^P(?:[1-9]|1[0-4])$/.test(block.paragraph_id) ? block.paragraph_id : null;
+    const last=groups.at(-1);
+    if(id && last?.id===id) last.blocks.push(block);
+    else groups.push({id,blocks:[block]});
+  }
+  return groups;
+}
 export function isCpuTask(task) {
   return ['source_search','text_check','terminology','morphology','jezikovna_urgenca','jezikovna_posta'].includes(task);
 }

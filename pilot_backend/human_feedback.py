@@ -18,7 +18,7 @@ PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response
 PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','invalid_response_json','invalid_execution_shape','invalid_content_type','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
 VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed'}
-VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','limitations',
+VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','paragraph_id','depends_on','limitations',
     'code','scope','claim_ids','no_sufficient_evidence','correction_required'}
 VALIDATION_ERROR_TYPES={'model_type','missing','extra_forbidden','string_type','string_too_short','string_too_long',
     'string_pattern_mismatch','list_type','too_long','too_short','literal_error','bool_type','bool_parsing',
@@ -28,7 +28,7 @@ VALIDATION_FAILURE_REASONS={'invalid_composition_envelope','tier_claim_bound_exc
     'requested_locale_differs','abstention_contradicts_claims','empty_supported_answer',
     'limitation_names_unknown_claims','no_evidence_caveat_contradicts_claims','support_bytes_differ'}
 VALIDATION_REASONS={
-    'invalid_independent_claim_schema','invalid_final_prose','unresolved_support_id','unresolved_inline_citation_alias',
+    'invalid_independent_claim_schema','invalid_final_prose','unresolved_support_id','unresolved_inline_citation_alias','dependent_claim_not_retained',
     'generated_bracketed_form_differs_from_original','silent_letter_interpretation_not_explicit_in_selected_support',
     'mentioned_name_form_not_in_selected_support','example_does_not_establish_adjective_definition',
     'entry_presence_does_not_establish_publication_change','uncertain_causal_support_became_unqualified',
@@ -175,7 +175,14 @@ def display_paragraphs(result,tier,locale):
     if tier=='long'and (result.get('correction')or{}).get('required'):
         messages=json.loads((Path(__file__).resolve().parent.parent/'pilot_ui'/'i18n'/(locale+'.json')).read_text())
         paragraphs.append(messages['long_correction_notice'])
-    paragraphs.extend(b['text']for b in result.get('blocks',[])if isinstance(b,dict)and isinstance(b.get('text'),str))
+    previous=None
+    for block in result.get('blocks',[]):
+        if not isinstance(block,dict)or not isinstance(block.get('text'),str):continue
+        pid=block.get('paragraph_id')
+        if isinstance(pid,str)and re.fullmatch(r'P(?:[1-9]|1[0-4])',pid)and pid==previous:
+            paragraphs[-1]+=' '+block['text']
+        else:paragraphs.append(block['text'])
+        previous=pid
     return paragraphs
 
 def observation(db,owner,run,result,created,display_locale):
@@ -196,7 +203,7 @@ def observation(db,owner,run,result,created,display_locale):
             'original_prompt':original[0]if original else family['question'],
             'original_prompt_exact':bool(original),'context':family['context'],
             'displayed_answer': '\n\n'.join(paragraphs),'display_paragraphs':paragraphs,
-            'display_sha256':run['display_hash'],'display_version':DISPLAY_VERSION,
+            'display_sha256':run['display_hash'],'display_version':('pilot-scoped-paragraph-display-v2' if any(b.get('paragraph_id')for b in result.get('blocks',[])) else DISPLAY_VERSION),
             'display_text_sha256':hashlib.sha256('\n\n'.join(paragraphs).encode()).hexdigest(),'display_locale':display_locale,
             'family_id':family['id'],'run_id':run['id'],'answer_revision':run['revision'],
             'timestamp':created,'selected_model':run['model'],

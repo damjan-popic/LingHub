@@ -1,4 +1,4 @@
-import {basePath,localePath,anchorForText,tierBlocks,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
+import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
@@ -99,14 +99,19 @@ function renderText(tier,kind,node,reference={}) {
   clear(node);node.lang=state.family?.locale||state.locale;if(kind==='long'&&tier?.correction?.required)node.append(el('p',t('long_correction_notice'),{class:'qualified-note','data-i18n':'long_correction_notice',role:'status'}));const blocks=tierBlocks(tier,kind);
   if(!blocks.length){node.append(el('p',t(['no_hit','no_answer'].includes(jobState(tier))?'no_hit':jobState(tier)==='rejected'?'answer_guard_failed':jobState(tier)==='cancelled'?'cancelled':jobState(tier)==='failed'?'request_failed':'source_unavailable')));return;}
   const citationButton=part=>{const button=el('button',part.text,{type:'button',class:'citation','aria-label':t('source_number',{number:part.number})});button.addEventListener('click',()=>openSource(tier,evidenceId(part.evidence),kind,reference));return button;};
-  for(const block of blocks){
-    const p=el('p',null);if(block.block_id){p.dataset.blockId=block.block_id;p.dataset.runId=tier.run_id||'';p.dataset.tier=kind;}
-    const presentation=blockTextPresentation(tier,block);
-    for(const part of presentation.parts)p.append(part.evidence?citationButton(part):document.createTextNode(part.text));
+  for(const group of paragraphGroups(blocks)){
+    const p=el('p',null);if(group.id)p.dataset.paragraphId=group.id;
+    for(const [index,block] of group.blocks.entries()){
+      if(index)p.append(document.createTextNode(' '));
+      const span=el('span',null);if(block.block_id){span.dataset.blockId=block.block_id;span.dataset.runId=tier.run_id||'';span.dataset.tier=kind;}
+      const presentation=blockTextPresentation(tier,block);
+      for(const part of presentation.parts)span.append(part.evidence?citationButton(part):document.createTextNode(part.text));
+      p.append(span);
+      // Citations stay beside their assertion, outside its feedback anchor.
+      if(presentation.separateCitation)p.append(citationButton(presentation.separateCitation));
+      for(const citation of presentation.separateCitations||[])p.append(citationButton(citation));
+    }
     node.append(p);
-    // Keep application controls out of the canonical text used for feedback.
-    if(presentation.separateCitation)node.append(citationButton(presentation.separateCitation));
-    for(const citation of presentation.separateCitations||[])node.append(citationButton(citation));
   }
 }
 async function recordDelivered(tier,expanded) {

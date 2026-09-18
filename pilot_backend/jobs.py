@@ -1,6 +1,6 @@
 """Persisted bounded work with short-job priority and starvation prevention."""
 from __future__ import annotations
-import fcntl,json,math,threading,time
+import fcntl,json,math,re,threading,time
 from .store import canonical,digest,stamp
 from .security import Failure
 from .classification import method
@@ -38,7 +38,8 @@ def render_result(value):
         if not isinstance(blocks,list)or len(blocks)>100 or any(not isinstance(b,dict)or not isinstance(b.get('text'),str)for b in blocks):raise Failure('invalid_answer',502)
         for b in blocks:
             if 'evidence_ids'in b and(not isinstance(b['evidence_ids'],list)or len(b['evidence_ids'])>256 or any(not isinstance(eid,str)for eid in b['evidence_ids'])):raise Failure('invalid_answer',502)
-        blocks=[{'block_id':str(b.get('block_id',f'b{i}')),'text':b['text'],**({'evidence_ids':list(b['evidence_ids'])}if'evidence_ids'in b else{})}for i,b in enumerate(blocks)]
+            if 'paragraph_id'in b and(not isinstance(b['paragraph_id'],str)or not re.fullmatch(r'P(?:[1-9]|1[0-4])',b['paragraph_id'])):raise Failure('invalid_answer',502)
+        blocks=[{'block_id':str(b.get('block_id',f'b{i}')),'text':b['text'],**({'evidence_ids':list(b['evidence_ids'])}if'evidence_ids'in b else{}),**({'paragraph_id':b['paragraph_id']}if'paragraph_id'in b else{})}for i,b in enumerate(blocks)]
         if len({b['block_id']for b in blocks})!=len(blocks):raise Failure('invalid_answer',502)
     else:blocks=[{'block_id':'answer','text':out['answer_md']or out['short_answer']}]
     out['blocks']=blocks

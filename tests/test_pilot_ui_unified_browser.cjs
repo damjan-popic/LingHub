@@ -16,8 +16,9 @@ async function scenario(mode){
   const other={evidence_id:'frozen-other',source_slug:'solska',source_label:'Šolska',external_id:'solska:test',title:'Synthetic additional <img src=x onerror=window.unsafe=1>',snippet:'Literal search reference [1], not a generated claim.',used_in_answer:false};
   const coverage=[{family:'editorial',status:'ok',returned_count:2,limit:20,has_more:null},{family:'reference',status:mode==='partial'?'timeout':'no_match',returned_count:0,limit:8,has_more:null},{family:'linghub_tools',source_label:'LingHub',status:'not_documentary',returned_count:0,limit:null,has_more:null}];
   function family(){const settled=phase==='complete',generated=mode==='generated'||mode==='partial',text=generated?'SYNTHETIC GENERATED FIXTURE with a supported claim and unknown [77]. <img src=x onerror=window.unsafe=1>':'SYNTHETIC EXCERPT FALLBACK — generation failed.';
+    const blocks=mode==='generated'?[{block_id:'C1',paragraph_id:'P1',text,evidence_ids:['frozen-used']},{block_id:'C2',paragraph_id:'P1',text:'SYNTHETIC SECOND ASSERTION.',evidence_ids:['frozen-used']}]:[{block_id:'body',text,evidence_ids:generated?['frozen-used']:[]}];
     return {answer_family_id:'owned-family',question:'agriturismo',task:'reference',model:'qwen',locale:'sl',unified_answers:true,matches_available:phase!=='retrieval',long:null,
-      short:{run_id:'synthetic-run',job_id:'synthetic-job',state:phase==='cancelled'?'cancelled':settled?'complete':'running',status:settled?generated?'validated':'source_only':undefined,model:'qwen',progress:{stage:phase},...(settled?{answer_method:generated?'generated':'source_only',generation_status:generated?'generated':'not_generated',blocks:[{block_id:'body',text,evidence_ids:generated?['frozen-used']:[]}],display_sha256:'synthetic-display',evidence:generated?[{...used,used_in_answer:true,local_number:1}]:[],source_badges:generated?[{source_slug:used.source_slug,label:'POŠTA'}]:[],generation:{status:generated?'generated':'failed',provider:generated?{repository:'synthetic/test-provider',device:'cpu'}:null,elapsed_ms:123,first_content_ms:null},retrieval:{status:mode==='partial'?'partial':'complete',coverage,elapsed_ms:12,returned_count:2}}:{})}};
+      short:{run_id:'synthetic-run',job_id:'synthetic-job',state:phase==='cancelled'?'cancelled':settled?'complete':'running',status:settled?generated?'validated':'source_only':undefined,model:'qwen',progress:{stage:phase},...(settled?{answer_method:generated?'generated':'source_only',generation_status:generated?'generated':'not_generated',blocks,display_sha256:'synthetic-display',evidence:generated?[{...used,used_in_answer:true,local_number:1}]:[],source_badges:generated?[{source_slug:used.source_slug,label:'POŠTA'}]:[],generation:{status:generated?'generated':'failed',provider:generated?{repository:'synthetic/test-provider',device:'cpu'}:null,elapsed_ms:123,first_content_ms:null},retrieval:{status:mode==='partial'?'partial':'complete',coverage,elapsed_ms:12,returned_count:2}}:{})}};
   }
   page.on('pageerror',e=>report.errors.push(e.message));
   await context.route('**/*',async route=>{
@@ -81,7 +82,12 @@ async function scenario(mode){
     }
     assert.equal(calls.filter(c=>c.path==='/families'&&c.method==='POST').length,1);
     assert.equal(await page.locator('#short-answer img').count(),0);assert.equal(await page.evaluate(()=>window.unsafe),undefined);
-    assert.equal(await page.locator('#short-answer .citation').count(),mode==='failure'?0:1);
+    assert.equal(await page.locator('#short-answer .citation').count(),mode==='failure'?0:mode==='generated'?2:1);
+    if(mode==='generated'){
+      assert.equal(await page.locator('#short-answer > p[data-paragraph-id=P1]').count(),1);
+      assert.deepEqual(await page.locator('#short-answer [data-block-id]').evaluateAll(nodes=>nodes.map(n=>({id:n.dataset.blockId,text:n.textContent,citation:n.nextElementSibling?.textContent}))),family().short.blocks.map(b=>({id:b.block_id,text:b.text,citation:'[1]'})));
+      assert.equal(await page.locator('#short-answer [data-block-id] .citation').count(),0,'Citation controls must not alter feedback offsets');
+    }
     const notice=await page.locator('#generation-notice').innerText();assert(notice.includes(mode==='failure'?'Model ni pripravil odgovora':'Odgovor je pripravil model'));
     if(mode==='partial')assert((await page.locator('#retrieval-notice').innerText()).includes('Iskanje je delno'));
     assert((await page.locator('#coverage-list').textContent()).includes('ni dokumentarni vir'));
@@ -91,7 +97,7 @@ async function scenario(mode){
     assert.equal(await page.locator('.match-record[data-used=true]').count(),mode==='failure'?0:1);
     await page.locator('#matches-source').selectOption('solska');assert.equal(await page.locator('.match-record').count(),1);assert((await page.locator('.match-use').innerText()).includes('ni citiran'));
     await page.locator('.match-record button').click();await page.locator('#source-content blockquote').waitFor();assert.equal(await page.locator('#source-content blockquote').textContent(),frozen);await page.locator('[data-close=source-dialog]').click();
-    if(mode!=='failure'){await page.locator('#short-answer .citation').click();await page.locator('#source-content blockquote').waitFor();assert.equal(await page.locator('#source-content blockquote').textContent(),frozen);assert((await page.locator('#source-title').innerText()).includes('pošta'));await page.locator('[data-close=source-dialog]').click();}
+    if(mode!=='failure'){await page.locator('#short-answer .citation').first().click();await page.locator('#source-content blockquote').waitFor();assert.equal(await page.locator('#source-content blockquote').textContent(),frozen);assert((await page.locator('#source-title').innerText()).includes('pošta'));await page.locator('[data-close=source-dialog]').click();}
     await selectComposerOption(page,'#task','jezikovna_posta');assert(await page.locator('#task').isVisible());assert(await page.locator('#model').isDisabled());
     await page.setViewportSize({width:360,height:800});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     await page.locator('#account-button').click();await page.locator('#logout-button').click();await page.locator('#login-view').waitFor({state:'visible'});assert.equal(await page.locator('.match-record').count(),0);assert.equal(await page.locator('#matches-panel').isVisible(),false);

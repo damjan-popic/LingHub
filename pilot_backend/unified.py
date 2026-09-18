@@ -413,6 +413,10 @@ def generate(gateway, bundle, tier, model, parent=None):
                     if (not isinstance(ids,list)or not ids or any(eid not in cited for eid in ids)
                             or set(ids)!={evidence_id(c)for c in citations if c.get('claim_id')==block.get('block_id')}):
                         raise Failure('unknown_citation',502)
+                    if 'paragraph_id' in block:
+                        claim=next((c for c in result.get('claims',[]) if c.get('claim_id')==block.get('block_id')),None)
+                        if not claim or claim.get('paragraph_id')!=block['paragraph_id']:
+                            raise Failure('unknown_citation',502)
         elapsed = round((time.monotonic() - started) * 1000, 3)
         if not generated:
             from .human_feedback import provider_diagnostics,generation_validation_diagnostics

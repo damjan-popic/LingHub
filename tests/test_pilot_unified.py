@@ -406,7 +406,8 @@ def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypa
     assert view==source_views([passage])[0][0]
 
 
-def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_path,monkeypatch):
+@pytest.mark.parametrize('connected',[False,True])
+def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_path,monkeypatch,connected):
     """Real producer→signed gateway→validated composition→owned pilot consumer.
 
     Only documentary HTTP responses and the model transport are synthetic. The
@@ -449,6 +450,10 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
                     ids.append(next(s['support_id']for s in entry['supports']if 'Huga' in s['text']))
                 raw=composition()
                 raw['claims'][0]['support_ids']=ids
+                if connected:
+                    raw['claims'][0].update(paragraph_id='P1',support_ids=[ids[0]])
+                    raw['claims'].append({'claim_id':'C2','text':'Izvirna rodilniška oblika je Huga.',
+                        'support_ids':[ids[1]],'paragraph_id':'P1'})
                 clients['qwen'].post.return_value['choices'][0]['message']['content']=json.dumps(raw)
                 result=runtime.generate(GenerateRequest(**payload))
                 self.producer_result=deepcopy(result)
@@ -463,7 +468,10 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
         assert short['generation']['status']=='generated',short
         assert {row['source_slug']for row in short['evidence']}=={'jezikovna_posta','jezikovna_svetovalnica'}
         assert clients['qwen'].post.call_count==1 and clients['gemma'].post.call_count==0
-        assert short['blocks'][0]['evidence_ids']==[row['evidence_id']for row in short['citations']]
+        assert short['blocks'][0]['evidence_ids']==[row['evidence_id']for row in short['citations'] if row['claim_id']=='C1']
+        if connected:
+            assert [b['paragraph_id']for b in short['blocks']]==['P1','P1']
+            assert short['blocks'][0]['evidence_ids']!=short['blocks'][1]['evidence_ids']
         assert '['not in short['answer_md']
         # Exercise the real source_views producer shape, rather than replacing it
         # with the canonical evidence_id shape used by synthetic browser fixtures.

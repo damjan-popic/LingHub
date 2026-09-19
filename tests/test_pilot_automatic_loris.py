@@ -17,6 +17,8 @@ from pilot_backend.store import digest
     'Katero začetnico uporabimo pri imenu Novo mesto?',
     'Kako se pravilno napiše »v Novem mestu«?',
     'Ali je prav Nova Gorica ali Nova gorica?',
+    'Ali pišemo Stari trg ali Stari Trg?',
+    'Ali pišemo Nova gorica ali Nova Gorica?',
     'Katero začetnico uporabimo pri imenu Kranjska Gora?',
     'Ali je prav disleksik ali dislektik?',
     'Kaj pomeni beseda »sopomenka«?',

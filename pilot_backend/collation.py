@@ -34,7 +34,7 @@ _AUTO_INTENTS = {
     'sl': (
         ('capitalization', r'\b(?:začetnic\w*|(?:velik\w*|mal\w*)\s+črk\w*)\b'),
         ('place_name', r'\b(?:krajevn\w*|zemljepisn\w*|naselbinsk\w*)\s+imen\w*\b'),
-        ('spelling', r'\bkako\s+(?:(?:naj|se|pravilno)\s+)*(?:piš\w*|zapiš\w*|napiš\w*)\b'),
+        ('spelling', r'\b(?:kako|ali)\s+(?:(?:naj|se|pravilno)\s+)*(?:piš\w*|zapiš\w*|napiš\w*)\b'),
         ('lexical_choice', r'\b(?:ali|kaj|kater[ai])\s+(?:je|sta|so)\s+(?:prav|pravil\w*|ustrez\w*)\b'),
         ('lexical_meaning', r'\bkaj\s+pomen\w*\b'),
     ),

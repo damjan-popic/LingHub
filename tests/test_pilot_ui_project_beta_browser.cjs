@@ -24,6 +24,7 @@ async function scenario(saved,mode,width){
   if(api==='/feedback'&&request.method()==='GET')return json({feedback:[]});
   if(api==='/feedback'){feedback=request.postDataJSON();return json({acknowledged:true,feedback_id:'private-feedback'});}
   if(api==='/families'&&request.method()==='POST'){const submitted=request.postDataJSON();assert(!('model'in submitted));assert.equal(submitted.task,'reference');submissions++;if(mode==='clarification'&&submissions===1)return json({status:'clarification_required',clarification:{code:'input_language_required',fields:['input_language']}});if(mode==='clarification')assert.equal(submitted.input_language,'sl');return json({family:response()});}
+  if(api==='/families'&&request.method()==='GET')return json({families:[]});
   if(api==='/families/'+family.answer_family_id)return json(response());
   if(api==='/jobs/fixture-job')return json({job_id:'fixture-job',state:complete?'complete':'running',progress:{stage:'generation',matches_ready:true}});
   if(api.endsWith('/sources'))return json({...saved.sources,usage_final:complete});
@@ -35,6 +36,15 @@ async function scenario(saved,mode,width){
  try{
   await page.goto(origin+'/?answer='+family.answer_family_id);await page.locator('#answer-card').waitFor({state:'visible'});
   assert.equal(await page.locator('#beta-explorer').isVisible(),false);assert.equal(await page.locator('#options-toggle').isVisible(),false);assert.equal(await page.locator('#account-button').isVisible(),false);assert.equal(await page.locator('#answer-model').isVisible(),false);assert.equal(await page.locator('#compare-button').isVisible(),false);assert.equal(await page.locator('.quality-form').count(),0);
+  if(mode==='saved'&&width===390){
+   await page.locator('#history-toggle').click();await page.locator('#history-list p').waitFor();
+   assert.equal(await page.locator('#shared-history-note').innerText(),'Prejšnja vprašanja so skupna vsem, ki uporabljajo isti projektni račun.');
+   assert.equal(await page.locator('#history-list').innerText(),'S tem projektnim računom še ni bilo poslano nobeno vprašanje.');
+   await page.locator('[data-locale=it]').click();
+   assert.equal(await page.locator('#shared-history-note').innerText(),'Le domande precedenti sono condivise da tutte le persone che usano lo stesso account di progetto.');
+   assert.equal(await page.locator('#history-list').innerText(),'Non sono ancora state inviate domande con questo account di progetto.');
+   await page.locator('[data-locale=sl]').click();await page.locator('#history-toggle').click();
+  }
   const answer=await page.locator('#short-answer').textContent();
   if(mode==='qualification'){const notes=await page.locator('.answer-notes').innerText();assert(notes.includes('Podpora za del sklepanja'));assert(notes.includes('osnutek'));assert(notes.includes('letni dodatek'));assert.equal(await page.locator('#beta-explorer').isVisible(),false);}
   if(mode==='saved'){await page.waitForFunction(()=>!document.querySelector('#short-feedback button')?.disabled);assert.equal(await page.locator('#short-feedback button').innerText(),'Sporoči težavo');assert.equal(await page.locator('#short-answer [data-block-id]').count(),family.short.blocks.length);assert.deepEqual(await page.locator('#short-answer [data-block-id]').allTextContents(),family.short.blocks.map(b=>b.text));

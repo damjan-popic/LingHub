@@ -362,5 +362,7 @@
   "beta_notices_copy": "Viri pod »Preberi več« prikazujejo zapise, ki jih je iskanje vrnilo. Navedki v odgovoru odprejo uporabljeno gradivo. Pri starejših nasvetih, osnutkih in predlogih upoštevajte datum in status izvirnika.",
   "beta_updated": "Posodobljeno {date}",
   "beta_record_parts": "Odlomki tega zapisa",
-  "beta_record_part": "Odlomek {number}"
+  "beta_record_part": "Odlomek {number}",
+  "shared_history_note": "Prejšnja vprašanja so skupna vsem, ki uporabljajo isti projektni račun.",
+  "shared_history_empty": "S tem projektnim računom še ni bilo poslano nobeno vprašanje."
 }

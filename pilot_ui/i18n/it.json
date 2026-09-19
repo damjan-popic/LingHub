@@ -362,5 +362,7 @@
   "beta_notices_copy": "Le fonti sotto «Leggi di più» mostrano i record restituiti dalla ricerca. Le citazioni nella risposta aprono il materiale utilizzato. Considerate la data e lo stato degli originali per consigli meno recenti, bozze e proposte.",
   "beta_updated": "Aggiornato il {date}",
   "beta_record_parts": "Brani di questa voce",
-  "beta_record_part": "Brano {number}"
+  "beta_record_part": "Brano {number}",
+  "shared_history_note": "Le domande precedenti sono condivise da tutte le persone che usano lo stesso account di progetto.",
+  "shared_history_empty": "Non sono ancora state inviate domande con questo account di progetto."
 }

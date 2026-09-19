@@ -42,6 +42,7 @@ async function scenario(mode){
   });
   try{
     await page.goto(origin+'/');await page.locator('#app-view').waitFor({state:'visible'});
+    assert.equal(await page.locator('#shared-history-note').getAttribute('hidden'),'','Shared-account note stays hidden for an ordinary account');
     assert.equal(await page.locator('#options').isVisible(),false);assert.equal(await page.locator('#model').isVisible(),false);assert.equal(await page.locator('#task').isVisible(),false);assert.equal(await page.locator('#input-language').isVisible(),false);
     await page.locator('#question').fill('agriturismo');await page.locator('#ask-button').click();
     await page.waitForFunction(()=>document.querySelector('#job-message').textContent.includes('povezanih virih'));

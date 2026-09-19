@@ -17,11 +17,11 @@
   <p id="public-release" class="release-label"></p>
   <div id="global-status" class="status" role="status" aria-live="polite"></div>
   <section id="login-view" class="login-card" hidden>
-    <div class="small-rule" aria-hidden="true"></div><h1 data-i18n="welcome"></h1><p class="muted" data-i18n="login_intro"></p>
+    <div class="small-rule" aria-hidden="true"></div><h1 class="login-greeting"><span data-i18n="welcome"></span> <span class="wordmark" role="img" aria-label="KLIKai">klik<span>ai</span></span></h1><p class="muted" data-i18n="login_intro"></p>
     <form id="login-form"><label for="username" data-i18n="username"></label><input id="username" name="username" autocomplete="username" maxlength="200" required>
       <label for="password" data-i18n="password"></label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required><button id="password-visibility" class="plain" type="button" data-i18n="show_password"></button></div>
       <p id="login-error" class="error" role="alert"></p><button class="primary wide" type="submit" data-i18n="sign_in"></button>
-    </form><p class="small muted" data-i18n="password_reset_help"></p>
+    </form>
   </section>
   <section id="password-view" class="login-card" hidden><h1 data-i18n="password_change"></h1><p id="password-notice" class="muted" data-i18n="password_required"></p>
     <form id="password-form"><label for="current-password" data-i18n="password_current"></label><input id="current-password" type="password" autocomplete="current-password" required maxlength="1024"><label for="new-password" data-i18n="password_new"></label><input id="new-password" type="password" autocomplete="new-password" required maxlength="1024"><label for="confirm-password" data-i18n="password_confirm"></label><input id="confirm-password" type="password" autocomplete="new-password" required maxlength="1024"><p id="password-error" class="error" role="alert"></p><button class="primary wide" type="submit" data-i18n="save"></button><button id="password-cancel" class="plain wide" type="button" data-i18n="cancel"></button></form>

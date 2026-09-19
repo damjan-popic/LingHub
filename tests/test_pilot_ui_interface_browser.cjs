@@ -60,18 +60,18 @@ async function legendAndCopy(width){
   await page.clock.setSystemTime(new Date('2035-01-01T00:00:00Z'));assert.equal(await page.locator('#public-release').innerText(),label);
   await page.goto(origin+'/?answer=saved-answer');await page.locator('#short-answer .citation').first().waitFor();
   const body=await page.locator('#short-answer').innerText(),answer=await page.locator('#short-answer').textContent();
-  await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Kopirano');
+  await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Kopirano');assert.equal(await page.evaluate(()=>document.activeElement.id),'copy-answer','Successful copy retains button focus');
   const copied=await page.evaluate(()=>window.copiedText);
   assert.equal(copied,body.trim()+'\n\nViri\n[1] ePravopis — First cited entry\n[2] ePravopis — Second cited entry');
   assert(copied.includes('osnutek'));assert(!copied.includes('Uncited'));assert(!copied.includes('opaque'));assert(!copied.includes('/api/'));
-  await screenshot(page,'copy-'+width);await page.evaluate(()=>window.clipboardFailure=true);await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Besedilo lahko označite in kopirate.');
+  await screenshot(page,'copy-'+width);await page.evaluate(()=>window.clipboardFailure=true);await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Besedilo lahko označite in kopirate.');assert.equal(await page.evaluate(()=>document.activeElement.id),'copy-answer','Clipboard failure retains button focus');
   const noRequest=calls.length;await page.locator('#source-legend-open').click();await page.keyboard.press('Escape');assert.equal(calls.length,noRequest);assert.equal(await page.locator('#short-answer').textContent(),answer);
   await page.locator('#expand-button').click();await page.locator('.explorer-badge').click();await page.locator('.explorer-entry').waitFor();
   const symbol=await page.locator('.explorer-badge .source-symbol').textContent();await page.locator('#source-legend-open').click();assert.equal(await page.locator('#source-legend-list [data-source=epravopis] .source-symbol').textContent(),symbol);await page.keyboard.press('Escape');assert.equal(await page.locator('.explorer-entry').count(),1);
   await page.locator('#short-answer .citation').first().click();await page.waitForFunction(()=>document.querySelector('#source-content').textContent.includes('Full saved original.'));await page.keyboard.press('Escape');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   assert.equal(calls.filter(c=>c.method==='POST'&&c.api==='/families').length,0);
-  report.checks.push({case:'legend-copy-release',width,status:'PASS',configured_collections:expected.length,no_query_required:true,clipboard_failure_honest:true});
+  report.checks.push({case:'legend-copy-release',width,status:'PASS',configured_collections:expected.length,no_query_required:true,clipboard_failure_honest:true,copy_focus_retained_on_success_and_failure:true});
  }finally{await f.context.close();}
 }
 async function waiting(matches,ending){

@@ -394,9 +394,9 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json'}:raise Failure('not_found',404)
+        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
         target=ui/asset
-        if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n'}:raise Failure('not_found',404)
+        if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n',ui/'brand'}:raise Failure('not_found',404)
         return FileResponse(target)
     async def shell(locale):
         source=(ui/'index.html').read_text();return HTMLResponse(source.replace('__PILOT_BASE__',base).replace('__PILOT_LOCALE__',locale))

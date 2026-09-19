@@ -30,3 +30,16 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 .footer-links{align-items:center}.footer-links>span{display:inline-block}.source-legend-list{list-style:none;margin:20px 0 0;padding:0;display:grid;gap:12px}.source-legend-list li{display:flex;align-items:center;gap:12px;font-size:.86rem;line-height:1.45}.source-symbol{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:2em;height:2em;border:1px solid var(--line);border-radius:7px;background:var(--green-tint);color:var(--green-dark);font-size:.7rem;font-weight:650}.explorer-badge{display:inline-flex;align-items:center;gap:7px}.explorer-badge .source-symbol{font-size:.6rem}.source-legend-list li>span:last-child{overflow-wrap:anywhere}
 
 .release-label{font-size:.72rem;line-height:1.6;color:var(--muted);margin:0 3px 10px}.beta-notice{margin-bottom:18px}
+
+/* Institutional footer follows the shared Jezik na klik / LORIS identity. */
+.site-footer{display:block;width:100%;margin:0;padding:0;border:0;background:#f4f4f4;color:#292e31;line-height:1.5}
+.footer-inner{width:min(1092px,calc(100% - 60px));margin:0 auto;padding:28px 0 16px}
+.footer-partners{display:grid;grid-template-columns:1fr 1fr;gap:36px}
+.footer-partner{min-width:0}.partner-logo{display:flex;align-items:center;width:max-content;max-width:100%;height:84px;margin-bottom:8px}
+.partner-logo img{display:block;object-fit:contain;object-position:left center;max-width:100%;height:auto;max-height:84px}.region-logo img{width:378px}.slori-logo img{width:175px}
+.partner-social{display:flex;gap:10px;margin:0 0 8px -11px}.partner-social a{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;color:var(--green);border-radius:4px;text-decoration:none}.partner-social a:hover{background:#e5eded;color:var(--green-dark)}
+.partner-social svg{width:22px;height:24px;fill:currentColor;stroke:none}
+.footer-partner h2{font-size:22px;font-weight:650;letter-spacing:normal;line-height:1.4;margin:0 0 3px}
+.footer-partner address{display:flex;flex-direction:column;align-items:flex-start;font-style:normal;font-size:20px;line-height:1.6}.footer-partner address a{color:var(--green);text-decoration:none}.footer-partner address a:hover{text-decoration:underline}
+.footer-utilities{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;border-top:1px solid #dfe3e3;margin-top:24px;padding-top:12px;color:var(--muted);font-size:.68rem}.footer-project{font-weight:650;text-decoration:none}.footer-links>span{line-height:36px}
+@media(max-width:760px){.footer-inner{width:calc(100% - 38px);padding-top:25px}.footer-partners{grid-template-columns:1fr;gap:28px}.footer-partner h2{font-size:20px}.footer-partner address{font-size:18px}.footer-utilities{align-items:flex-start;flex-direction:column;gap:5px}.footer-links{gap:2px 16px}.footer-links>span{line-height:32px}}

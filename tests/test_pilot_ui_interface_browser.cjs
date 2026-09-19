@@ -17,7 +17,7 @@ async function setup(width,{pending=false,matches=true,authenticated=true}={}){
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url());assert.equal(u.origin,origin,'No external requests');
   const json=value=>route.fulfill({contentType:'application/json',body:JSON.stringify(value)});
-  if(u.pathname.startsWith('/assets/')){const name=u.pathname.slice(8);assert(!name.includes('..'));return route.fulfill({contentType:name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'application/json',body:fs.readFileSync(path.join(assets,name))});}
+  if(u.pathname.startsWith('/assets/')){const name=u.pathname.slice(8);assert(!name.includes('..'));return route.fulfill({contentType:({'.mjs':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png'})[path.extname(name)]||'application/json',body:fs.readFileSync(path.join(assets,name))});}
   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(assets,'index.html'),'utf8').replaceAll('__PILOT_BASE__','').replaceAll('__PILOT_LOCALE__','sl')});
   const api=u.pathname.slice('/api/pilot'.length);calls.push({api,method:req.method()});
   if(api==='/session')return json({authenticated,user:authenticated?{username:'fixture',role:'tester',shared_group:true,can_change_password:false}:null,csrf_token:'fixture',capabilities:{project_beta:true,documentary_sources:configured,beta_updated:'UNRELATED OLD DATE'}});
@@ -34,7 +34,7 @@ async function setup(width,{pending=false,matches=true,authenticated=true}={}){
  });
  return {context,page,calls,finish(){complete=true;},fail(){jobState='failed';}};
 }
-async function screenshot(page,name){if(output)await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});}
+async function screenshot(page,name){if(output){if(name.startsWith('footer-'))await page.locator('footer').screenshot({path:path.join(output,name+'.png')});else await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});}}
 async function legendAndCopy(width){
  const f=await setup(width),{page,calls}=f;
  try{

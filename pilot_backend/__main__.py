@@ -23,6 +23,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--store',type=Path);sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('init')
     invite=sub.add_parser('invite-admin');invite.add_argument('--username',required=True);invite.add_argument('--password-file',type=Path,required=True);invite.add_argument('--bootstrap-id')
+    project=sub.add_parser('project-accounts');project.add_argument('--credentials-file',type=Path,required=True)
     status=sub.add_parser('bootstrap-status');status.add_argument('--bootstrap-id',required=True)
     a=sub.add_parser('analysis');a.add_argument('--output-dir',type=Path)
     a=sub.add_parser('adaptation');a.add_argument('--candidates',type=Path);a.add_argument('--validation',type=Path);a.add_argument('--config',type=Path);a.add_argument('--cases',type=Path);a.add_argument('--cases-sha256')
@@ -58,6 +59,9 @@ def main():
         if args.store is None:p.error('--store is required')
         store=Store(args.store)
         if args.command=='init':result={'status':'initialized','schema':store.meta('schema')}
+        elif args.command=='project-accounts':
+            from .project_accounts import provision
+            result=provision(store,args.credentials_file)
         elif args.command=='invite-admin':
             path=args.password_file
             if path.is_symlink()or path.stat().st_mode&0o077 or path.stat().st_uid!=os.geteuid():raise ValueError('Password input must be an owned protected0600 file')

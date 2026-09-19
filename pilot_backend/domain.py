@@ -150,7 +150,7 @@ class Domain:
     def families(self,owner):
         with self.store.connect()as db:ids=[r[0]for r in db.execute('SELECT id FROM families WHERE owner=?ORDER BY created DESC LIMIT 100',(owner,))]
         return {'families':[self.family(owner,fid)for fid in ids]}
-    def matches(self,owner,fid,offset=0,limit=20):
+    def matches(self,owner,fid,offset=0,limit=20,source=None,summary=False):
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
@@ -158,9 +158,18 @@ class Domain:
             latest={}
             for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):
                 latest[row['tier']]=json.loads(row['result'])if row['result']else{}
+            usage_final=not bool(db.execute("SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND state IN ('queued','running') LIMIT 1",(fid,)).fetchone())
+            if source is not None or summary:
+                generated=[r for r in latest.values()if r.get('answer_kind')in {'generated','mixed'}]
+                cited={unified.evidence_id(e)for result in generated for e in result.get('citations',[])if isinstance(e,dict)}
+                cited.update(eid for result in generated for b in result.get('blocks',[])for eid in b.get('evidence_ids',[]))
+                page=(unified.source_summary(bundle,cited,usage_final)if summary else
+                      unified.source_records_page(bundle,cited,source,offset,limit,usage_final))
+                page['answer_status']='pending'if not usage_final else'generated'if generated else'no_support'
+                return page
             used={unified.evidence_id(e)for result in latest.values()for e in result.get('evidence',[])if isinstance(e,dict)}
             page=unified.matches_page(bundle,used,offset,limit)
-            page['usage_final']=not bool(db.execute("SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND state IN ('queued','running') LIMIT 1",(fid,)).fetchone())
+            page['usage_final']=usage_final
             return page
     def job(self,owner,jid):
         with self.store.connect()as db:

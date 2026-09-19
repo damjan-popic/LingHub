@@ -470,3 +470,61 @@ def matches_page(bundle, used, offset=0, limit=20):
     return {'items': rows, 'offset': offset, 'limit': limit, 'returned_count': count,
             'next_offset': offset + limit if offset + limit < count else None,
             'corpus_total': None, 'coverage': deepcopy(bundle['retrieval']['coverage'])}
+
+
+def record_groups(bundle, used, usage_final=True):
+    """Group stored occurrences by native source/record/edition, never by title.
+
+    Source slugs remain registry identities, not ontology labels. Every exact
+    passage target survives in evidence_ids, including uncited/later-page hits.
+    If no native record identity exists, retain the separate evidence target.
+    """
+    checked(bundle)
+    grouped = {}
+    for item in bundle['matches']:
+        source = item.get('source', {})
+        locator = source.get('locator') or {}
+        external = item.get('external_id') or source.get('external_id') or evidence_id(item)
+        edition = source.get('edition') or item.get('edition')
+        revision = (item.get('source_revision') or source.get('source_revision')
+                    or item.get('capture_sha256') or locator.get('capture_sha256'))
+        occurrence = locator.get('post_id') or locator.get('entry_id') or source.get('entry_identity')
+        key = canonical([item['source_slug'], external, edition, revision, occurrence])
+        if key not in grouped:
+            bibliography = source.get('bibliography') or item.get('bibliography') or {}
+            grouped[key] = {'record_id': 'record-' + str(len(grouped) + 1),
+                'source_slug': item['source_slug'],
+                'source_label': item.get('source_label') or source.get('source_label') or item['source_slug'],
+                'title': item.get('title') or source.get('title') or item.get('source_label') or source.get('source_label') or 'Vir',
+                'preview': (item.get('snippet') or '')[:220],
+                'evidence_id': evidence_id(item), 'evidence_ids': [],
+                'edition': edition, 'status': source.get('status') or item.get('source_status'),
+                'bibliography': {k: deepcopy(bibliography[k]) for k in
+                    ('authors', 'date', 'signed_date_text', 'publisher', 'publication_date', 'title')
+                    if k in bibliography}, 'used_in_answer': None if not usage_final else False}
+        row = grouped[key]
+        target = evidence_id(item)
+        if target not in row['evidence_ids']:row['evidence_ids'].append(target)
+        if usage_final and target in used:row['used_in_answer'] = True
+    return list(grouped.values())
+
+
+def source_summary(bundle, used, usage_final=True):
+    groups = record_groups(bundle, used, usage_final)
+    sources = {}
+    for item in groups:
+        source = sources.setdefault(item['source_slug'], {'source_slug': item['source_slug'],
+            'source_label': item['source_label'], 'returned_count': 0})
+        source['returned_count'] += 1
+    return {'sources': list(sources.values()), 'returned_count': len(groups),
+            'count_scope': 'returned_unique_records', 'usage_final': usage_final}
+
+
+def source_records_page(bundle, used, source, offset=0, limit=20, usage_final=True):
+    if (not isinstance(source, str) or not source or type(offset) is not int or offset < 0
+            or type(limit) is not int or not 1 <= limit <= 50):raise Failure('invalid_request')
+    rows = [r for r in record_groups(bundle, used, usage_final) if r['source_slug'] == source]
+    count = len(rows)
+    return {'items': rows[offset:offset + limit], 'source_slug': source, 'offset': offset,
+        'limit': limit, 'returned_count': count, 'next_offset': offset + limit if offset + limit < count else None,
+        'count_scope': 'returned_unique_records', 'usage_final': usage_final, 'corpus_total': None}

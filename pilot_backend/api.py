@@ -1,7 +1,7 @@
 """Small authenticated same-origin pilot surface; internal APIs stay private."""
 from __future__ import annotations
 from contextlib import asynccontextmanager
-import asyncio,csv,hashlib,hmac,io,ipaddress,json,os,secrets,threading
+import asyncio,csv,hashlib,hmac,io,ipaddress,json,os,re,secrets,threading
 from pathlib import Path
 from urllib.parse import urlsplit
 from fastapi import FastAPI,Request
@@ -15,11 +15,13 @@ from .adapter import Gateway
 from .adoption import historical_source
 from .editorial import OPERATOR_POLICY_ID
 from . import unified
+from .presentation import tester_view,delivery_token
+from .project_accounts import COHORT as PROJECT_COHORT
 
 MESSAGES={'sl':{'login_required':'Prijavite se.','login_failed':'Prijava ni uspela.','login_throttled':'Preveč poskusov. Poskusite pozneje.','invalid_request':'Zahteva ni veljavna.','not_found':'Zapis ni na voljo.','forbidden':'Dostop ni dovoljen.','csrf_failed':'Osvežite stran in poskusite znova.','password_change_required':'Najprej spremenite začasno geslo.'},'it':{'login_required':'Accedi.','login_failed':'Accesso non riuscito.','login_throttled':'Troppi tentativi. Riprova più tardi.','invalid_request':'Richiesta non valida.','not_found':'La voce non è disponibile.','forbidden':'Accesso non consentito.','csrf_failed':'Aggiorna la pagina e riprova.','password_change_required':'Prima cambia la password temporanea.'}}
 
-MESSAGES['sl']['generation_waiting_capacity']='Izbrani model trenutno nima razpoložljivih zmogljivosti. Iskanje po virih in natančna orodja so na voljo.'
-MESSAGES['it']['generation_waiting_capacity']='Il modello selezionato non ha capacità disponibile. La ricerca nelle fonti e gli strumenti esatti sono disponibili.'
+MESSAGES['sl']['generation_waiting_capacity']='Priprava odgovora trenutno ni na voljo. Najdene vire lahko še vedno pregledate.'
+MESSAGES['it']['generation_waiting_capacity']='La preparazione della risposta non è al momento disponibile. Puoi comunque consultare le fonti trovate.'
 
 def config_checked(config):
     c=dict(config);base=c.get('base_path','').rstrip('/')
@@ -34,9 +36,15 @@ def config_checked(config):
         if p.scheme!='https'and(c['secure_cookies']or p.hostname not in {'127.0.0.1','localhost','::1'}):raise ValueError('HTTP is allowed only in explicit loopback development')
     c.setdefault('human_testing_mode',False);c.setdefault('comparisons_enabled',not c['human_testing_mode']);c.setdefault('editorial_full_records',False)
     c.setdefault('unified_answers',False)
+    c.setdefault('project_beta',False)
+    if type(c['project_beta'])is not bool:raise ValueError('Project beta capability must be boolean')
+    for key in ('beta_updated','beta_release'):
+        if key in c and(not isinstance(c[key],str)or not 1<=len(c[key])<=120):raise ValueError('Invalid beta release label')
+    if c.get('release_id')is not None and(not isinstance(c['release_id'],str)or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}',c['release_id'])):raise ValueError('Invalid release label')
     if type(c['unified_answers'])is not bool:raise ValueError('Unified answers capability must be boolean')
     if c['unified_answers']and not c.get('klikai_url'):raise ValueError('Unified answers require a configured KLIKai API')
     if not isinstance(c['models'],(list,tuple))or not c['models']or any(not isinstance(model,str)or model not in {'auto','qwen','gemma'}for model in c['models'])or len(set(c['models']))!=len(c['models']):raise ValueError('Configure explicit supported model choices')
+    if c['project_beta']and(not c['unified_answers']or'qwen'not in c['models']):raise ValueError('Project beta requires unified own-Qwen routing')
     if'auto'in c['models']and not c['unified_answers']:raise ValueError('Automatic model choice requires unified answers')
     if type(c['editorial_full_records'])is not bool:raise ValueError('Editorial full-record capability must be boolean')
     c.setdefault('editorial_operator_policy_id',None)
@@ -48,7 +56,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers']);domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers']);password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers']);domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
@@ -106,11 +114,21 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if not password_gate.acquire(blocking=False):raise Failure('login_busy',429)
         try:return await run_in_threadpool(fn,*args)
         finally:password_gate.release()
-    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change'])},'capabilities':{'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}}
+    def beta(s):return config['project_beta']and s['role']=='tester'
+    def shared_group(s):return s.get('cohort')==PROJECT_COHORT
+    def present(s,value):return tester_view(value,s['id'],store.meta('audit_salt'))if beta(s)else value
+    def operator_presentation(request):
+        s=user(request)
+        if beta(s):raise Failure('forbidden',403)
+        return s
+    def capability_result(s):
+        if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'comparisons':False,**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
+        return {'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
+    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
     def set_session(token,s):
         result=JSONResponse(session_result(s));result.set_cookie(cookie,token,httponly=True,secure=config['secure_cookies'],samesite='strict',path=base+'/'if base else'/',max_age=auth.absolute);return result
     @app.get(base+'/health')
-    async def health():return {'status':'ok'}
+    async def health():return {'status':'ok',**({'release_id':config['release_id']}if config.get('release_id')else{})}
     @app.get(api+'/session')
     async def session(request:Request):
         try:s=auth.session(request.cookies.get(cookie));return session_result(s)
@@ -132,30 +150,54 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         user(request,False);auth.logout(request.cookies.get(cookie));r=JSONResponse({'acknowledged':True});r.delete_cookie(cookie,path=base+'/'if base else'/');return r
     @app.post(api+'/password')
     async def password(request:Request):
-        u=user(request,False);p=await payload(request);token,s=await password_call(auth.change_password,u['id'],text(p.get('current_password'),1024),text(p.get('new_password'),1024));return set_session(token,s)
+        u=user(request,False)
+        if shared_group(u):raise Failure('forbidden',403)
+        p=await payload(request);token,s=await password_call(auth.change_password,u['id'],text(p.get('current_password'),1024),text(p.get('new_password'),1024));return set_session(token,s)
     @app.get(api+'/families')
-    async def families(request:Request):return domain.families(user(request)['id'])
+    async def families(request:Request):
+        u=user(request);return present(u,domain.families(u['id']))
     @app.get(api+'/capabilities')
     async def capabilities(request:Request):
-        user(request)
-        result={'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
+        u=user(request);result=capability_result(u)
+        if beta(u):return result
         if hasattr(adapter,'capabilities'):result.update(await run_in_threadpool(adapter.capabilities))
         return result
     @app.post(api+'/families')
-    async def new_family(request:Request):return await run_in_threadpool(domain.create_family,user(request)['id'],await payload(request))
+    async def new_family(request:Request):
+        u=user(request);p=await payload(request)
+        if beta(u):
+            if p.get('task','reference')!='reference':raise Failure('forbidden',403)
+            p['model']='qwen'
+        return present(u,await run_in_threadpool(domain.create_family,u['id'],p))
     @app.get(api+'/families/{fid}')
-    async def family(fid:str,request:Request):return domain.family(user(request)['id'],fid)
+    async def family(fid:str,request:Request):
+        u=user(request);return present(u,domain.family(u['id'],fid))
+    @app.get(api+'/families/{fid}/sources')
+    async def family_sources(fid:str,request:Request):
+        u=user(request);return present(u,domain.matches(u['id'],fid,summary=True))
     @app.get(api+'/families/{fid}/matches')
-    async def family_matches(fid:str,request:Request,offset:int=0,limit:int=20):
-        return domain.matches(user(request)['id'],fid,offset,limit)
+    async def family_matches(fid:str,request:Request,offset:int=0,limit:int=20,source:str|None=None):
+        u=user(request);return present(u,domain.matches(u['id'],fid,offset,limit,source=source))
     @app.post(api+'/families/{fid}/expand')
-    async def expand(fid:str,request:Request):return await run_in_threadpool(domain.expand,user(request)['id'],fid,await payload(request))
+    async def expand(fid:str,request:Request):
+        u=user(request)
+        if beta(u)and domain.family(u['id'],fid)['model']!='qwen':raise Failure('expansion_unavailable',409)
+        return present(u,await run_in_threadpool(domain.expand,u['id'],fid,await payload(request)))
     @app.get(api+'/jobs/{jid}')
-    async def job(jid:str,request:Request):return domain.job(user(request)['id'],jid)
+    async def job(jid:str,request:Request):
+        u=user(request);return present(u,domain.job(u['id'],jid))
     @app.post(api+'/jobs/{jid}/cancel')
-    async def cancel(jid:str,request:Request):return domain.cancel(user(request)['id'],jid)
+    async def cancel(jid:str,request:Request):
+        u=user(request);return present(u,domain.cancel(u['id'],jid))
     @app.post(api+'/runs/{rid}/delivered')
-    async def delivered(rid:str,request:Request):return domain.delivered(user(request)['id'],rid,await payload(request))
+    async def delivered(rid:str,request:Request):
+        u=user(request);p=await payload(request)
+        if beta(u):
+            with store.connect()as db:r=domain.run(db,rid,u['id'])
+            expected=delivery_token(store.meta('audit_salt'),u['id'],rid,r['display_hash']or'')
+            if not isinstance(p.get('delivery_token'),str)or not hmac.compare_digest(p['delivery_token'],expected):raise Failure('display_changed',409)
+            p={'display_sha256':r['display_hash'],'expanded':p.get('expanded',False)}
+        return domain.delivered(u['id'],rid,p)
     async def source_for(owner,fid,eid,tier,aid=None,side=None):
         if tier not in {'short','long'}:raise Failure('invalid_request')
         with store.connect()as db:
@@ -178,26 +220,28 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope')}
         return {k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope')if k in result}
     @app.get(api+'/families/{fid}/sources/{eid:path}')
-    async def family_source(fid:str,eid:str,request:Request,tier:str='short'):return await source_for(user(request)['id'],fid,eid,tier)
+    async def family_source(fid:str,eid:str,request:Request,tier:str='short'):
+        u=user(request);return present(u,await source_for(u['id'],fid,eid,tier))
     @app.post(api+'/feedback')
     async def feedback(request:Request):return domain.feedback(user(request)['id'],await payload(request))
     @app.get(api+'/feedback')
-    async def feedback_history(request:Request):return domain.feedback_history(owner=user(request)['id'])
+    async def feedback_history(request:Request):
+        u=user(request);return present(u,domain.feedback_history(owner=u['id']))
     @app.post(api+'/comparisons')
-    async def comparison_new(request:Request):return await run_in_threadpool(domain.create_comparison,user(request)['id'],await payload(request))
+    async def comparison_new(request:Request):return await run_in_threadpool(domain.create_comparison,operator_presentation(request)['id'],await payload(request))
     @app.get(api+'/comparisons/{aid}')
-    async def comparison(aid:str,request:Request):return domain.comparison(user(request)['id'],aid)
+    async def comparison(aid:str,request:Request):return domain.comparison(operator_presentation(request)['id'],aid)
     @app.post(api+'/comparisons/{aid}/expand')
-    async def comparison_expand(aid:str,request:Request):return await run_in_threadpool(domain.expand_comparison,user(request)['id'],aid,await payload(request))
+    async def comparison_expand(aid:str,request:Request):return await run_in_threadpool(domain.expand_comparison,operator_presentation(request)['id'],aid,await payload(request))
     @app.post(api+'/comparisons/{aid}/delivered')
-    async def comparison_delivered(aid:str,request:Request):return domain.comparison_delivery(user(request)['id'],aid,await payload(request))
+    async def comparison_delivered(aid:str,request:Request):return domain.comparison_delivery(operator_presentation(request)['id'],aid,await payload(request))
     @app.post(api+'/comparisons/{aid}/vote')
-    async def comparison_vote(aid:str,request:Request):return domain.vote(user(request)['id'],aid,await payload(request))
+    async def comparison_vote(aid:str,request:Request):return domain.vote(operator_presentation(request)['id'],aid,await payload(request))
     @app.post(api+'/comparisons/{aid}/reveal')
-    async def comparison_reveal(aid:str,request:Request):return domain.reveal(user(request)['id'],aid)
+    async def comparison_reveal(aid:str,request:Request):return domain.reveal(operator_presentation(request)['id'],aid)
     @app.get(api+'/comparisons/{aid}/sources/{eid:path}')
     async def comparison_source(aid:str,eid:str,request:Request,side:str='A',tier:str='short'):
-        owner=user(request)['id']
+        owner=operator_presentation(request)['id']
         if side not in {'A','B'}:raise Failure('invalid_request')
         with store.connect()as db:a=domain.owned(db,'assignments',aid,owner)
         return await source_for(owner,a['family_id'],eid,tier,aid,side)
@@ -332,10 +376,12 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         return JSONResponse(data,headers={'Content-Disposition':'attachment; filename="klikai-pilot-export.json"'})
     @app.post(api+'/account/export')
     async def account_export(request:Request):
-        u=user(request);p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('current_password'),1024));return JSONResponse(export(u['id']),headers={'Content-Disposition':'attachment; filename="klikai-my-records.json"'})
+        u=operator_presentation(request);p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('current_password'),1024));return JSONResponse(export(u['id']),headers={'Content-Disposition':'attachment; filename="klikai-my-records.json"'})
     @app.post(api+'/account/delete')
     async def account_delete(request:Request):
-        u=user(request);p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('current_password'),1024))
+        u=user(request)
+        if shared_group(u):raise Failure('forbidden',403)
+        p=await payload(request);await password_call(auth.reauthenticate,u['id'],text(p.get('current_password'),1024))
         with store.account_lock():
             with store.connect()as db:protect_last_admin(db,u['id'])
             store.delete_account(u['id'])
@@ -343,7 +389,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'pilot.css','pilot.mjs','core.mjs','i18n/sl.json','i18n/it.json','source-presentation.json'}:raise Failure('not_found',404)
+        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','i18n/sl.json','i18n/it.json','source-presentation.json'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n'}:raise Failure('not_found',404)
         return FileResponse(target)

@@ -9,7 +9,7 @@ from .store import canonical,digest
 
 SCALE='answer-quality-1-5-v1'
 DISPLAY_VERSION='pilot-paragraph-display-v1'
-VERSION_FIELDS=('evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','generation_profile_id','family_basis_hash','model_identity','execution')
+VERSION_FIELDS=('evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','generation_profile_id','family_basis_hash','model_identity','execution','application_release')
 PROVIDER_SCOPES={'shared','own'}
 PROVIDER_SELECTIONS={'auto','qwen','gemma'}
 PROVIDER_ROUTE_REASONS={'shared_ready','shared_busy_own','shared_unavailable_own','shared_incompatible_own','shared_terminal_failure_own','own_gpu_ready','own_cpu_fallback'}

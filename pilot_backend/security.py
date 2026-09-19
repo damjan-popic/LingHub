@@ -15,7 +15,7 @@ class Failure(Exception):
 
 def username_key(value):
     value=unicodedata.normalize('NFKC',value).casefold().strip()
-    if not re.fullmatch(r'[\w.@+-]{3,80}',value):raise Failure('invalid_username')
+    if not re.fullmatch(r'[\w.@+-]{2,80}',value):raise Failure('invalid_username')
     return value
 
 def password_valid(value):

@@ -46,8 +46,8 @@ def render_result(value):
     return out,digest(blocks)
 
 class Jobs:
-    def __init__(self,store,adapter,workers=2):
-        self.store=store;self.adapter=adapter;self.workers=workers;self.stop_event=threading.Event();self.threads=[];self.lock=None
+    def __init__(self,store,adapter,workers=2,release=None):
+        self.store=store;self.adapter=adapter;self.workers=workers;self.stop_event=threading.Event();self.threads=[];self.lock=None;self.release=release
     def start(self):
         if self.threads:return
         self.lock=self.store.path.with_suffix('.workers.lock').open('a')
@@ -57,9 +57,10 @@ class Jobs:
         self.threads=[threading.Thread(target=self.loop,args=('model',),name=f'pilot-worker-{i}',daemon=True)for i in range(self.workers)]
         self.threads.append(threading.Thread(target=self.loop,args=('cpu',),name='pilot-worker-cpu',daemon=True))
         for t in self.threads:t.start()
-    def close(self):
+    def close(self,grace_seconds=100):
         self.stop_event.set()
-        for t in self.threads:t.join(timeout=1)
+        deadline=time.monotonic()+max(0,grace_seconds)
+        for t in self.threads:t.join(timeout=max(0,deadline-time.monotonic()))
         # Retain the lock while an in-flight request is completing; a replacement must fail closed.
         if not any(t.is_alive()for t in self.threads)and self.lock:self.lock.close();self.lock=None
     def claim(self,pool=None):
@@ -124,6 +125,7 @@ class Jobs:
             if not self.continue_stage(job,{'progress':{'stage':'validation','matches_ready':True},'retrieval':bundle.get('retrieval',{})}if is_unified else None):return
             validation_started=time.monotonic()
             result,display=render_result(generated)
+            if self.release:result['application_release']=self.release
             result['capability']=f['task'];result['answer_method']=method(result)
             if is_unified:result['progress']={'stage':'complete'}
             presentation_ms=(time.monotonic()-validation_started)*1000

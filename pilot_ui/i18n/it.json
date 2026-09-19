@@ -205,7 +205,7 @@
   "feedback_history": "Le mie valutazioni",
   "unsupported_task": "Questa modalità non è ancora disponibile per la lingua selezionata.",
   "login_back": "Torna all’accesso",
-  "copy_failed": "Copia non riuscita. Puoi selezionare e copiare il testo manualmente.",
+  "copy_failed": "Potete selezionare e copiare il testo.",
   "reviewer_only": "Accesso alla revisione",
   "source_page": "Pagina",
   "source_topic": "Discussione",
@@ -341,7 +341,6 @@
   "beta_records_page": "Record {start}–{end} di {total}",
   "beta_previous_records": "Record precedenti",
   "beta_more_records": "Record successivi",
-  "beta_pilot": "Beta del progetto",
   "beta_notice": "Versione di prova. Verificate le risposte nelle fonti citate.",
   "beta_composer_label": "La vostra domanda",
   "beta_composer_placeholder": "Che cosa volete sapere?",
@@ -360,9 +359,14 @@
   "beta_generation_waiting_capacity": "La preparazione della risposta non è disponibile. Riprovate più tardi.",
   "beta_selected_model_unavailable": "La preparazione della risposta non è disponibile. Riprovate più tardi.",
   "beta_notices_copy": "Le fonti sotto «Leggi di più» mostrano i record restituiti dalla ricerca. Le citazioni nella risposta aprono il materiale utilizzato. Considerate la data e lo stato degli originali per consigli meno recenti, bozze e proposte.",
-  "beta_updated": "Aggiornato il {date}",
   "beta_record_parts": "Brani di questa voce",
   "beta_record_part": "Brano {number}",
   "shared_history_note": "Le domande precedenti sono condivise da tutte le persone che usano lo stesso account di progetto.",
-  "shared_history_empty": "Non sono ancora state inviate domande con questo account di progetto."
+  "shared_history_empty": "Non sono ancora state inviate domande con questo account di progetto.",
+  "source_legend": "Fonti incluse",
+  "source_legend_intro": "KLIKai utilizza le seguenti raccolte per la ricerca. Le fonti usate in una risposta sono indicate accanto al testo.",
+  "copy_sources": "Fonti",
+  "answer_wait_long": "La preparazione della risposta sta richiedendo un po’ più di tempo.",
+  "answer_wait_sources": "Nel frattempo potete consultare le fonti trovate in «Leggi di più».",
+  "public_release": "Versione {version} · Aggiornato il {date}"
 }

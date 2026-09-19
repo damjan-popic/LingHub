@@ -15,7 +15,7 @@ export function recordUsed(record, family, pending) {
   return (record.evidence_ids || [record.evidence_id]).some(id=>used.has(id));
 }
 
-export function createSourceExplorer({api, family, pending, t, label, openOriginal, element}) {
+export function createSourceExplorer({api, family, pending, t, label, icon, onChange, openOriginal, element}) {
   const pageSize=10;
   let epoch=0, current=null, sources=[], selected=null, pages=new Map(), opened=false, summaryLoading=false, summaryError=false;
   const panel=element('beta-explorer'), badges=element('explorer-badges'), list=element('explorer-list');
@@ -39,6 +39,7 @@ export function createSourceExplorer({api, family, pending, t, label, openOrigin
     for(const source of sources){const name=label(source), count=Number.isInteger(source.returned_count)?' · '+source.returned_count:'';
       const button=node('button',name+count,{type:'button',class:'explorer-badge','data-source':source.source_slug,
         'aria-pressed':source.source_slug===selected,'aria-controls':'explorer-records'});
+      if(icon){button.textContent='';button.append(node('span',icon(source),{class:'source-symbol','aria-hidden':'true'}),node('span',name+count));}
       button.addEventListener('click',()=>select(source.source_slug));badges.append(button);if(focusedSource===source.source_slug)button.focus?.({preventScroll:true});}
     element('explorer-records').hidden=!selected;
     if(!selected)return;
@@ -67,7 +68,7 @@ export function createSourceExplorer({api, family, pending, t, label, openOrigin
     if(summaryLoading || !current)return;
     const requestEpoch=epoch,id=current;summaryLoading=true;summaryError=false;render();
     try{const value=await api('/families/'+encodeURIComponent(id)+'/sources');if(requestEpoch!==epoch || id!==fid())return;
-      sources=Array.isArray(value.sources)?value.sources.filter(row=>typeof row.source_slug==='string'&&row.source_slug):[];
+      sources=Array.isArray(value.sources)?value.sources.filter(row=>typeof row.source_slug==='string'&&row.source_slug):[];onChange?.();
     }catch{if(requestEpoch===epoch)summaryError=true;}
     finally{if(requestEpoch===epoch){summaryLoading=false;render();}}
   }
@@ -91,5 +92,5 @@ export function createSourceExplorer({api, family, pending, t, label, openOrigin
   return {reset,render,toggle(){opened=!opened;render();if(opened&&!sources.length&&!summaryLoading)summaries();},
     sync(value){if(!value.matches_available){if(current!==value.answer_family_id)reset();return;}
       if(current!==value.answer_family_id){reset();current=value.answer_family_id;summaries();}else render();},
-    get open(){return opened;}};
+    get hasResults(){return current===fid()&&sources.some(source=>source.returned_count>0);},get open(){return opened;}};
 }

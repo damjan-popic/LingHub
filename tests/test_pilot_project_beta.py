@@ -76,7 +76,7 @@ def beta_rig(tmp_path):
     config={'store':str(tmp_path/'private/pilot.sqlite'),'allowed_origins':[ORIGIN],'secure_cookies':False,
             'unified_answers':True,'klikai_url':'http://127.0.0.1:8000','models':['auto','qwen','gemma'],
             'project_beta':True,'beta_updated':'19. september 2026','release_id':'project-beta-test',
-            'beta_release':'EXACT_INTERNAL_RELEASE'}
+            'beta_release':'EXACT_INTERNAL_RELEASE','documentary_sources':['epravopis','jezikovna_posta','gradivo']}
     app=create_app(config,adapter=adapter,hasher=hasher(),start_workers=False)
     note=tmp_path/'credentials.json'
     provision(app.state.store,note,hasher=hasher())
@@ -155,7 +155,8 @@ def test_tester_forces_qwen_clean_presentation_and_retains_internal_feedback(bet
         headers=login(client,credentials)
         session=client.get('/api/pilot/session').json()
         assert session['capabilities']=={'project_beta':True,'tasks':['reference'],'unified_answers':True,
-            'comparisons':False,'beta_updated':'19. september 2026'}
+            'comparisons':False,'beta_updated':'19. september 2026',
+            'documentary_sources':['epravopis','jezikovna_posta','gradivo']}
         assert session['user']['shared_group']and not session['user']['can_change_password']
         assert not session['user']['must_change_password']
         started=ask(client,headers,model={'untrusted':'automatic-shared'})
@@ -181,6 +182,44 @@ def test_tester_forces_qwen_clean_presentation_and_retains_internal_feedback(bet
         assert observation['participant']['username']=='cu'and observation['participant']['cohort']=='project_beta'
         assert observation['selected_model']=='qwen'and observation['versions']['application_release']=='EXACT_INTERNAL_RELEASE'
         assert client.get('/health').json()=={'status':'ok','release_id':'project-beta-test'}
+
+
+def test_documentary_legend_is_configured_authenticated_and_lookup_independent(beta_rig):
+    app,adapter,config,_,credentials=beta_rig
+    def unavailable():raise AssertionError('Legend must not contact the source gateway')
+    adapter.capabilities=unavailable
+    with TestClient(app,base_url=ORIGIN)as client:
+        assert client.get('/api/pilot/capabilities').status_code==401
+        assert client.get('/api/pilot/session').json()['capabilities']=={}
+        headers=login(client,credentials)
+        before=client.get('/api/pilot/capabilities').json()
+        assert before['documentary_sources']==config['documentary_sources']
+        assert client.get('/api/pilot/families').json()['families']==[]
+        assert adapter.freezes==adapter.calls==[]
+        # Existing query hits include ZKB but no ePravopis or Gradivo. Neither
+        # absent matches nor a separate source failure changes the legend.
+        ask(client,headers);finish(app)
+        assert client.get('/api/pilot/capabilities').json()==before
+        assert client.get('/api/pilot/session').json()['capabilities']==before
+        assert adapter.calls==['qwen']
+
+
+@pytest.mark.parametrize('invalid',[None,'gradivo',{},['gradivo','gradivo'],
+    ['../private'],['PRIVATE_HASH'],[{'slug':'gradivo','path':'/private'}],['x'*101]])
+def test_documentary_legend_rejects_malformed_release_metadata(beta_rig,invalid):
+    with pytest.raises(ValueError,match='documentary source presentation'):
+        config_checked({**beta_rig[2],'documentary_sources':invalid})
+
+
+def test_packaged_legend_includes_connected_answer_bank_not_internal_ontology(beta_rig):
+    config=dict(beta_rig[2]);config.pop('documentary_sources')
+    app=create_app(config,adapter=BetaAdapter(),hasher=hasher(),start_workers=False)
+    with TestClient(app,base_url=ORIGIN)as client:
+        login(client,beta_rig[4])
+        sources=client.get('/api/pilot/capabilities').json()['documentary_sources']
+    assert sources==['jezikovna_svetovalnica','epravopis','zvezek','crossterm','solska',
+        'tretji_sektor','zkb','jezikovna_posta','jezikovna_urgenca','zadrege','gradivo']
+    assert not set(sources)&{'ontology','viri-master','sloleks','morph_it','loris','synonyms','collocations'}
 
 
 def test_source_badges_count_all_unique_records_and_keep_each_exact_target(beta_rig):

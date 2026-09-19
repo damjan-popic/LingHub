@@ -2,6 +2,29 @@
 import base64
 import hashlib
 import hmac
+import json
+from pathlib import Path
+import re
+
+
+def documentary_sources(value):
+    """Validate release-pinned public collection identifiers, without a lookup.
+
+    The deployment derives this list from enabled documentary collections.
+    Keeping it in release configuration makes the legend independent of the
+    latest query, stored matches and temporary source availability.
+    """
+    if (not isinstance(value,list)or len(value)>256
+            or any(not isinstance(slug,str)or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,99}',slug)for slug in value)
+            or len(set(value))!=len(value)):
+        raise ValueError('Invalid documentary source presentation list')
+    return list(value)
+
+
+def packaged_documentary_sources():
+    """Read the small enabled-collection snapshot shipped with this release."""
+    path=Path(__file__).with_name('enabled-documentary-sources.json')
+    return documentary_sources(json.loads(path.read_text(encoding='utf-8')))
 
 SAFE = frozenset({
     'family', 'families', 'job', 'answer_family_id', 'family_id', 'run_id', 'job_id',

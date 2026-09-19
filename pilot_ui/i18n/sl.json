@@ -205,7 +205,7 @@
   "feedback_history": "Moje ocene",
   "unsupported_task": "Ta način za izbrani jezik še ni na voljo.",
   "login_back": "Nazaj na prijavo",
-  "copy_failed": "Kopiranje ni uspelo. Besedilo lahko izberete in kopirate ročno.",
+  "copy_failed": "Besedilo lahko označite in kopirate.",
   "reviewer_only": "Dostop do pregleda",
   "source_page": "Stran",
   "source_topic": "Tema",
@@ -341,7 +341,6 @@
   "beta_records_page": "Zapisi {start}–{end} od {total}",
   "beta_previous_records": "Prejšnji zapisi",
   "beta_more_records": "Naslednji zapisi",
-  "beta_pilot": "Projektna beta",
   "beta_notice": "Preizkusna različica. Odgovore preverite v navedenih virih.",
   "beta_composer_label": "Vaše vprašanje",
   "beta_composer_placeholder": "Kaj vas zanima?",
@@ -360,9 +359,14 @@
   "beta_generation_waiting_capacity": "Priprava odgovora trenutno ni na voljo. Poskusite znova pozneje.",
   "beta_selected_model_unavailable": "Priprava odgovora trenutno ni na voljo. Poskusite znova pozneje.",
   "beta_notices_copy": "Viri pod »Preberi več« prikazujejo zapise, ki jih je iskanje vrnilo. Navedki v odgovoru odprejo uporabljeno gradivo. Pri starejših nasvetih, osnutkih in predlogih upoštevajte datum in status izvirnika.",
-  "beta_updated": "Posodobljeno {date}",
   "beta_record_parts": "Odlomki tega zapisa",
   "beta_record_part": "Odlomek {number}",
   "shared_history_note": "Prejšnja vprašanja so skupna vsem, ki uporabljajo isti projektni račun.",
-  "shared_history_empty": "S tem projektnim računom še ni bilo poslano nobeno vprašanje."
+  "shared_history_empty": "S tem projektnim računom še ni bilo poslano nobeno vprašanje.",
+  "source_legend": "Vključeni viri",
+  "source_legend_intro": "KLIKai pri iskanju uporablja naslednje zbirke. Viri, uporabljeni v posameznem odgovoru, so navedeni ob besedilu.",
+  "copy_sources": "Viri",
+  "answer_wait_long": "Priprava odgovora traja nekoliko dlje.",
+  "answer_wait_sources": "Medtem lahko pod »Preberi več« pregledate najdene vire.",
+  "public_release": "Različica {version} · Posodobljeno {date}"
 }

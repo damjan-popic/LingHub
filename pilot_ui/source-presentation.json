@@ -92,8 +92,8 @@
       "badge_default": "Zvezek",
       "initials_fallback": "Z",
       "labels": {
-        "sl": "Zvezek",
-        "it": "Zvezek"
+        "sl": "Zvezek standardiziranih terminov",
+        "it": "Zvezek standardiziranih terminov"
       },
       "kind": "terminology",
       "official_asset": null
@@ -103,8 +103,8 @@
       "badge_default": "CROSSTERM",
       "initials_fallback": "CT",
       "labels": {
-        "sl": "CROSSTERM",
-        "it": "CROSSTERM"
+        "sl": "CrossTerm",
+        "it": "CrossTerm"
       },
       "kind": "terminology",
       "official_asset": null
@@ -125,8 +125,8 @@
       "badge_default": "Tretji sektor",
       "initials_fallback": "TS",
       "labels": {
-        "sl": "Tretji sektor",
-        "it": "Terzo settore"
+        "sl": "Terminologija tretjega sektorja",
+        "it": "Terminologia del terzo settore"
       },
       "kind": "terminology",
       "official_asset": null
@@ -136,8 +136,8 @@
       "badge_default": "ZKB",
       "initials_fallback": "ZK",
       "labels": {
-        "sl": "ZKB",
-        "it": "ZKB"
+        "sl": "Terminološke odločitve ZKB",
+        "it": "Decisioni terminologiche ZKB"
       },
       "kind": "terminology",
       "official_asset": null
@@ -147,8 +147,8 @@
       "badge_default": "Pošta",
       "initials_fallback": "JP",
       "labels": {
-        "sl": "Jezikovna pošta",
-        "it": "Jezikovna pošta"
+        "sl": "Jezikovna pošta / Druga pomoč",
+        "it": "Jezikovna pošta / Druga pomoč"
       },
       "kind": "advisory",
       "official_asset": null
@@ -165,12 +165,23 @@
       "official_asset": null
     },
     {
+      "suggested_key": "zadrege",
+      "badge_default": "Zadrege",
+      "initials_fallback": "ZD",
+      "labels": {
+        "sl": "Jezikovne zadrege in odgovori",
+        "it": "Dubbi linguistici e risposte"
+      },
+      "kind": "advisory",
+      "official_asset": null
+    },
+    {
       "suggested_key": "gradivo",
       "badge_default": "Gradivo",
       "initials_fallback": "G",
       "labels": {
-        "sl": "Gradivo",
-        "it": "Materiali"
+        "sl": "Obrazci in jezikovno gradivo",
+        "it": "Moduli e materiali linguistici"
       },
       "kind": "navigation",
       "official_asset": null

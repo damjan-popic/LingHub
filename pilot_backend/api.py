@@ -15,7 +15,7 @@ from .adapter import Gateway
 from .adoption import historical_source
 from .editorial import OPERATOR_POLICY_ID
 from . import unified
-from .presentation import tester_view,delivery_token
+from .presentation import tester_view,delivery_token,documentary_sources,packaged_documentary_sources
 from .project_accounts import COHORT as PROJECT_COHORT
 
 MESSAGES={'sl':{'login_required':'Prijavite se.','login_failed':'Prijava ni uspela.','login_throttled':'Preveč poskusov. Poskusite pozneje.','invalid_request':'Zahteva ni veljavna.','not_found':'Zapis ni na voljo.','forbidden':'Dostop ni dovoljen.','csrf_failed':'Osvežite stran in poskusite znova.','password_change_required':'Najprej spremenite začasno geslo.'},'it':{'login_required':'Accedi.','login_failed':'Accesso non riuscito.','login_throttled':'Troppi tentativi. Riprova più tardi.','invalid_request':'Richiesta non valida.','not_found':'La voce non è disponibile.','forbidden':'Accesso non consentito.','csrf_failed':'Aggiorna la pagina e riprova.','password_change_required':'Prima cambia la password temporanea.'}}
@@ -38,6 +38,7 @@ def config_checked(config):
     c.setdefault('unified_answers',False)
     c.setdefault('project_beta',False)
     if type(c['project_beta'])is not bool:raise ValueError('Project beta capability must be boolean')
+    c['documentary_sources']=documentary_sources(c['documentary_sources'])if'documentary_sources'in c else packaged_documentary_sources()
     for key in ('beta_updated','beta_release'):
         if key in c and(not isinstance(c[key],str)or not 1<=len(c[key])<=120):raise ValueError('Invalid beta release label')
     if c.get('release_id')is not None and(not isinstance(c['release_id'],str)or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}',c['release_id'])):raise ValueError('Invalid release label')
@@ -126,7 +127,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if beta(s):raise Failure('forbidden',403)
         return s
     def capability_result(s):
-        if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'comparisons':False,**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
+        if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
     def set_session(token,s):
@@ -393,7 +394,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','i18n/sl.json','i18n/it.json','source-presentation.json'}:raise Failure('not_found',404)
+        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n'}:raise Failure('not_found',404)
         return FileResponse(target)

@@ -78,6 +78,10 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if request.headers.get('host')not in config['allowed_hosts']:return early(Failure('forbidden',403))
         token=config.get('edge_token')
         if token and not hmac.compare_digest(request.headers.get('X-Pilot-Edge-Token',''),token):return early(Failure('forbidden',403))
+        # The authenticated TLS edge reaches this app over loopback HTTP. Its
+        # secure deployment permits only HTTPS origins; arbitrary forwarded
+        # headers remain untrusted, including when no edge token is configured.
+        if token and config['secure_cookies']:request.scope['scheme']='https'
         if request.method not in {'GET','HEAD','POST'}:return early(Failure('invalid_request',405))
         if request.method=='POST':
             if request.headers.get('origin')not in config['allowed_origins']or urlsplit(request.headers.get('origin','')).netloc!=request.headers.get('host'):return early(Failure('forbidden',403))

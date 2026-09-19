@@ -286,3 +286,29 @@ def test_shutdown_stops_dequeue_and_uses_one_bounded_drain_budget(tmp_path,monke
     jobs.threads=[Worker(),Worker()]
     jobs.close(grace_seconds=10)
     assert joined==[9.,7.]
+
+
+@pytest.mark.parametrize('path',['/health/','/api/pilot/session/'])
+def test_authenticated_tls_edge_preserves_public_https_redirects(tmp_path,path):
+    token='synthetic-edge-token-for-https-redirect-test'
+    app=create_app({'store':str(tmp_path/'private/pilot.sqlite'),
+        'allowed_origins':['https://klikai.example.test'],'secure_cookies':True,'edge_token':token},
+        adapter=BetaAdapter(),hasher=hasher(),start_workers=False)
+    with TestClient(app,base_url='http://klikai.example.test',follow_redirects=False)as client:
+        headers={'X-Pilot-Edge-Token':token,'X-Forwarded-Proto':'http','X-Forwarded-Host':'untrusted.example.test'}
+        response=client.get(path,headers=headers)
+        assert response.status_code==307
+        assert response.headers['location']=='https://klikai.example.test'+path.rstrip('/')
+        for invalid in ({},{'X-Pilot-Edge-Token':'wrong','X-Forwarded-Proto':'https'},
+                        {'X-Pilot-Edge-Token':token,'Host':'untrusted.example.test'}):
+            denied=client.get(path,headers=invalid)
+            assert denied.status_code==403 and 'location'not in denied.headers
+
+
+def test_development_redirects_ignore_forwarded_scheme(tmp_path):
+    token='synthetic-edge-token-for-development-redirect'
+    app=create_app({'store':str(tmp_path/'private/pilot.sqlite'),'allowed_origins':[ORIGIN],
+        'secure_cookies':False,'edge_token':token},adapter=BetaAdapter(),hasher=hasher(),start_workers=False)
+    with TestClient(app,base_url=ORIGIN,follow_redirects=False)as client:
+        response=client.get('/health/',headers={'X-Pilot-Edge-Token':token,'X-Forwarded-Proto':'https'})
+        assert response.status_code==307 and response.headers['location']==ORIGIN+'/health'

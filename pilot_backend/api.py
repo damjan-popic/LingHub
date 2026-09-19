@@ -45,7 +45,7 @@ def config_checked(config):
     if type(c['unified_answers'])is not bool:raise ValueError('Unified answers capability must be boolean')
     if c['unified_answers']and not c.get('klikai_url'):raise ValueError('Unified answers require a configured KLIKai API')
     if not isinstance(c['models'],(list,tuple))or not c['models']or any(not isinstance(model,str)or model not in {'auto','qwen','gemma'}for model in c['models'])or len(set(c['models']))!=len(c['models']):raise ValueError('Configure explicit supported model choices')
-    if c['project_beta']and(not c['unified_answers']or'qwen'not in c['models']):raise ValueError('Project beta requires unified own-Qwen routing')
+    if c['project_beta']and(not c['unified_answers']or'auto'not in c['models']):raise ValueError('Project beta requires unified automatic routing')
     if'auto'in c['models']and not c['unified_answers']:raise ValueError('Automatic model choice requires unified answers')
     if type(c['editorial_full_records'])is not bool:raise ValueError('Editorial full-record capability must be boolean')
     c.setdefault('editorial_operator_policy_id',None)
@@ -172,7 +172,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         u=user(request);p=await payload(request)
         if beta(u):
             if p.get('task','reference')!='reference':raise Failure('forbidden',403)
-            p['model']='qwen'
+            p['model']='auto'
         return present(u,await run_in_threadpool(domain.create_family,u['id'],p))
     @app.get(api+'/families/{fid}')
     async def family(fid:str,request:Request):
@@ -186,7 +186,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.post(api+'/families/{fid}/expand')
     async def expand(fid:str,request:Request):
         u=user(request)
-        if beta(u)and domain.family(u['id'],fid)['model']!='qwen':raise Failure('expansion_unavailable',409)
+        if beta(u)and domain.family(u['id'],fid)['model']not in {'auto','qwen'}:raise Failure('expansion_unavailable',409)
         return present(u,await run_in_threadpool(domain.expand,u['id'],fid,await payload(request)))
     @app.get(api+'/jobs/{jid}')
     async def job(jid:str,request:Request):

@@ -149,7 +149,7 @@ def test_interrupted_account_transaction_reuses_private_note_without_partial_acc
         assert Auth(store,hasher()).login(row['username'],row['password'],'test')[1]['id']==row['account_id']
 
 
-def test_tester_forces_qwen_clean_presentation_and_retains_internal_feedback(beta_rig):
+def test_tester_uses_automatic_routing_and_retains_actual_private_provenance(beta_rig):
     app,adapter,_,_,credentials=beta_rig
     with TestClient(app,base_url=ORIGIN)as client:
         headers=login(client,credentials)
@@ -162,7 +162,7 @@ def test_tester_forces_qwen_clean_presentation_and_retains_internal_feedback(bet
         started=ask(client,headers,model={'untrusted':'automatic-shared'})
         finish(app);fid=started['family']['answer_family_id']
         family=client.get('/api/pilot/families/'+fid).json();run=family['short']
-        assert adapter.calls==['qwen']and run['answer_md']=='Podprt odgovor [1].'
+        assert adapter.calls==['auto']and run['answer_md']=='Podprt odgovor [1].'
         assert run['limitations']==[{'code':'source_scope','scope':'claim','claim_ids':['C1']},
             {'code':'proposal_status','scope':'claim','claim_ids':['C1']}]
         responses=[family,client.get('/api/pilot/families').json(),client.get('/api/pilot/jobs/'+started['job']['job_id']).json()]
@@ -180,7 +180,7 @@ def test_tester_forces_qwen_clean_presentation_and_retains_internal_feedback(bet
             observation=json.loads(db.execute('SELECT snapshot FROM feedback_observations').fetchone()[0])
         assert stored['model_identity']['repository']=='Qwen/PRIVATE_WRITER'
         assert observation['participant']['username']=='cu'and observation['participant']['cohort']=='project_beta'
-        assert observation['selected_model']=='qwen'and observation['versions']['application_release']=='EXACT_INTERNAL_RELEASE'
+        assert observation['selected_model']=='auto'and observation['versions']['application_release']=='EXACT_INTERNAL_RELEASE'
         assert client.get('/health').json()=={'status':'ok','release_id':'project-beta-test'}
 
 
@@ -201,7 +201,27 @@ def test_documentary_legend_is_configured_authenticated_and_lookup_independent(b
         ask(client,headers);finish(app)
         assert client.get('/api/pilot/capabilities').json()==before
         assert client.get('/api/pilot/session').json()['capabilities']==before
-        assert adapter.calls==['qwen']
+        assert adapter.calls==['auto']
+
+
+def test_beta_requires_configured_automatic_route(beta_rig):
+    with pytest.raises(ValueError,match='unified automatic routing'):
+        config_checked({**beta_rig[2],'models':['qwen','gemma']})
+
+
+def test_saved_own_qwen_answer_stays_readable_after_automatic_routing(beta_rig):
+    app,adapter,_,_,credentials=beta_rig
+    saved=app.state.domain.create_family(credentials['cu']['account_id'],{
+        'question':'Prejšnje vprašanje?','model':'qwen','idempotency_key':'before-automatic-route'})
+    finish(app)
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client,credentials)
+        fid=saved['family']['answer_family_id']
+        old=client.get('/api/pilot/families/'+fid).json()
+        assert old['short']['answer_md']=='Podprt odgovor [1].'
+        ask(client,headers);finish(app)
+        assert adapter.calls==['qwen','auto']
+        assert client.get('/api/pilot/families/'+fid).json()==old
 
 
 @pytest.mark.parametrize('invalid',[None,'gradivo',{},['gradivo','gradivo'],
@@ -250,7 +270,7 @@ def test_source_badges_count_all_unique_records_and_keep_each_exact_target(beta_
                 response=client.get(f'/api/pilot/families/{fid}/sources/'+quote(eid,safe=''))
                 assert response.status_code==200 and len(response.json()['excerpt'])>360
                 assert 'PRIVATE_'not in response.text and 'locator'not in response.json()
-        assert adapter.calls==['qwen']and adapter.freezes==[fid]
+        assert adapter.calls==['auto']and adapter.freezes==[fid]
         assert client.get(f'/api/pilot/families/{fid}/matches?source=zkb').json()==late
         assert client.get(f'/api/pilot/families/{fid}/matches?source=zkb&limit=0').status_code==400
 

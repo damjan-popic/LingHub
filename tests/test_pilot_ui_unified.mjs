@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {progressLabel,matchGroups,settledMatchUsage,matchUseLabel,modelChoiceKey,modelAvailabilityKey,savedProvider,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation} from '../pilot_ui/core.mjs';
 
+test('captured normative status and limited scope stay visible beside source originals',()=>{
+  const notes=sourceStatusNotes({status:'captured_original_record',bibliography:{source_status:'Current reference as of captured date',normative_status:'current_reference',source_date:'2001',coverage_note:'Only the captured sections, not the complete dictionary.'}});
+  assert.deepEqual(notes.map(note=>note.key),['source_status_note','source_coverage_note']);
+  assert.equal(notes[0].values.status,'Current reference as of captured date');
+  assert.equal(notes[1].values.scope,'Only the captured sections, not the complete dictionary.');
+  assert.equal(sourceStatusNotes({status:'Pravopis 8.0 — predlog',bibliography:{coverage_note:'Selected chapter only.'}})[0].category,'proposal_status');
+});
+
 test('normal question selectors are optional and default to reference and offer automatic or exact own-model choices',()=>{
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
   const options=html.slice(html.indexOf('<div id="options"'),html.indexOf('</form>',html.indexOf('<div id="options"')));

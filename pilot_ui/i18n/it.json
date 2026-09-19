@@ -330,6 +330,7 @@
   "source_draft_note": "La fonte utilizzata è una bozza.",
   "source_proposal_note": "La fonte utilizzata è contrassegnata come proposta.",
   "source_status_note": "Stato della fonte citata: {status}.",
+  "source_coverage_note": "Ambito della fonte: {scope}",
   "source_annual_note": "La fonte utilizzata è un supplemento annuale, non l’intero dizionario.",
   "source_signed_date_note": "La risposta nella fonte riporta la data «{date}»; le indicazioni vanno comprese in quel contesto temporale.",
   "limitation_partial_evidence": "Le fonti sostengono solo una parte della risposta. Verifica l’ambito e le condizioni nei passaggi citati.",

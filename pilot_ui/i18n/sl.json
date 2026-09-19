@@ -330,6 +330,7 @@
   "source_draft_note": "Uporabljeni vir je osnutek.",
   "source_proposal_note": "Uporabljeni vir je označen kot predlog.",
   "source_status_note": "Status navedenega vira: {status}.",
+  "source_coverage_note": "Obseg vira: {scope}",
   "source_annual_note": "Uporabljeni vir je letni dodatek, ne celotni slovar.",
   "source_signed_date_note": "Odgovor v viru je označen z datumom »{date}«; navedbe je treba razumeti v tem časovnem okviru.",
   "limitation_partial_evidence": "Dokazila podpirajo le del odgovora. Preverite obseg in pogoje v navedenih odlomkih.",

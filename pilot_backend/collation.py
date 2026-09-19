@@ -1,7 +1,8 @@
-"""Explicit task/focus routing over fixed, read-only CPU interfaces.
+"""Bounded task/focus routing over fixed, read-only CPU interfaces.
 
 Tool names are operational facets, never ontology assignments. No question IDs,
-model dispatcher, guessed text language or cross-resource sense joins occur here.
+model dispatcher or cross-resource sense joins occur here. Automatic rule lookup
+uses explicit input language or language-specific question wording, not UI locale.
 """
 from __future__ import annotations
 import copy
@@ -26,6 +27,73 @@ _TERM_TARGET_REQUEST = re.compile(r'\b(?:kater[iaoe]\s+(?:(?:so|je)\s+)?(?:termi
 _TERM_NOUN_REQUEST = re.compile(r'^\s*(?:termini|terminološk\w*\s+ustreznic\w*|equivalent\w*|ustreznic\w*)\s+(?:za|per|di)\b',re.I)
 _QUOTES = re.compile(r'«([^«»\n]+)»|»([^»«\n]+)«|“([^“”\n]+)”|"([^"\n]+)"')
 
+# Applicability cues select a rule lookup, never a linguistic answer or ontology
+# code. This is not a general text-language classifier or an instruction to
+# correct all input.
+_AUTO_INTENTS = {
+    'sl': (
+        ('capitalization', r'\b(?:začetnic\w*|(?:velik\w*|mal\w*)\s+črk\w*)\b'),
+        ('place_name', r'\b(?:krajevn\w*|zemljepisn\w*|naselbinsk\w*)\s+imen\w*\b'),
+        ('spelling', r'\bkako\s+(?:(?:naj|se|pravilno)\s+)*(?:piš\w*|zapiš\w*|napiš\w*)\b'),
+        ('lexical_choice', r'\b(?:ali|kaj|kater[ai])\s+(?:je|sta|so)\s+(?:prav|pravil\w*|ustrez\w*)\b'),
+        ('lexical_meaning', r'\bkaj\s+pomen\w*\b'),
+    ),
+    'it': (
+        ('capitalization', r'\b(?:maiuscol\w*|minuscol\w*)\b'),
+        ('place_name', r'\bnom[ei]\s+(?:geografic\w*|di\s+luogo)\b'),
+        ('spelling', r'\bcome\s+(?:si\s+)?scriv\w*\b'),
+        ('lexical_choice', r'\b(?:è|sono)\s+(?:corrett\w*|giust\w*)\b'),
+        ('lexical_meaning', r'\b(?:che\s+cosa|cosa|che)\s+significa\w*\b'),
+    ),
+}
+_TARGET_LANGUAGE = {
+    'sl': re.compile(r'\b(?:v\s+slovenščini|in\s+sloveno)\b', re.I),
+    'it': re.compile(r'\b(?:v\s+italijanščini|in\s+italiano)\b', re.I),
+}
+
+
+def automatic_plan(question, input_language='und'):
+    """Select a bounded LORIS check without interpreting its normative result.
+
+    Preserve comparison alternatives verbatim. With one unambiguous quoted
+    subject, retain its exact original-question span as well as analyzer-local
+    offsets. Ambiguous/mixed-language or long questions continue source lookup
+    without guessing a tool input or forcing a clarification.
+    """
+    if not isinstance(question,str) or not question.strip() or len(question)>512:
+        return None
+    wording=_QUOTES.sub(' ',question)
+    cues=[(language,intent) for language,patterns in _AUTO_INTENTS.items()
+          for intent,pattern in patterns if re.search(pattern,wording,re.I)]
+    if not cues or input_language=='mixed':return None
+    targets=[language for language,pattern in _TARGET_LANGUAGE.items() if pattern.search(wording)]
+    if len(targets)>1:return None
+    if input_language in {'sl','it'}:
+        language=input_language;basis='explicit_input_language'
+    elif targets:
+        language=targets[0];basis='explicit_target_language_wording'
+    else:
+        languages={language for language,_ in cues}
+        if len(languages)!=1:return None
+        language=next(iter(languages));basis='language_specific_question_wording'
+    spans=list(_QUOTES.finditer(question))
+    start,end=0,len(question)
+    # A comparison may quote only one alternative. Keep all alternatives and
+    # their casing; never synthesize a normalized replacement phrase.
+    comparison=re.search(r'\b(?:ali|o|oppure)\b',wording,re.I)
+    if len(spans)==1 and not comparison:
+        match=spans[0]
+        group=next(i for i,value in enumerate(match.groups(),1) if value is not None)
+        start,end=match.span(group)
+    focus=question[start:end]
+    if not focus.strip():return None
+    return {'version':VERSION,'operations':['loris'],'focus':focus,
+            'input_language':language,'status':'ready',
+            'routing_kind':'automatic_question_rule_lookup',
+            'reason':cues[0][1],'language_basis':basis,
+            'focus_span':{'start':start,'end':end,
+                          'offset_basis':'original_question_unicode_codepoint_half_open'}}
+
 
 def plan(question, input_language='und', focus=None):
     wording=_QUOTES.sub(' ',question) # A tool name inside the quoted subject is not an operation.
@@ -45,8 +113,10 @@ def plan(question, input_language='und', focus=None):
     return {'version':VERSION,'operations':operations,'focus':focus,'input_language':input_language,'status':'ready','routing_kind':'explicit_requested_operations_and_focus_field'if explicit_focus else'explicit_requested_operations_and_quoted_focus'}
 
 
-def collect(gateway, family):
+def collect(gateway, family, *, automatic=False):
     routing=plan(family['question'],family.get('input_language','und'),family.get('focus'))
+    if routing is None and automatic:
+        routing=automatic_plan(family['question'],family.get('input_language','und'))
     if routing is None:return None
     result={'version':VERSION,'plan':routing,'captures':[],'capabilities_identity':None,'timings':{}}
     if routing['status']!='ready':return result

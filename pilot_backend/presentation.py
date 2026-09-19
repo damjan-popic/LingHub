@@ -34,7 +34,7 @@ SAFE = frozenset({
     'evidence', 'evidence_id', 'citation_id', 'citations', 'claim_id', 'local_number',
     'source_badges', 'source_slug', 'source_label', 'source_key', 'label', 'display_name',
     'title', 'snippet', 'excerpt', 'url', 'edition', 'source_status', 'bibliography',
-    'bibliographic', 'authors', 'date', 'signed_date_text', 'publisher', 'publication_date',
+    'bibliographic', 'authors', 'date', 'source_date', 'coverage_note', 'normative_status', 'signed_date_text', 'publisher', 'publication_date',
     'publication_scope', 'annual_scope', 'answer_kind', 'generation_status', 'answer_support',
     'correction', 'clarification_code', 'progress', 'stage', 'cancel_requested', 'position',
     'acknowledged', 'feedback_id', 'feedback', 'rating', 'quality_score', 'tags', 'comment',

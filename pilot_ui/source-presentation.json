@@ -26,8 +26,30 @@
       "badge_default": "ePravopis",
       "initials_fallback": "eP",
       "labels": {
-        "sl": "ePravopis",
-        "it": "ePravopis"
+        "sl": "ePravopis (letni dodatki 2025)",
+        "it": "ePravopis (supplemento annuale 2025)"
+      },
+      "kind": "orthographic",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "sp2001",
+      "badge_default": "SP 2001",
+      "initials_fallback": "SP",
+      "labels": {
+        "sl": "Slovenski pravopis 2001",
+        "it": "Slovenski pravopis 2001"
+      },
+      "kind": "orthographic",
+      "official_asset": null
+    },
+    {
+      "suggested_key": "pravopis8",
+      "badge_default": "Pravopis 8.0",
+      "initials_fallback": "P8",
+      "labels": {
+        "sl": "Pravopis 8.0 (predlog)",
+        "it": "Pravopis 8.0 (proposta)"
       },
       "kind": "orthographic",
       "official_asset": null

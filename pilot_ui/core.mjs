@@ -98,13 +98,14 @@ export function generationNotice(tier) {
 export function sourceStatusNotes(source) {
   // These are views of saved metadata, not new statements about a source's
   // present authority. A migration/upload date cannot replace a signed date.
-  const notes=[],status=source?.source_status || source?.status;
+  const notes=[],bib=source?.bibliographic || source?.bibliography,status=source?.source_status || bib?.source_status || source?.status;
   if(typeof status==='string' && /osnutek|draft|bozza|predlog|proposal|proposta/i.test(status)) {
     const proposal=/predlog|proposal|proposta/i.test(status),bare=/^(draft|osnutek|bozza|predlog|proposal|proposta)$/i.test(status.trim());
     notes.push({category:proposal?'proposal_status':'draft_status',key:bare?proposal?'source_proposal_note':'source_draft_note':'source_status_note',values:bare?{}:{status:status.trim()}});
   }
+  else if(typeof status==='string' && ['current_reference','status_notice'].includes(bib?.normative_status))notes.push({category:'source_status',key:'source_status_note',values:{status:status.trim()}});
   if(source?.annual_scope || source?.publication_scope==='annual_additions')notes.push({category:'source_scope',key:'source_annual_note',values:{}});
-  const bib=source?.bibliographic || source?.bibliography;
+  if(typeof bib?.coverage_note==='string' && bib.coverage_note.trim())notes.push({category:'source_scope',key:'source_coverage_note',values:{scope:bib.coverage_note.trim()}});
   if(source?.publication_scope==='individual_advisory_answer' && Array.isArray(bib?.signed_date_text)) {
     const dates=[...new Set(bib.signed_date_text.filter(value=>typeof value==='string' && value.trim()).map(value=>value.trim()))];
     if(dates.length)notes.push({category:'source_date',key:'source_signed_date_note',values:{date:dates.join('; ')}});

@@ -37,6 +37,21 @@ def score(value):
     return float(value) if type(value) in {int, float} and math.isfinite(value) else 0.0
 
 
+def merge_source_matches(matches):
+    """Interleave source-local ranks without comparing unlike score scales.
+
+    Keep each complete immutable capture. Stable source/id tie breakers remove
+    thread-completion order from the merge; gateway question relevance decides
+    which records may enter the writer context afterwards.
+    """
+    groups={}
+    for item in sorted(matches,key=lambda row:(row['source_slug'],-score(row['score']),row['external_id'],row['capture_sha256'])):
+        key=(item['external_id'],item['capture_kind'],item['capture_sha256'])
+        groups.setdefault(item['source_slug'],{}).setdefault(key,item)
+    ranked=[list(group.values())for _,group in sorted(groups.items())]
+    return [group[index]for index in range(max(map(len,ranked),default=0))for group in ranked if index<len(group)]
+
+
 def diagnostic(error, stage):
     """Fixed public classifications; exception messages may contain private data."""
     codes = {'answer_unavailable', 'source_timeout', 'invalid_answer', 'unknown_citation',
@@ -207,7 +222,7 @@ def collect_source(gateway, family, definition, detail_pool=None):
                 source = {'title': hit['title'], 'source_label': definition['display_name'], 'excerpt': rendered,
                           'url': hit.get('url'), 'locator': {k: hit[k] for k in ('section', 'subsection', 'page_start', 'page_end') if hit.get(k) is not None},
                           'bibliography': {'record_id': hit['resource_id'], 'rights_mode': hit['rights_mode'],
-                              **{key:hit[key]for key in ('source_revision','source_status')if hit.get(key)is not None}}}
+                              **{key:hit[key]for key in ('source_revision','source_status','source_date','release_id','coverage_note','normative_status')if hit.get(key)is not None}}}
                 item=match(hit, 'resource_record', definition['display_name'], rendered, source, locale, hit.get('score'))
                 if hit['rights_mode']=='linked_only':item['context_eligible']=False
                 matches.append(item)
@@ -225,22 +240,37 @@ def collect_source(gateway, family, definition, detail_pool=None):
 
 
 def collect_tools(gateway, family):
-    """Retain existing explicitly requested CPU operations and their authority."""
+    """Freeze requested operations or an applicable automatic LORIS rule check."""
     started=time.monotonic()
     status={'family':'linghub_tools','source_label':'LingHub','status':'unavailable',
             'returned_count':0,'limit':None,'has_more':None}
     try:
-        capture=collation.collect(gateway,family)
+        capture=collation.collect(gateway,family,automatic=True)
         if capture is None:return None,None
         if capture['plan']['status']!='ready':
             status.update(status='unsupported',reason='explicit_tool_context_required')
             return None,status
         # These are typed tool results, not a corpus of documentary records.
         status.update(status='not_documentary',capture_count=len(capture['captures']))
+        if capture['plan'].get('routing_kind')=='automatic_question_rule_lookup':
+            part=next(row['response']['results']['loris'] for row in capture['captures'] if row['operation']=='explore')
+            outcome=part['status']
+            if outcome not in {'ok','no_hit','unavailable','unsupported','error'}:
+                raise Failure('invalid_answer',502)
+            data=part.get('data')or{}
+            rule_count=len({(row.get('rule_id'),row.get('start'),row.get('end'))
+                            for row in data.get('issues',[])+data.get('spans',[])})
+            status.update(evidence_type='tool_result',routing_kind=capture['plan']['routing_kind'],
+                          operation_statuses={'loris':outcome},rule_count=rule_count,
+                          match_scope='matched_span_only',normative_conclusion='not_established',
+                          tool_outcome='no_match'if outcome=='no_hit'else'matched'if outcome=='ok'else'unavailable')
+            if outcome=='no_hit':status['status']='no_match'
+            elif outcome in {'unavailable','error'}:status['status']='unavailable'
+            elif outcome=='unsupported':status['status']='unsupported'
         return capture,status
     except (Failure,ValueError,KeyError,TypeError)as error:
         status.update(status='timeout'if isinstance(error,Failure)and error.code=='source_timeout'else'unavailable',
-                      **diagnostic(error,'explicit_tool_retrieval'))
+                      **diagnostic(error,'tool_retrieval'))
         return None,status
     finally:status['elapsed_ms']=round((time.monotonic()-started)*1000,3)
 
@@ -271,11 +301,7 @@ def freeze(gateway, family, policy):
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.
-    dedup = {}
-    for item in sorted(found, key=lambda x: (-x['score'], x['source_slug'], x['external_id'], x['capture_sha256'])):
-        key = (item['source_slug'], item['external_id'], item['capture_kind'], item['capture_sha256'])
-        dedup.setdefault(key, item)
-    found = list(dedup.values())
+    found = merge_source_matches(found)
     coverage.sort(key=lambda x: x['family'])
     external = [{k: deepcopy(v) for k, v in item.items() if k != 'source'} for item in found]
     packet = {'version': PACKET, 'matches': external, 'retrieval': coverage}
@@ -307,6 +333,10 @@ def freeze(gateway, family, policy):
                 raise Failure('invalid_answer',502)
             item['snippet']=item.get('snippet','')[:1000]
             original=by_capture.get(item.get('capture_sha256'))
+            if original:
+                item['source']['bibliography'].update({key:deepcopy(value)
+                    for key,value in original.get('bibliography',{}).items()
+                    if key in {'source_status','source_date','release_id','coverage_note','normative_status'}})
             if original and original.get('detail_status'):
                 item['detail_status']=original['detail_status']
                 item['source']['excerpt']=editorial.notice(family['locale'])+'\n\n'+item['source']['excerpt']

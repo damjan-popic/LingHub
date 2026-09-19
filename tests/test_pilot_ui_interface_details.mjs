@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel} from '../pilot_ui/interface-details.mjs';
 import {publicRelease} from '../pilot_ui/public-release.mjs';
 
@@ -9,6 +10,17 @@ const registry={sources:[
   {suggested_key:'disconnected',labels:{sl:'Not enabled'}}
 ]};
 const t=(key,values={})=>({answer_wait_long:'Long wait.',answer_wait_sources:'Browse sources.',public_release:'Version '+values.version+' · '+values.date}[key]||key);
+
+test('packaged documentary legend distinguishes current reference, proposal, and annual additions',()=>{
+  const presentation=JSON.parse(fs.readFileSync(new URL('../pilot_ui/source-presentation.json',import.meta.url)));
+  const configured=JSON.parse(fs.readFileSync(new URL('../pilot_backend/enabled-documentary-sources.json',import.meta.url)));
+  const rows=legendSources(presentation,configured,'sl');
+  assert.equal(rows.find(row=>row.key==='sp2001').label,'Slovenski pravopis 2001');
+  assert.match(rows.find(row=>row.key==='pravopis8').label,/predlog/);
+  assert.match(rows.find(row=>row.key==='epravopis').label,/letni dodatki 2025/);
+  assert.match(legendSources(presentation,configured,'it').find(row=>row.key==='pravopis8').label,/proposta/);
+  assert(!rows.some(row=>row.key==='loris'),'LORIS remains a tool, not a documentary collection');
+});
 
 test('configured legend shares presentation and deduplicates collections independently of hits',()=>{
   const rows=legendSources(registry,['epravopis_2025','collection','epravopis_2026','ontology','tokenizer'],'it');

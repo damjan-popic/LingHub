@@ -7,6 +7,7 @@ uses explicit input language or language-specific question wording, not UI local
 from __future__ import annotations
 import copy
 import re
+import unicodedata
 import time
 from urllib.parse import urlencode
 from .store import digest, canonical
@@ -52,6 +53,27 @@ _TARGET_LANGUAGE = {
 }
 
 
+def single_word_plan(question, input_language='und'):
+    """Original Unicode span; SL/IT is a lookup policy, not language detection."""
+    if not isinstance(question,str) or len(question)>512:return None
+    start,end=0,len(question)
+    while start<end and question[start].isspace():start+=1
+    while end>start and (question[end-1].isspace() or question[end-1] in '?!.,;:'):end-=1
+    pairs={'"':'"', "'":"'", '«':'»','»':'«','“':'”','‘':'’'}
+    if start<end and pairs.get(question[start])==question[end-1]:start+=1;end-=1
+    while start<end and question[start].isspace():start+=1
+    while end>start and (question[end-1].isspace() or question[end-1] in '?!.,;:'):end-=1
+    word=question[start:end]
+    # Same Unicode-letter token convention as documentary query handling, with
+    # combining marks kept attached; no URLs, digits, punctuation-only input.
+    if not word or not word[0].isalpha() or any(not(c.isalpha() or unicodedata.category(c).startswith('M')) for c in word):return None
+    languages=[input_language] if input_language in {'sl','it'} else ['sl','it']
+    return {'version':VERSION,'operations':['loris'],'focus':word,'input_language':input_language,
+        'lookup_languages':languages,'status':'ready','routing_kind':'single_word_rule_lookup',
+        'reason':'single_word_rule_lookup','language_basis':'explicit_input_language' if len(languages)==1 else 'project_sl_it_inventory_lookup_not_detection',
+        'focus_span':{'start':start,'end':end,'offset_basis':'original_question_unicode_codepoint_half_open'}}
+
+
 def automatic_plan(question, input_language='und'):
     """Select a bounded LORIS check without interpreting its normative result.
 
@@ -62,6 +84,8 @@ def automatic_plan(question, input_language='und'):
     """
     if not isinstance(question,str) or not question.strip() or len(question)>512:
         return None
+    word=single_word_plan(question,input_language)
+    if word:return word
     wording=_QUOTES.sub(' ',question)
     cues=[(language,intent) for language,patterns in _AUTO_INTENTS.items()
           for intent,pattern in patterns if re.search(pattern,wording,re.I)]
@@ -96,6 +120,7 @@ def automatic_plan(question, input_language='und'):
 
 
 def plan(question, input_language='und', focus=None):
+    if focus is None and single_word_plan(question,input_language):return None
     wording=_QUOTES.sub(' ',question) # A tool name inside the quoted subject is not an operation.
     operations = [name for name,pattern in _PATTERNS.items() if re.search(pattern,wording,re.I)
                   and (name!='terminology' or _TERM_REQUEST.search(wording) or _TERM_NOUN_REQUEST.search(wording) or _TERM_TARGET_REQUEST.search(wording))]
@@ -114,9 +139,11 @@ def plan(question, input_language='und', focus=None):
 
 
 def collect(gateway, family, *, automatic=False):
-    routing=plan(family['question'],family.get('input_language','und'),family.get('focus'))
+    question=family.get('original_question',family['question'])
+    routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
+    if routing is None:routing=plan(question,family.get('input_language','und'),family.get('focus'))
     if routing is None and automatic:
-        routing=automatic_plan(family['question'],family.get('input_language','und'))
+        routing=automatic_plan(question,family.get('input_language','und'))
     if routing is None:return None
     result={'version':VERSION,'plan':routing,'captures':[],'capabilities_identity':None,'timings':{}}
     if routing['status']!='ready':return result
@@ -136,11 +163,20 @@ def collect(gateway, family, *, automatic=False):
         capabilities=gateway.request('/v1/capabilities',None,gateway.linghub_url)
         if not capabilities.get('identity')or not capabilities.get('analyzer_service_reachable'):raise Failure('task_unavailable',503)
         result['capabilities_identity']=capabilities['identity']
-        request={'text':focus,'lang':routing['input_language'],'engine':'default','include':lexical,'limit':3}
-        before=time.monotonic();response=gateway.request('/v1/explore',request,gateway.linghub_url)
-        after=gateway.request('/v1/capabilities',None,gateway.linghub_url)
-        if capabilities['identity']!=after.get('identity')or response.get('text')!=focus or response.get('lang')!=request['lang']or response.get('offset_convention')!='unicode_codepoint_half_open':raise Failure('resource_changed',503)
-        capture('explore',request,response,(time.monotonic()-before)*1000)
+        for language in routing.get('lookup_languages',[routing['input_language']]):
+            request={'text':focus,'lang':language,'engine':'default','include':lexical,'limit':3}
+            before=time.monotonic()
+            try:
+                response=gateway.request('/v1/explore',request,gateway.linghub_url)
+            except Failure as error:
+                if routing.get('routing_kind')!='single_word_rule_lookup':raise
+                # Explicitly local transport observation, never an analyzer result.
+                response={'text':focus,'lang':language,'offset_convention':'unicode_codepoint_half_open',
+                    'results':{op:{'status':'unavailable','data':None,'diagnostic':{'stage':'explore','error_code':error.code,'error_type':type(error).__name__}} for op in lexical},
+                    'observation_origin':'application_transport_failure'}
+            after=gateway.request('/v1/capabilities',None,gateway.linghub_url)
+            if capabilities['identity']!=after.get('identity')or response.get('text')!=focus or response.get('lang')!=request['lang']or response.get('offset_convention')!='unicode_codepoint_half_open':raise Failure('resource_changed',503)
+            capture('explore',request,response,(time.monotonic()-before)*1000)
     result['timings']['tool_evidence_ms']=(time.monotonic()-started)*1000
     result['capture_set_sha256']=digest(result['captures'])
     return result

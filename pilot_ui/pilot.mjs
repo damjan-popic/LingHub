@@ -160,7 +160,7 @@ async function recordDelivered(tier,expanded) {
   await api('/runs/'+encodeURIComponent(tier.run_id)+'/delivered',{method:'POST',body:{...(beta()?{delivery_token:tier.delivery_token}:{display_sha256:tier.display_sha256}),expanded}});state.delivered.add(key);
 }
 function renderFeedback(tier,kind,node) {
-  clear(node);if(['clarification','clarification_required','capability_unavailable','unavailable'].includes(tier?.answer_kind)||!tier?.run_id||!(tier.state==='complete'||acceptedStates.has(jobState(tier))))return;
+  clear(node);if(!tier?.run_id||!(['complete','failed','cancelled'].includes(tier.state)||acceptedStates.has(jobState(tier))))return;
   const delivered=state.delivered.has(tier.run_id+':'+(kind==='long'));
   if(beta()){const mark=localButton('mark_error',()=>openFeedback(tier,kind),'feedback-mark');mark.disabled=!delivered;node.append(mark);return;}
   const old=state.feedback.get(tier.run_id),draft=state.feedbackDrafts.get(tier.run_id)||{quality_score:old?.quality_score??null,comment:old?.comment||''};

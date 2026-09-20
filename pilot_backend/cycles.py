@@ -49,6 +49,14 @@ def snapshot(store,previous=0):
         rows=[dict(r)for r in db.execute('''SELECT e.*,o.quality_score,f.owner,f.run_id,a.origin,a.cohort,r.model,r.tier,r.result,r.family_id,fa.locale,fa.task,fa.identity,fa.policy_id FROM feedback_events e LEFT JOIN feedback_observations o ON o.event_id=e.id JOIN feedback f ON f.id=e.feedback_id JOIN accounts a ON a.id=f.owner JOIN runs r ON r.id=f.run_id JOIN families fa ON fa.id=r.family_id WHERE e.seq>?AND e.seq<=?AND e.revision=(SELECT max(e2.revision)FROM feedback_events e2 WHERE e2.feedback_id=e.feedback_id AND e2.seq<=?) ORDER BY e.seq''',(previous,cutoff,cutoff))]
         # Denominators include actual delivered answers even when no vote was supplied.
         run_rows=[dict(r)for r in db.execute('SELECT r.id,r.state,r.delivered,r.finished,r.result,r.model,r.tier,f.locale,f.task,a.origin FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner')]
+        # Reuse submission origins; technical work must not enter natural-use
+        # quality denominators merely because its login is a human account.
+        observations={r['run_id']:json.loads(r['snapshot'])['participant'] for r in db.execute('SELECT * FROM run_observations')}
+        technical={r[0] for r in db.execute("SELECT r.id FROM runs r JOIN families f ON f.id=r.family_id JOIN accounts a ON a.id=f.owner WHERE a.username='tehno'")}
+        for row in rows+run_rows:
+            rid=row.get('run_id',row.get('id'));participant=observations.get(rid,{})
+            if row['origin']=='human' and (rid in technical or participant.get('origin') in {'technical_manual','automated_test'}):
+                row['account_origin']=row['origin'];row['origin']=participant.get('origin','technical_manual')
     return cutoff,rows,run_rows
 
 def answer_feedback(row):

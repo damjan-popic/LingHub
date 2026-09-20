@@ -4,6 +4,7 @@ import fcntl,json,math,re,threading,time
 from .store import canonical,digest,stamp
 from .security import Failure
 from .classification import method
+from .human_feedback import record_stage, safe_exception, terminal_display
 
 
 FREEZE_STAGES={'cpu_collation_ms','tool_evidence_ms','lexical_ms','embedding_ms','vector_search_ms','rerank_ms','retrieval_and_freeze_ms','evidence_lookup_ms','registry_ms','source_collection_ms','gateway_freeze_ms','evidence_preparation_ms'}
@@ -87,25 +88,31 @@ class Jobs:
             if current['cancel_requested']:
                 finished=stamp()
                 db.execute("UPDATE jobs SET state='cancelled',finished=? WHERE id=?",(finished,job['id']))
-                db.execute("UPDATE runs SET state='cancelled',result=NULL,display_hash=NULL,finished=? WHERE id=?",(finished,job['run_id']))
+                display,display_hash=terminal_display(db,job['run_id'],'cancelled')
+                db.execute("UPDATE runs SET state='cancelled',result=?,display_hash=?,finished=? WHERE id=?",(display,display_hash,finished,job['run_id']))
                 return False
             if result is not None:db.execute('UPDATE runs SET result=? WHERE id=?',(canonical(result),job['run_id']))
             return True
     def execute(self,job):
         started=time.monotonic();rid=job['run_id'];queue_wait_ms=max(0,((job.get('started')or stamp())-job['created'])*1000);freeze_ms=0.0;matches_ready_ms=None
+        stage='accepted'
         try:
+            record_stage(self.store,rid,'started',{'queue_wait_ms':queue_wait_ms,'timestamp':stamp()})
             if not self.continue_stage(job):return
             with self.store.connect()as db:
                 r=dict(db.execute('SELECT *FROM runs WHERE id=?',(rid,)).fetchone());f=dict(db.execute('SELECT *FROM families WHERE id=?',(r['family_id'],)).fetchone());policy=json.loads(db.execute('SELECT config FROM policies WHERE id=?',(f['policy_id'],)).fetchone()[0])
-                parent=db.execute('SELECT result FROM runs WHERE id=?',(r['parent_run_id'],)).fetchone()if r['parent_run_id']else None
+                parent=db.execute('SELECT result FROM runs WHERE id=? AND family_id=?',(r['parent_run_id'],r['family_id'])).fetchone()if r['parent_run_id']else None
                 focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(f['id'],)).fetchone()
                 if focus:f['focus']=focus[0]
+                original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(f['id'],)).fetchone()
+                if original:f['original_question']=original[0]
             is_unified=f['task']=='reference'and getattr(self.adapter,'unified_answers',False)
             if is_unified:
                 if not self.continue_stage(job,{'progress':{'stage':'retrieval'if not f['bundle']else'generation'}}):return
             if f['task']=='reference'and not is_unified and hasattr(self.adapter,'require_generation'):self.adapter.require_generation([r['model']])
             if not f['bundle']:
                 freeze_started=time.monotonic()
+                stage='retrieval_and_freeze'
                 frozen=self.adapter.freeze(f,policy)
                 freeze_ms=(time.monotonic()-freeze_started)*1000
                 if not isinstance(frozen.get('bundle'),dict)or not isinstance(frozen.get('identity'),dict):raise Failure('invalid_freeze',502)
@@ -117,11 +124,15 @@ class Jobs:
                     bundle=json.loads(current[0]);observation=json.loads(current[1]).get('freeze_observation')
             else:
                 bundle=json.loads(f['bundle']);observation=json.loads(f['identity']or'{}').get('freeze_observation')
+            record_stage(self.store,rid,'freeze',{'family_id':f['id'],'frozen_reference':'families.bundle','reused':bool(f['bundle'])})
             if is_unified:
                 matches_ready_ms=queue_wait_ms+(time.monotonic()-started)*1000
                 if not self.continue_stage(job,{'progress':{'stage':'generation','matches_ready':True},'retrieval':bundle.get('retrieval',{})}):return
             elif not self.continue_stage(job):return
+            stage='writer'
             generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
+            record_stage(self.store,rid,'generation',generated.get('diagnostics',{'writer':{'status':'not_invoked','reason':generated.get('generation',{}).get('status')}}) if generated.get('generation',{}).get('status') in {'no_support','unavailable'} else generated.get('diagnostics',{'writer':{'status':'not_captured','missing_fields':['writer_request_and_raw_output'],'trace_incomplete':True}}))
+            stage='display_validation'
             if not self.continue_stage(job,{'progress':{'stage':'validation','matches_ready':True},'retrieval':bundle.get('retrieval',{})}if is_unified else None):return
             validation_started=time.monotonic()
             result,display=render_result(generated)
@@ -143,15 +154,18 @@ class Jobs:
                 if not current:return
                 state='cancelled'if current['cancel_requested']else'complete'
                 db.execute('UPDATE jobs SET state=?,finished=?WHERE id=?',(state,stamp(),job['id']))
-                db.execute('UPDATE runs SET state=?,result=?,display_hash=?,finished=?WHERE id=?',(state,canonical(result)if state=='complete'else None,display if state=='complete'else None,stamp(),rid))
+                output,display_hash=(canonical(result),display) if state=='complete' else terminal_display(db,rid,state)
+                db.execute('UPDATE runs SET state=?,result=?,display_hash=?,finished=?WHERE id=?',(state,output,display_hash,stamp(),rid))
         except Exception as error:
+            record_stage(self.store,rid,'failure',{'stage':stage,'elapsed_ms':(time.monotonic()-started)*1000,**safe_exception(error)})
             code=error.code if isinstance(error,Failure)else'answer_unavailable'
             with self.store.tx()as db:
                 current=db.execute('SELECT state,cancel_requested FROM jobs WHERE id=?',(job['id'],)).fetchone()
                 if not current or current['state']!='running':return
                 state='cancelled'if current['cancel_requested']else'failed';finished=stamp()
                 db.execute('UPDATE jobs SET state=?,error_code=?,finished=?WHERE id=?',(state,code,finished,job['id']))
-                db.execute('UPDATE runs SET state=?,result=NULL,finished=?WHERE id=?',(state,finished,rid))
+                output,display_hash=terminal_display(db,rid,state)
+                db.execute('UPDATE runs SET state=?,result=?,display_hash=?,finished=?WHERE id=?',(state,output,display_hash,finished,rid))
             # Only an error code is retained; provider exceptions may contain private URLs or model identities.
         finally:
             from .cycles import monitor_canary

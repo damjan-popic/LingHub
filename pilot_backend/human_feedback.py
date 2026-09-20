@@ -199,6 +199,8 @@ def observation(db,owner,run,result,created,display_locale):
     ui=Path(__file__).resolve().parent.parent/'pilot_ui'
     versions['ui_assets_sha256']={name:hashlib.sha256((ui/name).read_bytes()).hexdigest()for name in ('pilot.mjs','core.mjs','pilot.css','i18n/'+display_locale+'.json')}
     versions['feedback_implementation_sha256']=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    submission=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(run['id'],)).fetchone()
+    submission=json.loads(submission[0]) if submission else None
     return {'schema':'klikai.pilot.feedback-observation.v1','participant':account,
             'original_prompt':original[0]if original else family['question'],
             'original_prompt_exact':bool(original),'context':family['context'],
@@ -211,7 +213,8 @@ def observation(db,owner,run,result,created,display_locale):
             'execution':result['execution']if isinstance(result.get('execution'),dict)else{'device':'cpu'if family['task']!='reference'else'unknown'},
             'answer_language':family['locale'],'input_language':family['input_language'],
             'tier':run['tier'],'task':family['task'],'answer_method':result.get('answer_method'),'versions':versions,
-            'human_eligible':account['origin']=='human'}
+            'human_eligible':account['origin']=='human' and account['username']!='tehno' and (submission or {}).get('participant',{}).get('origin')!='automated_test',
+            'submission_observation':{k:submission[k] for k in ('participant','versions')} if submission else None}
 
 def attach(db,event):
     row=db.execute('SELECT quality_score,snapshot FROM feedback_observations WHERE event_id=?',(event['id'],)).fetchone()
@@ -244,3 +247,185 @@ def csv_export(data):
             row={'event_id':event['id'],'feedback_id':event['feedback_id'],'revision':event['revision'],'participant_id':a['id'],'participant':a['username'],'origin':a['origin'],'timestamp':event['created'],'original_prompt':o.get('original_prompt',''),'original_prompt_exact':o.get('original_prompt_exact',False),'displayed_answer':o.get('displayed_answer',''),'quality_score':event.get('quality_score'),'quality_scale':event.get('quality_scale',''),'legacy_rating':event['rating'],'comment':event['comment'],'model':o.get('selected_model',''),'actual_model':o.get('actual_model',''),'backend':o.get('execution',{}).get('device','unknown'),'answer_language':o.get('answer_language',''),'tier':o.get('tier',''),'display_sha256':event['display_hash'],'versions':o.get('versions',{})}
             writer.writerow({key:safe(value)for key,value in row.items()})
     return stream.getvalue()
+
+# One small additive record per existing run, in the same private/backed-up DB.
+# Families retain their frozen sources; results and revisioned feedback are joined,
+# never copied into a second feedback store.
+def participant_at_submission(db, owner, automated=False):
+    account=dict(db.execute('SELECT id,username,origin,cohort FROM accounts WHERE id=?',(owner,)).fetchone())
+    group=account['username'] if account['username'] in {'cu','slori','tehno'} else 'unknown'
+    origin=('automated_test' if automated or account['origin'] in {'test','synthetic'} else
+            'technical_manual' if group=='tehno' else 'project_use' if group in {'cu','slori'} else 'unknown')
+    return {**account,'group':group,'account_origin':account['origin'],'origin':origin,'group_basis':'authenticated_account_at_submission'}
+
+
+def accepted(db, run_id, owner, *, automated=False, release=None):
+    row=db.execute('SELECT parent_run_id FROM runs WHERE id=?',(run_id,)).fetchone()
+    parent=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(row[0],)).fetchone() if row[0] else None
+    value={'schema':'klikai.pilot.run-observation.v1', 'participant':participant_at_submission(db,owner,automated),
+        'versions':{'application_release':release},'stages':{},'trace_incomplete':False,'missing_fields':[]}
+    if parent and json.loads(parent[0])['participant']['origin']=='automated_test':value['participant']['origin']='automated_test'
+    db.execute('INSERT INTO run_observations VALUES(?,?)',(run_id,canonical(value)))
+
+
+def record_stage(store, run_id, stage, value):
+    """Optional extended capture must not turn an answer into a failure.
+
+    Missing stage markers are detected independently by export even if the DB
+    itself could not accept the diagnostic failure marker.
+    """
+    try:
+        encoded=canonical(value)
+        if len(encoded.encode())>4*1024*1024:raise ValueError('diagnostic_capture_bound')
+        with store.tx() as db:
+            row=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(run_id,)).fetchone()
+            if row is None:return False
+            snapshot=json.loads(row[0]);snapshot['stages'][stage]=json.loads(encoded)
+            db.execute('UPDATE run_observations SET snapshot=? WHERE run_id=?',(canonical(snapshot),run_id))
+        return True
+    except Exception as error:
+        try:
+            with store.tx() as db:
+                row=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(run_id,)).fetchone()
+                if row:
+                    snapshot=json.loads(row[0]);snapshot['trace_incomplete']=True
+                    snapshot['missing_fields'].append({'stage':stage,'cause':safe_exception(error)})
+                    db.execute('UPDATE run_observations SET snapshot=? WHERE run_id=?',(canonical(snapshot),run_id))
+        except Exception:pass
+        return False
+
+
+def safe_exception(error):
+    # Exception messages can contain a signed URL, token, headers or a full
+    # provider response. Retain class, numeric errno, safe code, and code frames.
+    import traceback
+    value={'error_type':type(error).__name__,'frames':[{'file':Path(f.filename).name,'function':f.name,'line':f.lineno} for f in traceback.extract_tb(error.__traceback__)[-6:]]}
+    code=getattr(error,'code',None)
+    if isinstance(code,str) and re.fullmatch('[a-zA-Z0-9_]{1,100}',code):value['error_code']=code
+    if type(getattr(error,'errno',None)) is int:value['errno']=error.errno
+    cause=error.__cause__ or error.__context__
+    if cause is not None and cause is not error:value['cause_type']=type(cause).__name__
+    return value
+
+
+def failure_display(state, locale):
+    message=('Zahteva je preklicana.' if state=='cancelled' else 'Odgovora ni bilo mogoče pripraviti. Poskusite znova.') if locale=='sl' else (
+        'La richiesta è stata annullata.' if state=='cancelled' else 'Non è stato possibile preparare la risposta. Riprova.')
+    return {'status':'failed','answer_kind':'failed','answer_md':message,'short_answer':message,
+        'blocks':[{'block_id':'attempt-status','text':message}],'evidence':[],'citations':[],'source_badges':[]}
+
+
+def terminal_display(db, run_id, state):
+    locale=db.execute('SELECT f.locale FROM families f JOIN runs r ON r.family_id=f.id WHERE r.id=?',(run_id,)).fetchone()[0]
+    result=failure_display(state,locale)
+    return canonical(result),digest(result['blocks'])
+
+
+def visible_result(run, locale):
+    result=json.loads(run['result'] or '{}')
+    if run['state'] in {'failed','cancelled'} and not result.get('blocks'):return failure_display(run['state'],locale)
+    return result
+
+
+def attempt_case(db, run_id):
+    """Offline-only joins over original persisted data. Never calls a provider."""
+    run=dict(db.execute('SELECT * FROM runs WHERE id=?',(run_id,)).fetchone())
+    family=dict(db.execute('SELECT * FROM families WHERE id=?',(run['family_id'],)).fetchone())
+    account=dict(db.execute('SELECT id,username,cohort,origin FROM accounts WHERE id=?',(family['owner'],)).fetchone())
+    row=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(run_id,)).fetchone()
+    observed_at_submission=row is not None
+    observation=json.loads(row[0]) if row else {'participant':{**account,'group':account['username'] if account['username'] in {'cu','slori','tehno'} else 'unknown','origin':'unknown','group_basis':'historical_owner_identity_only'},'stages':{},'versions':{},'missing_fields':['submission_observation_not_recorded_historically']}
+    job=dict(db.execute('SELECT * FROM jobs WHERE run_id=?',(run_id,)).fetchone() or {})
+    original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(family['id'],)).fetchone()
+    bundle=json.loads(family['bundle'] or '{}');result=visible_result(run,family['locale'])
+    # HMACs authorize internal operations, not analysis. Export the signed
+    # payload's source bytes but never the signature or an answer bearer pin.
+    def data_only(value):
+        if isinstance(value,list):return [data_only(x) for x in value]
+        if isinstance(value,dict):return {k:data_only(v) for k,v in value.items() if k not in {'signature','hmac','answer_pin','sig'}}
+        return value
+    feedback=[]
+    for row in db.execute('SELECT e.*,f.id AS feedback_id FROM feedback_events e JOIN feedback f ON f.id=e.feedback_id WHERE f.run_id=? ORDER BY e.revision',(run_id,)):
+        event=attach(db,dict(row))
+        for key in ('tags','target','anchor'):event[key]=json.loads(event[key]) if event[key] else None
+        feedback.append(event)
+    reviews=[dict(row) for row in db.execute('SELECT t.* FROM feedback_triage t JOIN feedback f ON f.id=t.feedback_id WHERE f.run_id=? ORDER BY t.created',(run_id,))]
+    missing=list(observation.get('missing_fields',[]));stages=observation['stages']
+    if run['state'] in {'failed','cancelled'} and not json.loads(run['result'] or '{}').get('blocks'):missing.append('historical_failure_display_not_captured')
+    if observed_at_submission and run['state']=='complete' and 'generation' not in stages:missing.append('generation_stage_capture')
+    if job.get('started') and 'started' not in stages:missing.append('worker_start_capture')
+    writer=stages.get('generation',{}).get('writer',{})
+    missing.extend(writer.get('missing_fields',[]))
+    frozen=bundle.get('gateway_bundle',bundle).get('payload',{}) if isinstance(bundle.get('gateway_bundle',bundle),dict) else {}
+    if family['task']=='reference' and run['state']=='complete' and bundle.get('matches') and not frozen:missing.append('gateway_freeze_unavailable')
+    missing.extend(frozen.get('retrieval',{}).get('missing_fields',[]))
+    generation=result.get('generation',{})
+    failure=stages.get('failure',{})
+    timeout=(job.get('error_code') in {'source_timeout','answer_timeout','PILOT_TIMEOUT'} or
+        failure.get('error_type') in {'TimeoutError','ReadTimeout','ConnectTimeout'} or
+        failure.get('cause_type') in {'TimeoutError','ReadTimeout','ConnectTimeout'})
+    outcome=('timed_out' if run['state']!='cancelled' and timeout else
+        run['state'] if run['state']!='complete' else
+        'no_support' if result.get('status')=='no_hit' or generation.get('status')=='no_support' else
+        'failed' if generation.get('status') in {'failed','unavailable'} or result.get('status')=='failed' else
+        'partial' if result.get('status')=='partial' else 'completed')
+    retrieval=result.get('retrieval',bundle.get('retrieval',{}))
+    degraded=bool(retrieval.get('status') in {'partial','unavailable'} or frozen.get('retrieval',{}).get('degraded'))
+    latest=feedback[-1] if feedback else {}
+    rating=latest.get('quality_score') or latest.get('rating') or 'unrated'
+    summary={'run_id':run_id,'family_id':family['id'],'job_id':job.get('id'),'parent_run_id':run['parent_run_id'],
+        'participant_id':account['id'],'participant':observation['participant']['username'],'group':observation['participant']['group'],
+        'origin':observation['participant']['origin'],'timestamp':run['created'],'question':original[0] if original else family['question'],
+        'release':result.get('application_release') or observation.get('versions',{}).get('application_release'),
+        'actual_model':result.get('model_identity'),'provider':result.get('execution',{}).get('provider_scope'),
+        'outcome':outcome,'degraded':degraded,'rating':rating,'feedback_revisions':len(feedback),
+        'review_status':reviews[-1]['status'] if reviews else 'unreviewed','trace_incomplete':bool(missing or observation.get('trace_incomplete')),
+        'display_sha256':run['display_hash'] or digest(result.get('blocks',[])),'tier':run['tier']}
+    return {'summary':summary,'observation':data_only(observation),'missing_fields':missing,
+        'context':family['context'],'languages':{'input':family['input_language'],'input_basis':'explicit_input' if family['input_language']!='und' else 'not_supplied','answer':family['locale'],'answer_basis':'submitted_answer_locale'},
+        'job':job,'frozen_sources':data_only(bundle),'family_identity':json.loads(family['identity'] or '{}'),
+        'display':data_only(result),'display_paragraphs':display_paragraphs(result,run['tier'],family['locale']),
+        'feedback_revisions':feedback,'human_reviews':reviews,
+        'timing':{'accepted':run['created'],'started':job.get('started'),'server_ready':run['finished'],'browser_delivery':run['delivered']},
+        'teaching_approval':'not_established_by_rating_or_group'}
+
+
+def export_attempts(store, directory, *, groups=None, origin=None, since=None, until=None, release=None,
+                    model=None, provider=None, outcome=None, degraded=None, rating=None, review_status=None, run_id=None):
+    import os
+    directory=Path(directory).absolute()
+    if directory.exists() or directory.is_symlink():raise ValueError('Choose a new private export directory')
+    directory.mkdir(parents=True,mode=0o700);os.chmod(directory,0o700)
+    chosen=set(groups or ('cu','slori'))
+    # Explicit TEHNO includes its ordinary technical traffic. Automated traffic
+    # and historical unknown traffic require an explicit origin/all selection.
+    default_origin={'project_use','technical_manual'} if groups else {'project_use'}
+    cases=[]
+    with store.connect() as db:
+        ids=[r[0] for r in db.execute('SELECT id FROM runs ORDER BY created')]
+        for rid in ids:
+            if run_id and rid!=run_id:continue
+            case=attempt_case(db,rid);row=case['summary']
+            if not run_id:
+                if 'all' not in chosen and row['group'] not in chosen:continue
+                if origin!='all' and row['origin'] not in ({origin} if origin else default_origin):continue
+            if since is not None and row['timestamp']<since or until is not None and row['timestamp']>until:continue
+            filters={'release':release,'provider':provider,'outcome':outcome,'rating':rating,'review_status':review_status,'degraded':degraded}
+            if any(v is not None and str(row[k])!=str(v) for k,v in filters.items()):continue
+            if model and model not in canonical(row['actual_model']):continue
+            cases.append(case)
+    def write(name, content):
+        fd=os.open(directory/name,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+        with os.fdopen(fd,'w') as out:out.write(content)
+    write('attempts.jsonl',''.join(canonical(c['summary'])+'\n' for c in cases))
+    stream=io.StringIO(newline='');columns=list(cases[0]['summary']) if cases else ['run_id','group','origin','outcome','rating']
+    writer=csv.DictWriter(stream,fieldnames=columns);writer.writeheader()
+    for case in cases:
+        row={k:canonical(v) if isinstance(v,(dict,list)) else v for k,v in case['summary'].items()}
+        row={k:("'"+v if isinstance(v,str) and v.lstrip().startswith(('=','+','-','@')) else v) for k,v in row.items()};writer.writerow(row)
+        write(case['summary']['run_id']+'.json',json.dumps(case,ensure_ascii=False,indent=2)+'\n')
+        summary=case['summary'];write(summary['run_id']+'.md',f"# Private testing case {summary['run_id']}\n\nGroup: {summary['group']}; origin: {summary['origin']}; outcome: {summary['outcome']}; rating: {summary['rating']}.\n\n## Original question\n\n{summary['question']}\n\n## Displayed answer\n\n"+'\n\n'.join(case['display_paragraphs'])+'\n\nFull persisted analysis, candidates, selection, writer request/output and feedback revisions are in the adjacent JSON file. No retrieval or generation was performed for this export.\n\nMissing fields: '+canonical(case['missing_fields'])+'\n')
+    write('attempts.csv',stream.getvalue())
+    counts={'attempts':len(cases),'unique_questions':len({digest([c['summary']['question'],c['context']]) for c in cases}),'rated_outputs':sum(c['summary']['rating']!='unrated' for c in cases),'incomplete_traces':sum(c['summary']['trace_incomplete'] for c in cases)}
+    write('README.json',json.dumps({'counts':counts,'scope':'bounded returned candidates, no claim of exhaustive coverage','filters':{'groups':sorted(chosen),'origin':origin or sorted(default_origin)},'training':'No case is approved teaching material merely by inclusion or rating.'},indent=2)+'\n')
+    return {'directory':str(directory),'counts':counts}

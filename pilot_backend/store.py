@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS family_inputs(family_id TEXT PRIMARY KEY REFERENCES f
 CREATE TRIGGER IF NOT EXISTS family_inputs_immutable BEFORE UPDATE ON family_inputs BEGIN SELECT RAISE(ABORT,'Original prompt is immutable');END;
 CREATE TABLE IF NOT EXISTS assignments(id TEXT PRIMARY KEY,owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,family_id TEXT NOT NULL REFERENCES families(id) ON DELETE CASCADE,blind INTEGER NOT NULL,mapping TEXT NOT NULL,revealed REAL,prior_named_exposure INTEGER NOT NULL,active_tier TEXT NOT NULL DEFAULT 'short',created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,family_id TEXT NOT NULL REFERENCES families(id) ON DELETE CASCADE,tier TEXT NOT NULL CHECK(tier IN ('short','long')),model TEXT NOT NULL,revision INTEGER NOT NULL,parent_run_id TEXT REFERENCES runs(id),assignment_id TEXT REFERENCES assignments(id) ON DELETE CASCADE,state TEXT NOT NULL,result TEXT,display_hash TEXT,created REAL NOT NULL,finished REAL,delivered REAL,UNIQUE(family_id,tier,model,assignment_id,revision));
+CREATE TABLE IF NOT EXISTS run_observations(run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assignment_runs(assignment_id TEXT NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,tier TEXT NOT NULL,side TEXT NOT NULL CHECK(side IN ('A','B')),run_id TEXT UNIQUE NOT NULL REFERENCES runs(id) ON DELETE CASCADE,PRIMARY KEY(assignment_id,tier,side));
 CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,run_id TEXT UNIQUE NOT NULL REFERENCES runs(id) ON DELETE CASCADE,owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,kind TEXT NOT NULL,model TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,started REAL,finished REAL,cancel_requested INTEGER NOT NULL DEFAULT0,error_code TEXT,attempts INTEGER NOT NULL DEFAULT0);
 CREATE INDEX IF NOT EXISTS pending_jobs ON jobs(state,created);
@@ -137,6 +138,7 @@ class Store:
         db.execute("DELETE FROM families WHERE created<=?AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.family_id=families.id AND (r.finished>?OR r.state IN ('running','queued')))AND NOT EXISTS(SELECT 1 FROM feedback f JOIN runs r ON r.id=f.run_id WHERE r.family_id=families.id)",(cutoff,cutoff))
     def retention(self,days=180,now=None):
         if days!=180:raise ValueError('Pilot retention is fixed at180 days')
+        if self.meta('human_testing_mode','0')=='1':return {'status':'project_testing_retained_pending_review','purged':False}
         cutoff=(stamp()if now is None else now)-days*86400
         fd=os.open(self.path.with_suffix('.deletion.lock'),os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
         with os.fdopen(fd,'a')as stream:
@@ -157,4 +159,7 @@ class Store:
         with self.tx()as db:
             ids=[r[0]for r in db.execute("SELECT run_id FROM jobs WHERE state='running'")]
             db.execute("UPDATE jobs SET state='failed',finished=?,error_code='interrupted'WHERE state='running'",(stamp(),))
-            db.executemany("UPDATE runs SET state='failed',finished=? WHERE id=?",[(stamp(),i)for i in ids])
+            from .human_feedback import terminal_display
+            for rid in ids:
+                result,display=terminal_display(db,rid,'failed')
+                db.execute("UPDATE runs SET state='failed',result=?,display_hash=?,finished=? WHERE id=?",(result,display,stamp(),rid))

@@ -26,8 +26,9 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False):
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
+        self.release=release
         self.unified_answers=unified_answers
         self.default_model='auto'if'auto'in self.models else'qwen'if'qwen'in self.models else self.models[0]
         self.comparison_models=tuple(model for model in self.models if model in {'qwen','gemma'})
@@ -57,13 +58,14 @@ class Domain:
     def admit(self,db,owner,count=1):
         active="state IN ('queued','running')"
         if db.execute(f'SELECT count(*)FROM jobs WHERE {active}').fetchone()[0]+count>self.max_queue or db.execute(f'SELECT count(*)FROM jobs WHERE owner=?AND {active}',(owner,)).fetchone()[0]+count>self.per_owner:raise Failure('queue_full',429)
-    def new_run(self,db,family,owner,tier,model,assignment=None,parent=None):
+    def new_run(self,db,family,owner,tier,model,assignment=None,parent=None,automated=False):
         if historical_record(db,family,owner=owner)is not None:raise Failure('historical_generation_unavailable',409)
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
         job_model='cpu'if task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
+        human_feedback.accepted(db,rid,owner,automated=automated,release=self.release)
         return {'run_id':rid,'job_id':jid}
     def select_policy(self,db,owner,comparison=False):
         baseline=self.store.meta('active_policy',db=db)
@@ -73,12 +75,13 @@ class Domain:
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
     def create_family(self,owner,payload):
-        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key'})
+        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id'})
         original_question=text(payload.get('question'),5000);q=original_question.strip();context=text(payload.get('context',''),3000)
         locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model',self.default_model)
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
         if not q or locale not in {'sl','it'}or interface not in {'sl','it'}or input_language not in {'sl','it','mixed','und'}or task not in self.tasks or model not in self.models:raise Failure('invalid_request')
         checked_key(payload.get('idempotency_key'))
+        if payload.get('origin') is not None and payload.get('origin')!='automated_test':raise Failure('invalid_request')
         focus=text(payload['focus'],512).strip()if 'focus'in payload else None
         if focus=='':focus=None
         clarification=None
@@ -99,7 +102,9 @@ class Domain:
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
-                r=self.new_run(db,fid,owner,'short',model);return dict(family_id=fid,**r)
+                parent=payload.get('parent_run_id')
+                if parent:self.run(db,parent,owner) # Same-owner retry link only.
+                r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test');return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
     def expand(self,owner,fid,payload):
@@ -121,13 +126,14 @@ class Domain:
         if not blind:
             out['job_id']=job[0]if job else None
             if job and job['error_code']:out['error_code']=job['error_code']
-        if r['result']:
-            result=json.loads(r['result'])
+        if r['result'] or r['state'] in {'failed','cancelled'}:
+            locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+            result=human_feedback.visible_result(r,locale)
             for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress'):
                 if blind and k in {'retrieval','generation','progress'}:continue
                 if k in result:out[k]=result[k]
             if not blind:
-                out['display_sha256']=r['display_hash'];out['model']=r['model']
+                out['display_sha256']=r['display_hash'] or digest(result.get('blocks',[]));out['model']=r['model']
                 from .human_feedback import public_execution,provider_diagnostics
                 out.update(public_execution(result))
                 validation=provider_diagnostics(result).get('generation_validation')
@@ -185,21 +191,25 @@ class Domain:
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)
             if j['state']=='queued':
-                db.execute("UPDATE jobs SET state='cancelled',cancel_requested=1,finished=?WHERE id=?",(stamp(),jid));db.execute("UPDATE runs SET state='cancelled',finished=?WHERE id=?",(stamp(),j['run_id']))
+                db.execute("UPDATE jobs SET state='cancelled',cancel_requested=1,finished=?WHERE id=?",(stamp(),jid));display,display_hash=human_feedback.terminal_display(db,j['run_id'],'cancelled');db.execute("UPDATE runs SET state='cancelled',result=?,display_hash=?,finished=?WHERE id=?",(display,display_hash,stamp(),j['run_id']))
             elif j['state']=='running':db.execute('UPDATE jobs SET cancel_requested=1 WHERE id=?',(jid,))
         return self.job(owner,jid)
     def delivered(self,owner,rid,payload):
         with self.store.tx()as db:
             r=self.run(db,rid,owner)
-            if r['state']!='complete' or payload.get('display_sha256')!=r['display_hash']:raise Failure('display_changed',409)
+            locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+            expected=r['display_hash'] or digest(human_feedback.visible_result(r,locale).get('blocks',[]))
+            if r['state'] not in {'complete','failed','cancelled'} or payload.get('display_sha256')!=expected:raise Failure('display_changed',409)
             if r['assignment_id']:
                 a=self.owned(db,'assignments',r['assignment_id'],owner)
                 if a['blind']and not a['revealed']:raise Failure('blind_delivery_route_required',409)
             self.mark_delivery(db,owner,r,payload.get('expanded',False))
         return {'acknowledged':True}
     def mark_delivery(self,db,owner,r,expanded):
-        if r['state']!='complete':raise Failure('answer_not_ready',409)
-        db.execute('INSERT INTO deliveries VALUES(?,?,?,?,?,?)',(uid(),owner,r['id'],r['display_hash'],int(bool(expanded)),stamp()))
+        if r['state'] not in {'complete','failed','cancelled'}:raise Failure('answer_not_ready',409)
+        locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+        display=r['display_hash'] or digest(human_feedback.visible_result(r,locale).get('blocks',[]))
+        db.execute('INSERT INTO deliveries VALUES(?,?,?,?,?,?)',(uid(),owner,r['id'],display,int(bool(expanded)),stamp()))
         db.execute('UPDATE runs SET delivered=coalesce(delivered,?)WHERE id=?',(stamp(),r['id']))
     def create_comparison(self,owner,payload):
         if not self.comparisons_enabled or self.store.meta('human_testing_mode','0')=='1':raise Failure('comparisons_deferred',409)
@@ -290,9 +300,11 @@ class Domain:
         if not isinstance(target,dict)or set(target)-{'kind','evidence_id'}or not isinstance(target.get('kind'),str)or target.get('kind')not in {'answer','source'}:raise Failure('invalid_feedback')
         with self.store.tx()as db:
             r=self.run(db,payload.get('run_id'),owner)
-            if r['state']!='complete' or not r['delivered']:raise Failure('answer_not_delivered',409)
-            result=json.loads(r['result']);evidence=result.get('evidence',[])
-            if not self.answer_actions(r):raise Failure('feedback_unavailable',409)
+            if r['state'] not in {'complete','failed','cancelled'} or not r['delivered']:raise Failure('answer_not_delivered',409)
+            locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+            result=human_feedback.visible_result(r,locale);evidence=result.get('evidence',[])
+            if result.get('answer_kind') in {'clarification','clarification_required'}:raise Failure('feedback_unavailable',409)
+            r['display_hash']=r['display_hash'] or digest(result.get('blocks',[]))
             task=db.execute('SELECT task FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
             target=dict(target,capability=task,answer_method=result.get('answer_method',method(result)))
             if target['kind']=='source'and not any(e.get('evidence_id',e.get('passage_id',e.get('citation_id')))==target.get('evidence_id')for e in evidence):raise Failure('invalid_evidence')

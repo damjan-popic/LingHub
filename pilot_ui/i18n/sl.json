@@ -197,7 +197,7 @@
   "admin_disable": "Onemogoči račun",
   "admin_reset": "Ponastavi geslo",
   "operation_saved": "Sprememba je shranjena.",
-  "privacy_copy": "Vprašanja, prikazani odgovori in vaše ocene se shranjujejo za ta preizkus. Neposlanih vnosov ne shranjujemo. Za dostop do svojih podatkov ali izbris se obrnite na skrbnika projekta.",
+  "privacy_copy": "Vprašanja, odgovori, uporabljeni viri in vaše povratne informacije se shranjujejo za izboljšanje sistema. Ne vnašajte osebnih ali zaupnih podatkov.",
   "project_copy": "klikai je preizkusno jezikovno orodje v vizualni družini portala Jezik na klik.",
   "notices_copy": "Značke označujejo vire, uporabljene v odgovoru. Ne potrjujejo jezikovne pravilnosti. Navedki ohranjajo izvirno besedilo; svetovalne odgovore in pravopisne predloge berite v njihovem okviru.",
   "admin_insufficient": "Premalo novih podatkov za spremembo.",

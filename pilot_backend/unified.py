@@ -61,7 +61,8 @@ def diagnostic(error, stage):
     codes |= PROVIDER_FAILURE_CODES
     code = error.code if isinstance(error, Failure) and error.code in codes else 'invalid_gateway_response'
     status=getattr(error,'http_status',None)
-    return {'error_code': code, 'stage': stage, **({'http_status':status}if type(status)is int and 100<=status<=599 else{})}
+    from .human_feedback import safe_exception
+    return {'technical_cause':safe_exception(error),'error_code': code, 'stage': stage, **({'http_status':status}if type(status)is int and 100<=status<=599 else{})}
 
 
 def match(capture, kind, label, text, source, locale, weight=0):
@@ -122,7 +123,7 @@ def collect_source(gateway, family, definition, detail_pool=None):
     coverage = {'family': slug, 'source_label': definition['display_name'], 'status': 'unavailable', 'returned_count': 0,
                 'limit': limit, 'has_more': None, 'elapsed_ms': 0.0,
                 'search_ms': 0.0, 'detail_ms': 0.0, 'detail_requests': 0,
-                'detail_reused': 0, 'details': []}
+                'detail_reused': 0, 'details': [],'query':query,'query_variants':[query],'adapter':adapter,'score_method':'source_native_unspecified','candidates':[]}
     matches = []
     detail_started = None
     try:
@@ -147,6 +148,7 @@ def collect_source(gateway, family, definition, detail_pool=None):
                 or len(hits) > limit or type(data.get('count')) is not int or data['count'] != len(hits)):
             raise Failure('invalid_answer', 502)
         coverage['returned_count'] = len(hits)
+        coverage['candidates']=[{'native_rank':i+1,**{k:deepcopy(h[k]) for k in ('resource_id','external_id','source_slug','score','score_method','matched_forms','accepted_matched_forms','source_revision') if k in h}} for i,h in enumerate(hits)]
         details = {}
         if adapter not in TERM_ADAPTERS and slug in editorial.SOURCES and gateway.editorial_full_records:
             # Independent full-record reads used to run serially after discovery.
@@ -246,15 +248,19 @@ def collect_tools(gateway, family):
             'returned_count':0,'limit':None,'has_more':None}
     try:
         capture=collation.collect(gateway,family,automatic=True)
-        if capture is None:return None,None
+        if capture is None:return None,dict(status,status='not_documentary',tool_outcome='not_invoked',reason='no_applicable_lookup_route')
         if capture['plan']['status']!='ready':
             status.update(status='unsupported',reason='explicit_tool_context_required')
             return None,status
         # These are typed tool results, not a corpus of documentary records.
         status.update(status='not_documentary',capture_count=len(capture['captures']))
-        if capture['plan'].get('routing_kind')=='automatic_question_rule_lookup':
-            part=next(row['response']['results']['loris'] for row in capture['captures'] if row['operation']=='explore')
+        if capture['plan'].get('routing_kind') in {'automatic_question_rule_lookup','single_word_rule_lookup'}:
+            parts=[row['response']['results']['loris'] for row in capture['captures'] if row['operation']=='explore']
+            part=next((p for p in parts if p['status']=='ok'),parts[0])
             outcome=part['status']
+            if all(p['status']=='no_hit' for p in parts):outcome='no_hit'
+            elif not any(p['status']=='ok' for p in parts) and any(p['status'] in {'unavailable','error'} for p in parts):outcome='unavailable'
+            status['lookup_outcomes']=[{'language':c['request']['lang'],'status':c['response']['results']['loris']['status']} for c in capture['captures'] if c['operation']=='explore']
             if outcome not in {'ok','no_hit','unavailable','unsupported','error'}:
                 raise Failure('invalid_answer',502)
             data=part.get('data')or{}
@@ -359,7 +365,7 @@ def freeze(gateway, family, policy):
                  'coverage': coverage, 'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
                  'returned_count': len(found), 'timings': timings}
     if not found and retrieval['status'] == 'partial':retrieval['status'] = 'unavailable'
-    body = {'contract': CONTRACT, 'task': 'reference', 'query': family['question'], 'locale': family['locale'],
+    body = {'analysis':tool_capture,'contract': CONTRACT, 'task': 'reference', 'query': family['question'], 'locale': family['locale'],
             'matches': found, 'retrieval': retrieval, 'gateway_bundle': child}
     if len(canonical(body).encode()) > 2*MAX_BYTES:
         raise Failure('unified_capture_too_large', 413)
@@ -458,6 +464,7 @@ def generate(gateway, bundle, tier, model, parent=None):
             if validation:diagnostics['generation_validation']=validation
             out = fallback(bundle, 'failed', elapsed, {'error_code':diagnostics.get('provider_failure',{}).get('code','generation_not_admitted'),'stage':'provider_result'})
             out.update(diagnostics)
+            if 'diagnostics' in result:out['diagnostics']=deepcopy(result['diagnostics'])
             for key in ('model_identity', 'execution', 'usage'):
                 if key in result:out[key] = result[key]
             from .human_feedback import public_execution
@@ -476,6 +483,7 @@ def generate(gateway, bundle, tier, model, parent=None):
         if isinstance(result, dict):
             from .human_feedback import provider_diagnostics
             out.update(provider_diagnostics(result))
+            if 'diagnostics' in result:out['diagnostics']=deepcopy(result['diagnostics'])
         return out
 
 

@@ -20,8 +20,12 @@ def replay_gateway(config_path):
     return Gateway(config['gateway_url'],secret.read_text().strip())
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--store',type=Path);sub=p.add_subparsers(dest='command',required=True)
+    p=argparse.ArgumentParser();p.add_argument('--store',type=Path);p.add_argument('--config-file',type=Path);sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('init')
+    export=sub.add_parser('export-attempts');export.add_argument('--output-dir',type=Path,required=True)
+    export.add_argument('--owner');export.add_argument('--group',action='append',dest='groups');export.add_argument('--origin',choices=['project_use','technical_manual','automated_test','unknown','all'])
+    for field in ('release','model','provider','outcome','rating','review-status','run-id'):export.add_argument('--'+field)
+    export.add_argument('--since',type=float);export.add_argument('--until',type=float);export.add_argument('--degraded',choices=['true','false'])
     invite=sub.add_parser('invite-admin');invite.add_argument('--username',required=True);invite.add_argument('--password-file',type=Path,required=True);invite.add_argument('--bootstrap-id')
     project=sub.add_parser('project-accounts');project.add_argument('--credentials-file',type=Path,required=True)
     status=sub.add_parser('bootstrap-status');status.add_argument('--bootstrap-id',required=True)
@@ -37,6 +41,9 @@ def main():
     support=sub.add_parser('restore-support');support.add_argument('--archive',type=Path,required=True);support.add_argument('--destination',type=Path,required=True);support.add_argument('--sha256',required=True)
     e=sub.add_parser('recovery-exercise');e.add_argument('--directory',type=Path,required=True)
     args=p.parse_args()
+    if args.config_file:
+        if args.store:p.error('Use --store or --config-file, not both')
+        args.store=Path(json.loads(args.config_file.read_text())['store'])
     if args.command=='verify-backup':result=verify_backup(args.archive)
     elif args.command=='recovery-support':result=build_support(args.feedback_archive,args.current_ledger,args.signing_key,args.backend_config,args.gateway_config,args.pins_file,args.archive)
     elif args.command=='restore-support':result=restore_support(args.archive,args.destination,args.sha256)
@@ -59,6 +66,15 @@ def main():
         if args.store is None:p.error('--store is required')
         store=Store(args.store)
         if args.command=='init':result={'status':'initialized','schema':store.meta('schema')}
+        elif args.command=='export-attempts':
+            from .human_feedback import export_attempts
+            options={key:getattr(args,key) for key in ('groups','origin','since','until','release','model','provider','outcome','rating','review_status','run_id')}
+            options['degraded']=None if args.degraded is None else args.degraded=='true'
+            result=export_attempts(store,args.output_dir,**options)
+            if args.owner:
+                import pwd
+                identity=pwd.getpwnam(args.owner)
+                for path in [*args.output_dir.iterdir(),args.output_dir]:os.chown(path,identity.pw_uid,identity.pw_gid)
         elif args.command=='project-accounts':
             from .project_accounts import provision
             result=provision(store,args.credentials_file)

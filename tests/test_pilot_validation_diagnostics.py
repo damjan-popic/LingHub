@@ -44,7 +44,7 @@ def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_
             raise AssertionError('Unexpected synthetic upstream request: ' + path)
     gateway = RealWriterGateway();app = app_choices(tmp_path, gateway)
     with TestClient(app, base_url=ORIGIN) as client:
-        family, job = submit(app, client, login(client))
+        family, job = submit(app, client, login(client),question='Kako sklanjamo Hugo?')
         short = family['short']
         assert short['state'] == 'complete' and short['generation_status'] == 'not_generated'
         assert short['generation'].get('error_code') == 'generation_not_admitted', (short['generation'], short.get('retrieval'), [row[0] for row in gateway.calls])

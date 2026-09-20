@@ -57,7 +57,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers']);domain=Domain(store,config['tasks'],config['models'],generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers']);domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
@@ -199,9 +199,14 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         u=user(request);p=await payload(request)
         if beta(u):
             with store.connect()as db:r=domain.run(db,rid,u['id'])
-            expected=delivery_token(store.meta('audit_salt'),u['id'],rid,r['display_hash']or'')
+            with store.connect() as db:
+                locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
+            from .human_feedback import visible_result
+            from .store import digest
+            display=r['display_hash'] or digest(visible_result(r,locale).get('blocks',[]))
+            expected=delivery_token(store.meta('audit_salt'),u['id'],rid,display)
             if not isinstance(p.get('delivery_token'),str)or not hmac.compare_digest(p['delivery_token'],expected):raise Failure('display_changed',409)
-            p={'display_sha256':r['display_hash'],'expanded':p.get('expanded',False)}
+            p={'display_sha256':display,'expanded':p.get('expanded',False)}
         return domain.delivered(u['id'],rid,p)
     async def source_for(owner,fid,eid,tier,aid=None,side=None):
         if tier not in {'short','long'}:raise Failure('invalid_request')

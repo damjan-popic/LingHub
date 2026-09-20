@@ -105,8 +105,7 @@ def test_shared_detail_pool_is_bounded_across_both_editorial_sources(monkeypatch
     assert gateway.peak == unified.DETAIL_WORKERS == 4
     assert len(gateway.detail_calls) == 6 and all(count == 1 for count in gateway.detail_calls.values())
     rows = [row for row in bundle['matches'] if row['source_slug'] in editorial.SOURCES]
-    assert [(row['source_slug'], row['external_id']) for row in rows] == sorted(
-        (slug, rid) for slug in editorial.SOURCES for rid in ['a', 'b', 'c'])
+    assert [(row['source_slug'], row['external_id']) for row in rows] == [(slug,rid) for rid in ['a','b','c'] for slug in sorted(editorial.SOURCES)]
     assert bundle['retrieval']['status'] == 'complete'
     for key in ('registry_ms', 'source_collection_ms', 'evidence_preparation_ms', 'gateway_freeze_ms'):
         assert frozen['timings'][key] == bundle['retrieval']['timings'][key] >= 0

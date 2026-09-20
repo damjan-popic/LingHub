@@ -41,8 +41,8 @@ def app_choices(tmp_path,gateway):
     return app
 
 
-def submit(app,client,headers,model=None):
-    response=client.post('/api/pilot/families',headers=headers,json={'question':QUERY,
+def submit(app,client,headers,model=None,question=QUERY):
+    response=client.post('/api/pilot/families',headers=headers,json={'question':question,
         'idempotency_key':'synthetic-choice-test',**({'model':model}if model is not None else{})})
     assert response.status_code==200,response.text
     job=app.state.jobs.claim('model');assert job;app.state.jobs.execute(job)
@@ -221,7 +221,8 @@ def test_generation_http_failure_preserves_status_and_only_known_code(monkeypatc
     with pytest.raises(Failure)as error:
         Gateway('http://127.0.0.1:18320','synthetic-token-'*4).request('/internal/pilot/generate',{'model':'auto'})
     observed=diagnostic(error.value,'provider_request')
-    assert observed=={'error_code':expected,'stage':'provider_request','http_status':503}
+    assert {k:v for k,v in observed.items() if k!='technical_cause'}=={'error_code':expected,'stage':'provider_request','http_status':503}
+    assert observed['technical_cause']['error_type']=='Failure'
     assert calls==['/internal/pilot/generate']
 
 

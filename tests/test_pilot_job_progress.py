@@ -60,7 +60,7 @@ def test_cancel_during_retrieval_prevents_generation_and_keeps_owned_capture(tmp
         status=client.get('/api/pilot/jobs/'+job['id']).json()
         family=client.get('/api/pilot/families/'+fid).json()
         assert status['state']==family['short']['state']=='cancelled'
-        assert 'blocks'not in family['short']and 'display_sha256'not in family['short']
+        assert family['short']['blocks']==[{'block_id':'attempt-status','text':'Zahteva je preklicana.'}] and family['short']['display_sha256']
         assert not any(path=='/internal/pilot/generate'for path,_,_ in gateway.calls)
         if operation_fails:
             assert status['error_code']=='source_timeout'
@@ -102,7 +102,7 @@ def test_inflight_cancel_waits_without_starting_another_model_job_or_publishing_
         assert not thread.is_alive()
         login(client)
         final=client.get('/api/pilot/families/'+fid).json()
-        assert final['short']['state']=='cancelled'and not final['short'].get('blocks')
+        assert final['short']['state']=='cancelled' and final['short']['blocks']==[{'block_id':'attempt-status','text':'Zahteva je preklicana.'}]
         assert client.get(drawer).json()==original
         gateway.on_generate=None
         second_job=app.state.jobs.claim('model');assert second_job and second_job['id']==second['job']['job_id']
@@ -153,7 +153,7 @@ def test_failed_answer_keeps_the_same_owned_frozen_originals(tmp_path,failure):
         family=client.get('/api/pilot/families/'+fid).json()
         assert family['short']['state']=='failed'and family['matches_available']is True
         assert family['short']['error_code']==('invalid_answer'if failure=='render_validation'else'answer_unavailable')
-        assert not family['short'].get('blocks')and not family['short'].get('display_sha256')
+        assert family['short']['blocks'][0]['block_id']=='attempt-status' and family['short']['display_sha256']
         gateway.blocked=True
         page=client.get('/api/pilot/families/'+fid+'/matches').json()
         assert saved['page']['usage_final']is False and page['usage_final']is True

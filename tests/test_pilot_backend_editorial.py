@@ -119,7 +119,7 @@ def test_no_hit_or_failure_never_becomes_advice_or_generation(tmp_path, unavaila
         fid, short = submit(app, client, login(client), adapter.selected_source)
         assert short['state'] == ('failed' if unavailable else 'complete')
         if unavailable:
-            assert short['error_code'] == 'answer_unavailable' and 'evidence' not in short
+            assert short['error_code'] == 'answer_unavailable' and not short.get('evidence')
         else:
             assert short['status'] == 'no_hit' and short['evidence'] == short['source_badges'] == []
         assert client.get('/api/pilot/families/' + fid + '/sources/guessed').status_code == 404

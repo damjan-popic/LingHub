@@ -18,23 +18,20 @@ Feedback corrections remain separate revisions. A rating is never teaching appro
 
 ## Operator export (no retrieval or generation)
 
-Use the installed web release's existing operator module. On ALDHI, resolve the
-active release once:
-
-```bash
-KLIKAI_CODE=$(systemctl show klikai-pilot.service -p WorkingDirectory --value)
-```
+Each command resolves the currently installed web release itself. It works in a
+new terminal without first setting KLIKAI_CODE. An empty or stale PYTHONPATH can
+cause `No module named pilot_backend`; the application is not missing.
 
 CU/SLORI project-use attempts, including unrated attempts:
 
 ```bash
-sudo env PYTHONPATH="$KLIKAI_CODE" /data/envs/lingstack/pilot/bin/python -B -m pilot_backend --config-file /data/services/lingstack/releases/platform-control/synthesis-20260918-review-r3/config/pilot-editorial.json export-attempts --output-dir /data/scratch/damjan/klikai-testing-exports/project-20260920 --owner damjan
+sudo env PYTHONPATH="$(systemctl show klikai-pilot.service -p WorkingDirectory --value)" /data/envs/lingstack/pilot/bin/python -B -m pilot_backend --config-file /data/services/lingstack/releases/platform-control/synthesis-20260918-review-r3/config/pilot-editorial.json export-attempts --output-dir /data/scratch/damjan/klikai-testing-exports/project-$(date +%Y%m%d-%H%M%S) --owner damjan
 ```
 
 TEHNO manual technical attempts explicitly:
 
 ```bash
-sudo env PYTHONPATH="$KLIKAI_CODE" /data/envs/lingstack/pilot/bin/python -B -m pilot_backend --config-file /data/services/lingstack/releases/platform-control/synthesis-20260918-review-r3/config/pilot-editorial.json export-attempts --group tehno --output-dir /data/scratch/damjan/klikai-testing-exports/tehno-20260920 --owner damjan
+sudo env PYTHONPATH="$(systemctl show klikai-pilot.service -p WorkingDirectory --value)" /data/envs/lingstack/pilot/bin/python -B -m pilot_backend --config-file /data/services/lingstack/releases/platform-control/synthesis-20260918-review-r3/config/pilot-editorial.json export-attempts --group tehno --output-dir /data/scratch/damjan/klikai-testing-exports/tehno-$(date +%Y%m%d-%H%M%S) --owner damjan
 ```
 
 Choose a new output directory for each export. Files are private (0600, directory

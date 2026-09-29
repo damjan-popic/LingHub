@@ -289,6 +289,7 @@
   "retrieval_family_gradivo": "Gradivo",
   "retrieving_sources": "Iščem ustrezno gradivo v povezanih virih …",
   "generating_grounded": "Model pripravlja odgovor na podlagi ohranjenih virov …",
+  "generation_source_excerpt": "Prikazan je podprti odlomek vira; celoten odgovor ni bil oblikovan.",
   "generated_grounded": "Odgovor je pripravil model na podlagi navedenih virov. Citati odprejo uporabljeno gradivo.",
   "generation_fallback": "Model ni pripravil odgovora. Morebitni prikazani izseki so rezultati iskanja, ne ustvarjen odgovor; gradivo lahko še vedno pregledate.",
   "generation_no_support": "Ni bilo najdenega dovolj podpornega gradiva za odgovor z viri. Vrnjene zadetke lahko pregledate spodaj.",

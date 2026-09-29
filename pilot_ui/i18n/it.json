@@ -289,6 +289,7 @@
   "retrieval_family_gradivo": "Gradivo",
   "retrieving_sources": "Cerco materiale pertinente nelle fonti collegate…",
   "generating_grounded": "Il modello sta preparando una risposta basata sulle fonti conservate…",
+  "generation_source_excerpt": "È riportato un passaggio della fonte; non è stata formulata una risposta completa.",
   "generated_grounded": "Risposta generata dal modello sulla base delle fonti indicate. Le citazioni aprono il materiale utilizzato.",
   "generation_fallback": "Il modello non ha prodotto una risposta. Gli eventuali estratti mostrati sono risultati di ricerca, non una risposta generata; il materiale resta consultabile.",
   "generation_no_support": "Non è stato trovato materiale sufficiente per una risposta supportata dalle fonti. Puoi consultare i risultati restituiti qui sotto.",

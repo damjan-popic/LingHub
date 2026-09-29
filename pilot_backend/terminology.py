@@ -1,6 +1,7 @@
 """Frozen, exact terminology views over the accepted read-only lookup API."""
 from copy import deepcopy
 import unicodedata
+import json
 from .security import Failure
 from .store import digest
 
@@ -42,6 +43,8 @@ def record_text(hit,locale):
     labels=[('categories','Ambito'if it else'Področje'),('subcategories','Sottoambito'if it else'Podpodročje'),('original_terms','Forme originali'if it else'Izvirne oblike'),('standardized_terms','Forme standardizzate'if it else'Standardizirane oblike'),('proposals','Proposte nel record'if it else'Predlogi v zapisu'),('rationale','Motivazione originale'if it else'Izvirna utemeljitev')]
     for key,label in labels:
         if hit[key]:lines.append(label+':\n'+'\n'.join(hit[key]))
+    if hit.get('term_entries'):
+        lines.append(('Forme originali con etichette d’uso (nessuna etichetta non significa raccomandato)' if it else 'Izvirne oblike z oznakami rabe (manjkajoča oznaka ne pomeni priporočila)')+':\n'+json.dumps(hit['term_entries'],ensure_ascii=False,indent=2))
     lines.append(('Fonte: 'if it else'Vir: ')+hit['source_display_name'])
     if hit.get('source_date'):lines.append(('Data della fonte: 'if it else'Datum vira: ')+hit['source_date'])
     return '\n\n'.join(lines)

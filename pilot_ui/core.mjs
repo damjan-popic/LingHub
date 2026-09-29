@@ -1,3 +1,9 @@
+// A supported excerpt is useful delivery, but is never labeled generation.
+export function hasSupportedAnswer(tier) {
+  return ['generated','mixed'].includes(tier?.answer_kind) ||
+    ['generated','source_supported_partial','mixed_generated_and_source_partial'].includes(tier?.generation_status);
+}
+
 export function basePath(value) {
   if (!value || value === '/') return '';
   if (!/^\/[A-Za-z0-9_/-]+$/.test(value) || value.includes('//') || value.split('/').includes('..')) throw Error('Invalid application prefix');
@@ -89,6 +95,7 @@ export function matchGroups(items, source='') {
 }
 export function generationNotice(tier) {
   const status = tier?.generation?.status;
+  if (tier?.generation_status === 'source_supported_partial') return 'generation_source_excerpt';
   if (tier?.generation?.error_code === 'ambiguous_remote_generation') return 'generation_outcome_unknown';
   if (status === 'generated') return 'generated_grounded';
   if (status === 'failed' || status === 'unavailable') return 'generation_fallback';
@@ -129,7 +136,7 @@ export function answerNotes(tier) {
     const ids=new Set(blocks.filter(block=>value?.scope!=='claim' || value.claim_ids.includes(block.block_id)).flatMap(block=>block.evidence_ids || []));
     add({category:value?.code || 'limitation',...(text?{text}:{key:limitationKeys[value.code],values:{}}),evidence:evidence.filter(item=>ids.has(eid(item)))});
   }
-  if(tier?.generation_status==='generated' || ['generated','mixed'].includes(tier?.answer_kind)) {
+  if(hasSupportedAnswer(tier)) {
     const seen=new Set();
     for(const item of evidence) {
       // Multiple passages from one record share a status/date. Do not repeat
@@ -163,7 +170,7 @@ export function blockTextPresentation(tier, block) {
     end = match.index + match[0].length;
   }
   parts.push({text:block.text.slice(end)});
-  if (tier?.generation_status === 'generated' && Array.isArray(block.evidence_ids)) {
+  if (hasSupportedAnswer(tier) && Array.isArray(block.evidence_ids)) {
     const inline = new Set(parts.filter(part=>part.evidence).map(part=>part.evidence.evidence_id));
     const selected = [...new Set(block.evidence_ids)].map(id=>evidence.find(item=>item.evidence_id===id))
       .filter(item=>item && !inline.has(item.evidence_id) && Number.isInteger(item.local_number) && item.local_number>0);

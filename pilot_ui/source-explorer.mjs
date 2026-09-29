@@ -1,8 +1,8 @@
 // A view over one owned frozen family. Browsing never submits a question.
-import {tierBlocks,blockTextPresentation} from './core.mjs';
+import {tierBlocks,blockTextPresentation,hasSupportedAnswer} from './core.mjs';
 
 export function citedEvidenceIds(tier) {
-  if(tier?.state!=='complete'||!(['generated','mixed'].includes(tier.answer_kind)||(!tier.answer_kind&&tier.generation_status==='generated')))return new Set();
+  if(tier?.state!=='complete'||!hasSupportedAnswer(tier))return new Set();
   return new Set(tierBlocks(tier).flatMap(block=>{
     const view=blockTextPresentation(tier,block);
     return [...view.parts,view.separateCitation,...(view.separateCitations||[])].filter(part=>part?.evidence)
@@ -30,7 +30,7 @@ export function createSourceExplorer({api, family, pending, t, label, icon, onCh
     element('expand-button').setAttribute('aria-expanded',String(opened));
     element('expand-button').setAttribute('aria-controls','beta-explorer');
     element('expand-button').querySelector('span').textContent=t(opened?'beta_less':'beta_more');
-    const hasAnswer=['generated','mixed'].includes(family()?.short?.answer_kind) || family()?.short?.generation_status==='generated';
+    const hasAnswer=hasSupportedAnswer(family()?.short);
     element('explorer-heading').textContent=t(!pending()&&!hasAnswer?'beta_other_matches':'beta_sources_heading');
     element('explorer-note').textContent=t(pending()?'beta_sources_pending':'beta_sources_scope');
     element('explorer-status').textContent=summaryLoading?t('loading'):summaryError?t('matches_unavailable'):sources.length?'':t('no_returned_matches');

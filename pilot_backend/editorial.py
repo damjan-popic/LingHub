@@ -187,7 +187,8 @@ def freeze_records(discovery, records, operator_policy_id=None):
                     raise ValueError()
             except ValueError:
                 raise Failure('invalid_answer', 502) from None
-        complete = bool(record['question_original'] and record['answer_text'])
+        complete = bool(record['question_original'] and record['answer_text'] and
+                        'image_content' not in (record.get('missing_fields') or []))
         if type(record['complete_qa']) is not bool or record['complete_qa'] != complete:
             raise Failure('invalid_answer', 502)
         expected_status = 'complete_qa' if complete else 'article' if record['article_text'] and not record['question_original'] else 'incomplete'
@@ -223,6 +224,8 @@ def full_record_text(bundle, record):
               'answer_text': 'Risposta originale completa' if it else 'Celoten izvirni odgovor',
               'article_text': 'Articolo originale (nessuna domanda originale disponibile)' if it else 'Izvirni članek (izvirno vprašanje ni na voljo)',
               'additional_info': 'Ulteriori spiegazioni originali' if it else 'Dodatna izvirna pojasnila'}
+    if 'image_content' in record.get('missing_fields', []):
+        labels['answer_text'] = 'Testo originale (immagini non trascritte)' if it else 'Izvirno besedilo (slike niso prepisane)'
     parts = [('Fonte: ' if it else 'Vir: ') + record['source_label']]
     for field, label in labels.items():
         if record[field] is not None:

@@ -383,6 +383,13 @@ def fallback(bundle, status, elapsed=0.0, error=None):
     message = no_support if status == 'no_support' else (
         'La risposta generata non è disponibile. Puoi consultare i risultati salvati.' if it else
         'Generirani odgovor ni na voljo. Pregledate lahko shranjene zadetke.')
+    code = (error or {}).get('error_code')
+    if code in {'invalid_composition_envelope', 'all_claims_withheld'}:
+        message = ('Non è stato possibile formulare una risposta sufficientemente supportata. Puoi consultare i risultati salvati.' if it else
+                   'Ni bilo mogoče oblikovati dovolj podprtega odgovora. Pregledate lahko shranjene zadetke.')
+    elif code == 'incomplete_source':
+        message = ('Il testo completo delle fonti non è disponibile. Puoi consultare i risultati trovati.' if it else
+                   'Celotno besedilo virov ni na voljo. Pregledate lahko najdene zadetke.')
     return {'status': 'no_hit' if status == 'no_support' else 'source_only', 'answer_kind': 'source_only',
             'generation_status': 'not_generated', 'short_answer': message, 'answer_md': message,
             'display_blocks': [{'block_id': 'unified-status', 'text': message}], 'evidence': [], 'source_badges': [],
@@ -390,10 +397,29 @@ def fallback(bundle, status, elapsed=0.0, error=None):
             'generation': {'status': status, 'provider': {}, 'elapsed_ms': elapsed, 'first_content_ms': None, **(error or {})}}
 
 
+def undelivered_reason(result):
+    """Classify observed stages; never infer admission failure from no prose."""
+    from .human_feedback import provider_diagnostics, generation_validation_diagnostics
+    provider = provider_diagnostics(result).get('provider_failure', {})
+    if provider:
+        return 'failed', {'error_code': provider['code'], 'stage': provider.get('stage', 'provider_result')}
+    validation = generation_validation_diagnostics(result)
+    status = validation.get('validation', {}).get('status')
+    if status in {'invalid_composition_envelope', 'all_claims_withheld'}:
+        return 'failed', {'error_code': status, 'stage': 'composition_validation'}
+    reasons = validation.get('limitation_reasons', [])
+    if any(reason in reasons for reason in ('empty_indexed_evidence', 'model_found_insufficient_evidence')):
+        return 'no_support', {'error_code': 'insufficient_selected_evidence', 'stage': 'evidence_selection'}
+    return 'failed', {'error_code': 'undelivered_answer', 'stage': 'provider_result'}
+
+
 def generate(gateway, bundle, tier, model, parent=None):
     checked(bundle)
     if not bundle['matches']:return fallback(bundle, 'no_support' if bundle['retrieval']['status'] == 'complete' else 'unavailable')
-    if not any(row.get('context_eligible',True)for row in bundle['matches']):return fallback(bundle,'no_support')
+    if not any(row.get('context_eligible',True)for row in bundle['matches']):
+        incomplete = any(row.get('detail_status') in {'timeout', 'unavailable', 'partial'} for row in bundle['matches'])
+        return (fallback(bundle, 'unavailable', error={'error_code': 'incomplete_source', 'stage': 'source_detail'})
+                if incomplete else fallback(bundle, 'no_support'))
     if bundle['gateway_bundle'] is None:return fallback(bundle, 'unavailable')
     started = time.monotonic()
     stage = 'provider_request'
@@ -416,7 +442,12 @@ def generate(gateway, bundle, tier, model, parent=None):
                 raise Failure('unknown_citation', 502)
         # A successful transport or an excerpt with badges is not generation.
         generated = result.get('answer_kind') in {'generated', 'mixed'} and result.get('status') in {'validated', 'partial'}
-        if generated:
+        excerpt = (result.get('answer_kind') == 'source_only' and result.get('status') in {'validated', 'partial'}
+                   and result.get('generation_status') == 'source_supported_partial'
+                   and result.get('synthesis_mode') == 'source_supported_partial'
+                   and result.get('validation', {}).get('status') == 'bounded_checks_completed')
+        deliverable = generated or excerpt
+        if deliverable:
             stage='provider_identity'
             execution=result.get('execution',{});identity=result.get('model_identity',{})
             if not isinstance(execution,dict)or not isinstance(identity,dict):raise Failure('provider_identity_missing',502)
@@ -427,8 +458,8 @@ def generate(gateway, bundle, tier, model, parent=None):
             elif selection is not None or scope is not None:
                 if selection!=model or scope!='own':raise Failure('provider_selection_mismatch',502)
             stage='citation_validation'
-        if generated and not evidence:raise Failure('unknown_citation', 502)
-        if generated:
+        if deliverable and not evidence:raise Failure('unknown_citation', 502)
+        if deliverable:
             numbers={str(row.get('local_number')or row.get('number')or i+1)for i,row in enumerate(evidence)}
             markers=set(re.findall(r'\[(\d{1,3})\]',result.get('answer_md','')))
             if not markers<=numbers:raise Failure('unknown_citation',502)
@@ -457,12 +488,13 @@ def generate(gateway, bundle, tier, model, parent=None):
                         if not claim or claim.get('paragraph_id')!=block['paragraph_id']:
                             raise Failure('unknown_citation',502)
         elapsed = round((time.monotonic() - started) * 1000, 3)
-        if not generated:
+        if not deliverable:
             from .human_feedback import provider_diagnostics,generation_validation_diagnostics
             diagnostics=provider_diagnostics(result)
             validation=generation_validation_diagnostics(result)
             if validation:diagnostics['generation_validation']=validation
-            out = fallback(bundle, 'failed', elapsed, {'error_code':diagnostics.get('provider_failure',{}).get('code','generation_not_admitted'),'stage':'provider_result'})
+            outcome, reason = undelivered_reason(result)
+            out = fallback(bundle, outcome, elapsed, reason)
             out.update(diagnostics)
             if 'diagnostics' in result:out['diagnostics']=deepcopy(result['diagnostics'])
             for key in ('model_identity', 'execution', 'usage'):
@@ -471,9 +503,11 @@ def generate(gateway, bundle, tier, model, parent=None):
             public=public_execution(out)
             out['generation']['provider']={**public.get('model_identity',{}),**public.get('execution',{})}
             return out
-        result['generation_status'] = 'generated'
+        result['generation_status'] = ('source_supported_partial' if excerpt else
+            'mixed_generated_and_source_partial' if result.get('synthesis_mode') == 'mixed_generated_and_source_partial' else 'generated')
+        if excerpt:result['status'] = 'partial'
         result['retrieval'] = deepcopy(bundle['retrieval'])
-        result['generation'] = {'status': 'generated', 'provider': {}, 'elapsed_ms': elapsed, 'first_content_ms': None}
+        result['generation'] = {'status': 'partial' if excerpt or result.get('status') == 'partial' else 'generated', 'provider': {}, 'elapsed_ms': elapsed, 'first_content_ms': None}
         from .human_feedback import public_execution
         public = public_execution(result)
         result['generation']['provider'] = {**public.get('model_identity', {}), **public.get('execution', {})}

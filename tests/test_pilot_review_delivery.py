@@ -66,3 +66,32 @@ def test_actual_stage_is_not_replaced_by_admission_guess(result, status, code, s
     assert {k: value['generation'][k] for k in ('status', 'error_code', 'stage')} == {
         'status': status, 'error_code': code, 'stage': stage}
     assert 'SECRET' not in str(value)
+
+
+def test_freeze_producer_uses_the_durable_nested_json_order(monkeypatch):
+    import json
+    from pilot_backend.store import canonical
+    # Lists retain source order; only object key order is canonicalized.
+    capture={'term_entries':[{'term':'B','lang':'sl','motivation':'Exact note.',
+        'motivationSource':[{'url':'https://example.org','label':'Original'}]},
+        {'term':'A','lang':'it'}]}
+    original=deepcopy(capture)
+    row={'source_slug':'synthetic','external_id':'term:1','capture':capture,
+         'capture_sha256':digest(capture),'capture_kind':'terminology_record','score':1,
+         'source':{'excerpt':'Exact note.'}}
+    monkeypatch.setattr(unified,'registry',lambda g:[{}])
+    monkeypatch.setattr(unified,'collect_source',lambda *a:([row],{'family':'synthetic','status':'ok'}))
+    monkeypatch.setattr(unified,'collect_tools',lambda *a:(None,None))
+    monkeypatch.setattr(unified,'merge_source_matches',lambda rows:rows)
+    sent=[]
+    def request(path, body):
+        sent.append(deepcopy(body))
+        return {'bundle':{'payload':body},'matches':[dict(deepcopy(row),evidence_id='known')]}
+    result=unified.freeze(SimpleNamespace(klikai_url='fixture',request=request),{'question':'Term?','locale':'sl'}, {})
+    assert result['bundle']['gateway_bundle'] is not None
+    assert len(sent)==1
+    assert json.dumps(sent[0],ensure_ascii=False)==json.dumps(json.loads(canonical(sent[0])),ensure_ascii=False)
+    transmitted=sent[0]['unified_evidence']['matches'][0]['capture']
+    assert transmitted==original and capture==original
+    assert [x['term'] for x in transmitted['term_entries']]==['B','A']
+    assert digest(transmitted)==digest(original)

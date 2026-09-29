@@ -5,6 +5,7 @@ remain tools; neither a source outage nor a bounded response proves no matches.
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
+import json
 import math
 import re
 import time
@@ -317,10 +318,14 @@ def freeze(gateway, family, policy):
     child = None
     stage_started = time.monotonic()
     try:
-        response = gateway.request('/internal/pilot/freeze', {'question': family['question'],
+        # Freeze the same canonical JSON representation that the durable store
+        # will retain. Source values/hashes are unchanged, but field iteration
+        # must not depend on insertion order lost at the storage boundary.
+        freeze_request = json.loads(canonical({'question': family['question'],
             'context': family.get('context', ''), 'locale': family['locale'], 'task': 'reference',
             'policy': policy, 'unified_evidence': packet,
-            **({'tool_evidence':tool_capture}if tool_capture is not None else{})})
+            **({'tool_evidence':tool_capture}if tool_capture is not None else{})}))
+        response = gateway.request('/internal/pilot/freeze', freeze_request)
         remote = response.get('matches')
         if not isinstance(response.get('bundle'), dict) or not isinstance(remote, list):
             raise Failure('invalid_answer', 502)

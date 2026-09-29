@@ -445,7 +445,8 @@ def generate(gateway, bundle, tier, model, parent=None):
         excerpt = (result.get('answer_kind') == 'source_only' and result.get('status') in {'validated', 'partial'}
                    and result.get('generation_status') == 'source_supported_partial'
                    and result.get('synthesis_mode') == 'source_supported_partial'
-                   and result.get('validation', {}).get('status') == 'bounded_checks_completed')
+                   and isinstance(result.get('validation'), dict)
+                   and result['validation'].get('status') == 'bounded_checks_completed')
         deliverable = generated or excerpt
         if deliverable:
             stage='provider_identity'

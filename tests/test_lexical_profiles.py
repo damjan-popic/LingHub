@@ -18,6 +18,7 @@ def test_original_target_spans_and_no_identifier_enrichment():
  p=plan('brez Luke ali brez Luka','','sl',a)
  assert [t['text']for t in p['targets']]==['Luke','Luka']
  assert p['slot_focus']['case']=='genitive'
+ assert 'orthography'in plan('Novo mesto ali Novo Mesto?','','sl',a)['requested_facets']
  assert plan('Kdo je Luka?','','sl',a)['slot_focus']['case']=='nominative'
 
 def test_nonidentical_tokenization_aligns_without_zip():

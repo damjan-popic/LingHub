@@ -63,7 +63,11 @@ def install(app,config):
    if operation in {'profile','analyze'}:
     if not isinstance(payload.get('text'),str)or not 1<=len(payload['text'])<=3000:return response({'error':'text_bound'},422)
     if operation=='profile':payload['profile']=PROFILES[selected]
-    else:payload['engine']=PROFILES[selected]
+    else:
+     engine=payload.get('engine','default')
+     if engine not in {'default','spacy','classla','compare'}:return response({'error':'engine_denied'},422)
+     if engine=='compare'and len(payload['text'])>512:return response({'error':'comparison_text_bound'},422)
+     payload['engine']=PROFILES[selected]if engine=='default'else engine
    async with httpx.AsyncClient(timeout=35,trust_env=False,follow_redirects=False)as upstream:
     async with upstream.stream(request.method,(stable_base if selected=='stable'else base)+route[0],params=params,headers={'X-Linghub-Cache-Scope':'api:'+cid},**({'json':payload}if payload is not None else{}))as r:
      status=r.status_code;body=bytearray()

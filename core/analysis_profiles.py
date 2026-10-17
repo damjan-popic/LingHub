@@ -32,6 +32,7 @@ def align(raw,text):
 
 async def _analyze(request,req):
  from .platform_api import analyzer_request,AnalyzerFailure
+ if req.lang=='it'and req.engine=='classla':raise AnalyzerFailure('unsupported','CLASSLA profile supports Slovene only.')
  start=time.monotonic();raw={};failures={}
  async def spacy():
   async with asyncio.timeout(8),_SPACY_SLOTS:

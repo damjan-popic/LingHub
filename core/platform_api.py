@@ -92,7 +92,7 @@ class AnalyzeRequest(BaseModel):
 async def analyze_once(request,req):
     if not req.text.strip(): raise HTTPException(400,'Text is empty.')
     from .analysis_profiles import PROFILES, analyze as profile_analysis
-    if req.engine in PROFILES or (req.engine=='classla' and getattr(request.app.state,'lexical_classla_url',None)):
+    if req.engine in PROFILES or (req.engine in {'classla','spacy'} and getattr(request.app.state,'lexical_classla_url',None)):
         return await profile_analysis(request,req)
     result=await analyzer_request(request,'/v1/analyze',req.model_dump())
     try:

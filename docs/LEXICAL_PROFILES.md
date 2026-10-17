@@ -78,6 +78,10 @@ result.raise_for_status()
 profile = result.json()
 ```
 
+`POST /analyze` accepts `engine: default`, `spacy`, `classla` or `compare`;
+explicit comparison is bounded to 512 characters. `default` resolves the selected
+client profile, while explicit engines retain their actual identity.
+
 Authenticated `GET /openapi.json` documents the complete contract. Operations:
 `GET /capabilities`, `/resources`, `/paradigm?surface=Luka`, `/synonyms?lemma=lep`,
 `/collocations?lemma=lep`; `POST /analyze`, `/profile`, `/morphology/lemmatize`,

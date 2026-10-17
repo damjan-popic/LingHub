@@ -140,6 +140,17 @@ def plan(question, input_language='und', focus=None):
 
 def collect(gateway, family, *, automatic=False):
     question=family.get('original_question',family['question'])
+    # Only a configured opt-in LingHub release advertises the new contract.
+    if automatic and getattr(gateway,'lexical_profiles',False) and gateway.linghub_url and len(question)<=3000:
+        capabilities=gateway.request('/v1/capabilities',None,gateway.linghub_url)
+        if capabilities.get('lexical_profile',{}).get('available'):
+            request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_experimental_v1','limit':4}
+            before=time.monotonic();response=gateway.request('/v1/lexical/profile',request,gateway.linghub_url)
+            if response.get('request_schema_version')!='linghub.lexical-profile.v1' or response.get('query',{}).get('text')!=question:raise Failure('invalid_answer',502)
+            cap={'operation':'lexical_profile','request':request,'response':response,'response_sha256':digest(response),'duration_ms':(time.monotonic()-before)*1000}
+            value={'version':'klikai.lexical-collation.v1','plan':{'version':'klikai.lexical-collation.v1','status':'ready','operations':['morphology','loris','synonyms','collocations','terminology'],'routing_kind':'automatic_lexical_profile','focus':question},'captures':[cap],'capture_set_sha256':digest([cap]),'capabilities_identity':digest(response['provenance']['resource_editions'])}
+            if len(canonical(value).encode())>1536*1024:raise Failure('unified_capture_too_large',413)
+            return value
     routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
     if routing is None:routing=plan(question,family.get('input_language','und'),family.get('focus'))
     if routing is None and automatic:

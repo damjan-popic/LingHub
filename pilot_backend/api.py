@@ -57,7 +57,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers']);domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
@@ -68,6 +68,8 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         yield
         if start_workers:jobs.close()
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
+    from .linghub_api import install as install_linghub_api
+    install_linghub_api(app,config)
     app.state.store=store;app.state.auth=auth;app.state.domain=domain;app.state.jobs=jobs;app.state.config=config
     def failure(error,locale='sl'):
         return JSONResponse({'error':{'code':error.code,'message':MESSAGES[locale].get(error.code,'Zahteva ni uspela.'if locale=='sl'else'Operazione non riuscita.'),'locale':locale}},status_code=error.status)
@@ -85,7 +87,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if token and config['secure_cookies']:request.scope['scheme']='https'
         if request.method not in {'GET','HEAD','POST'}:return early(Failure('invalid_request',405))
         if request.method=='POST':
-            if request.headers.get('origin')not in config['allowed_origins']or urlsplit(request.headers.get('origin','')).netloc!=request.headers.get('host'):return early(Failure('forbidden',403))
+            if not request.url.path.startswith('/api/linghub/v1/') and (request.headers.get('origin')not in config['allowed_origins']or urlsplit(request.headers.get('origin','')).netloc!=request.headers.get('host')):return early(Failure('forbidden',403))
             if request.headers.get('content-type','').split(';')[0]!='application/json':return early(Failure('invalid_request',415))
             try:
                 if int(request.headers.get('content-length','0'))>65536:return early(Failure('request_too_large',413))

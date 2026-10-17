@@ -146,6 +146,10 @@ class Domain:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             out['matches_available']=bundle.get('contract')==unified.CONTRACT
+            if out['matches_available']:
+                from .lexical import reader
+                lexical=reader(bundle)
+                if lexical:out['lexical_profile']=lexical
             out['unified_answers']=out['matches_available']or(self.unified_answers and f['task']=='reference'and not f['bundle'])
             focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()
             if focus:out['focus']=focus[0]

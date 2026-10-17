@@ -82,6 +82,18 @@ async def lifespan(app):
         if scope == 'local_persistent' and app.state.lemmatizer_url is None:
             raise RuntimeError('Persistent local Core requires explicit MY_LEMMATIZER_URL')
         app.state.deployment_scope = scope
+        rich_root=os.environ.get('LINGHUB_SLOLEKS_PROFILE_RELEASE')
+        if rich_root:
+            from core.sloleks_profiles import SloleksProfiles
+            app.state.sloleks_profiles=SloleksProfiles(rich_root)
+        from urllib.parse import urlsplit
+        for attribute,variable in [('lexical_classla_url','LINGHUB_LEXICAL_CLASSLA_URL'),('lexical_klikai_url','LINGHUB_LEXICAL_KLIKAI_URL')]:
+            value=os.environ.get(variable)
+            if value:
+                parsed=urlsplit(value)
+                if parsed.scheme!='http' or parsed.hostname!='127.0.0.1' or not parsed.port or parsed.path not in ('','/') or parsed.username or parsed.query or parsed.fragment:
+                    raise RuntimeError('Lexical backend must be a fixed loopback origin')
+                setattr(app.state,attribute,value.rstrip('/'))
         yield
     finally:
         # Also unwind partial startup and cancellation; ExitStack attempts every
@@ -90,7 +102,7 @@ async def lifespan(app):
 
 
 def require_resources_unchanged(request: Request):
-    if request.url.path in PARTIAL_PATHS or request.url.path.startswith(('/workbench','/workbench-api','/workbench-static','/v1/references/')):
+    if request.url.path in PARTIAL_PATHS or request.url.path.startswith(('/v1/lexical/','/workbench','/workbench-api','/workbench-static','/v1/references/')):
         return
     try:
         unchanged = all(file_identity(path) == identity for path, identity in request.app.state.resource_files.items())
@@ -104,6 +116,8 @@ app = FastAPI(title='LingHub local Core candidate', version='0.2.0', lifespan=li
               dependencies=[Depends(require_resources_unchanged)])
 app.include_router(contextual_router)
 app.include_router(platform_router)
+from core.lexical_profile import router as lexical_router
+app.include_router(lexical_router)
 from reference_routes import router as reference_router
 app.include_router(reference_router)
 app.add_middleware(RequestBodyLimit,limit=131072)

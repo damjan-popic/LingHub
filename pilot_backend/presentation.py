@@ -74,6 +74,9 @@ def tester_view(value, owner, secret):
     if isinstance(value,list):return [tester_view(v,owner,secret)for v in value]
     if not isinstance(value,dict):return value
     out={k:tester_view(v,owner,secret)for k,v in value.items()if k in SAFE}
+    if isinstance(value.get('lexical_profile'),dict):
+        # Produced by the closed reader projection, never raw analyzer diagnostics.
+        out['lexical_profile']=value['lexical_profile']
     if 'limitations'in value:out['limitations']=reader_limitations(value['limitations'])
     if value.get('run_id')and value.get('display_sha256'):
         out['delivery_token']=delivery_token(secret,owner,value['run_id'],value['display_sha256'])

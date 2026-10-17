@@ -1,0 +1,1500 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LingHub lexical API",
+    "version": "1.0.0",
+    "description": "Stable lexical-20261017-v1 and explicitly selected experimental profile. No submitted text persisted by default."
+  },
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "summary": "Catalogue",
+        "operationId": "catalogue_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "read"
+      }
+    },
+    "/resources": {
+      "get": {
+        "summary": "Catalogue",
+        "operationId": "catalogue_v1_resources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "read"
+      }
+    },
+    "/analyze": {
+      "post": {
+        "summary": "Analyze",
+        "operationId": "analyze_v1_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "analysis"
+      }
+    },
+    "/profile": {
+      "post": {
+        "summary": "Lexical Profile",
+        "operationId": "lexical_profile_v1_lexical_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LexicalProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    },
+    "/paradigm": {
+      "get": {
+        "summary": "Paradigm",
+        "operationId": "paradigm_v1_lexical_paradigm_get",
+        "parameters": [
+          {
+            "name": "surface",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 4,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    },
+    "/morphology/lemmatize": {
+      "post": {
+        "summary": "Lemmatize",
+        "operationId": "lemmatize_v1_morphology_lemmatize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LemmatizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    },
+    "/morphology/inflect": {
+      "post": {
+        "summary": "Inflect",
+        "operationId": "inflect_v1_morphology_inflect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InflectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    },
+    "/synonyms": {
+      "get": {
+        "summary": "Thesaurus Evidence",
+        "operationId": "thesaurus_evidence_v1_resources_thesaurus_get",
+        "parameters": [
+          {
+            "name": "lemma",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "title": "Lemma"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 20,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    },
+    "/collocations": {
+      "get": {
+        "summary": "Collocation Evidence",
+        "operationId": "collocation_evidence_v1_resources_collocations_get",
+        "parameters": [
+          {
+            "name": "lemma",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "title": "Lemma"
+            }
+          },
+          {
+            "name": "min_freq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Freq"
+            }
+          },
+          {
+            "name": "min_logdice",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Logdice"
+            }
+          },
+          {
+            "name": "structure_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Structure Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "freq",
+                "logdice"
+              ],
+              "type": "string",
+              "default": "freq",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "desc",
+                "asc"
+              ],
+              "type": "string",
+              "default": "desc",
+              "title": "Order"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "collocation",
+                "grammaticalCombination",
+                "all"
+              ],
+              "type": "string",
+              "default": "collocation",
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "x-required-scope": "lexical"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "include_loris": {
+            "type": "boolean",
+            "title": "Include Loris",
+            "default": true
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "experimental"
+            ],
+            "default": "stable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "AnalyzeRequest"
+      },
+      "ExploreRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "default",
+              "spacy",
+              "classla",
+              "compare",
+              "klikai_experimental_v1",
+              "linghub_lexical_stable_v1"
+            ],
+            "title": "Engine",
+            "default": "default"
+          },
+          "include_loris": {
+            "type": "boolean",
+            "title": "Include Loris",
+            "default": true
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Selection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "include": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "analysis",
+                "loris",
+                "morphology",
+                "synonyms",
+                "collocations"
+              ]
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Include"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "ExploreRequest"
+      },
+      "FromTextRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "const": "sl",
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "min_freq": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Freq",
+            "default": 1
+          },
+          "min_logdice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Logdice"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "freq",
+              "logdice"
+            ],
+            "title": "Sort",
+            "default": "freq"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "desc",
+              "asc"
+            ],
+            "title": "Order",
+            "default": "desc"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "allowed_pos": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "NOUN",
+                "VERB",
+                "ADJ",
+                "PROPN",
+                "ADV",
+                "AUX",
+                "ADP",
+                "PRON",
+                "NUM",
+                "DET",
+                "CCONJ",
+                "SCONJ",
+                "PART",
+                "INTJ",
+                "X"
+              ]
+            },
+            "type": "array",
+            "maxItems": 17,
+            "title": "Allowed Pos"
+          },
+          "max_lemmas": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Max Lemmas",
+            "default": 5
+          },
+          "limit_per_lemma": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit Per Lemma",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "FromTextRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InflectRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "lemma": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Lemma"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 40
+          },
+          "msd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "lemma"
+        ],
+        "title": "InflectRequest"
+      },
+      "InflectedLookup": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Token"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Language",
+            "default": "sl"
+          },
+          "limit_per_lemma": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit Per Lemma",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "InflectedLookup"
+      },
+      "LemmatizeRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "tokens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Tokens"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 4
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "tokens"
+        ],
+        "title": "LemmatizeRequest"
+      },
+      "LexicalProfile": {
+        "properties": {
+          "request_schema_version": {
+            "type": "string",
+            "title": "Request Schema Version"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "query": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Query"
+          },
+          "interpretation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Interpretation"
+          },
+          "analysis": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Analysis"
+          },
+          "facets": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Facets"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "coverage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coverage"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provenance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_schema_version",
+          "request_id",
+          "query",
+          "interpretation",
+          "analysis",
+          "facets",
+          "evidence",
+          "coverage",
+          "provenance"
+        ],
+        "title": "LexicalProfile"
+      },
+      "PhraseRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "const": "sl",
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "min_freq": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Freq",
+            "default": 1
+          },
+          "min_logdice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Logdice"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "freq",
+              "logdice"
+            ],
+            "title": "Sort",
+            "default": "freq"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "desc",
+              "asc"
+            ],
+            "title": "Order",
+            "default": "desc"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "allowed_pos": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "NOUN",
+                "VERB",
+                "ADJ",
+                "PROPN",
+                "ADV",
+                "AUX",
+                "ADP",
+                "PRON",
+                "NUM",
+                "DET",
+                "CCONJ",
+                "SCONJ",
+                "PART",
+                "INTJ",
+                "X"
+              ]
+            },
+            "type": "array",
+            "maxItems": 17,
+            "title": "Allowed Pos"
+          },
+          "headword": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headword"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 50
+          },
+          "max_lemmas": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Max Lemmas",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "PhraseRequest"
+      },
+      "ProfileRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 3000,
+            "title": "Context",
+            "default": ""
+          },
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it",
+              "und"
+            ],
+            "title": "Lang",
+            "default": "und"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "experimental"
+            ],
+            "default": "stable"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 4
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "ProfileRequest"
+      },
+      "ReferenceRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "sources": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "jezikovna_svetovalnica",
+                "epravopis"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Sources"
+          },
+          "retrieval": {
+            "type": "string",
+            "enum": [
+              "lexical",
+              "hybrid",
+              "hybrid_rerank"
+            ],
+            "title": "Retrieval",
+            "default": "hybrid_rerank"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "challenger"
+            ],
+            "title": "Model",
+            "default": "primary"
+          },
+          "answer_language": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Answer Language",
+            "default": "sl"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 8
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "ReferenceRequest"
+      },
+      "ReferenceSearchRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "sources": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "jezikovna_svetovalnica",
+                "epravopis"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Sources"
+          },
+          "retrieval": {
+            "type": "string",
+            "enum": [
+              "lexical",
+              "hybrid",
+              "hybrid_rerank"
+            ],
+            "title": "Retrieval",
+            "default": "lexical"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "challenger"
+            ],
+            "title": "Model",
+            "default": "primary"
+          },
+          "answer_language": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Answer Language",
+            "default": "sl"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 8
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "ReferenceSearchRequest"
+      },
+      "Selection": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "Selection"
+      },
+      "SignatureRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 32
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "SignatureRequest"
+      },
+      "Span": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "Span"
+      },
+      "TerminologyRequest": {
+        "properties": {
+          "q": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Q"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sl",
+                  "it",
+                  "fu"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "use_morphology": {
+            "type": "boolean",
+            "title": "Use Morphology",
+            "default": true
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "q"
+        ],
+        "title": "TerminologyRequest"
+      },
+      "TextRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "text"
+        ],
+        "title": "TextRequest"
+      },
+      "ToolRequest": {
+        "properties": {
+          "task": {
+            "type": "string",
+            "enum": [
+              "text_check",
+              "morphology",
+              "synonyms",
+              "collocations",
+              "explore"
+            ],
+            "title": "Task"
+          },
+          "lang": {
+            "type": "string",
+            "enum": [
+              "sl",
+              "it"
+            ],
+            "title": "Lang",
+            "default": "sl"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "default",
+              "spacy",
+              "classla"
+            ],
+            "title": "Engine",
+            "default": "default"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Span"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "lemmatize",
+                  "inflect",
+                  "signatures"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task",
+          "text"
+        ],
+        "title": "ToolRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "applicationKey": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/linghub/v1"
+    }
+  ]
+}

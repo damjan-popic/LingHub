@@ -340,6 +340,7 @@ def freeze(gateway, family, policy):
             item['source'].update(source_label=view.get('source_label')or item.get('source_label')or item['source_slug'],
                 excerpt=view.get('excerpt',view.get('snippet','')),
                 bibliography=deepcopy(view.get('bibliography',view.get('bibliographic',{}))))
+            if isinstance(view.get('original_json'),dict):item['source']['excerpt']=json.dumps(view['original_json'],ensure_ascii=False,indent=2)
             if not isinstance(item['source']['excerpt'],str)or not item['source']['excerpt']:
                 raise Failure('invalid_answer',502)
             item['snippet']=item.get('snippet','')[:1000]
@@ -418,7 +419,7 @@ def undelivered_reason(result):
     return 'failed', {'error_code': 'undelivered_answer', 'stage': 'provider_result'}
 
 
-def generate(gateway, bundle, tier, model, parent=None):
+def _generate(gateway, bundle, tier, model, parent=None):
     checked(bundle)
     if not bundle['matches']:return fallback(bundle, 'no_support' if bundle['retrieval']['status'] == 'complete' else 'unavailable')
     if not any(row.get('context_eligible',True)for row in bundle['matches']):
@@ -431,7 +432,7 @@ def generate(gateway, bundle, tier, model, parent=None):
     result = None
     try:
         result = gateway.request('/internal/pilot/generate', {'bundle': bundle['gateway_bundle'],
-            'tier': tier, 'model': model, 'parent_answer': parent})
+            'tier': ('lexical_overview'if tier=='short'and __import__(__package__+'.lexical',fromlist=['overview']).overview(bundle)else tier), 'model': model, 'parent_answer': parent})
         if not isinstance(result, dict):raise Failure('invalid_answer', 502)
         stage = 'citation_validation'
         known = {evidence_id(row) for row in bundle['matches']}
@@ -606,3 +607,11 @@ def source_records_page(bundle, used, source, offset=0, limit=20, usage_final=Tr
     return {'items': rows[offset:offset + limit], 'source_slug': source, 'offset': offset,
         'limit': limit, 'returned_count': count, 'next_offset': offset + limit if offset + limit < count else None,
         'count_scope': 'returned_unique_records', 'usage_final': usage_final, 'corpus_total': None}
+
+
+def generate(gateway,bundle,tier,model,parent=None):
+    from .lexical import reader
+    result=_generate(gateway,bundle,tier,model,parent)
+    lexical=reader(bundle)
+    if lexical:result['lexical_profile']=lexical
+    return result

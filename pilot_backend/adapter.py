@@ -12,12 +12,14 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None,unified_answers=False):
+    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None,unified_answers=False,lexical_profiles=False):
         self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
         if type(editorial_full_records)is not bool:raise ValueError('Editorial full-record capability must be boolean')
         if type(unified_answers)is not bool:raise ValueError('Unified answers capability must be boolean')
         self.editorial_full_records=editorial_full_records
         self.unified_answers=unified_answers
+        if type(lexical_profiles)is not bool:raise ValueError("Lexical opt-in must be boolean")
+        self.lexical_profiles=lexical_profiles
         if editorial_operator_policy_id is not None and (editorial_operator_policy_id!=editorial.OPERATOR_POLICY_ID or not editorial_full_records or not self.klikai_url):raise ValueError('Invalid local editorial operator policy')
         self.editorial_operator_policy_id=editorial_operator_policy_id
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')

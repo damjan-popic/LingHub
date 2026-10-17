@@ -85,12 +85,15 @@ async def analyzer_request(request,route,payload=None,timeout=30):
 class AnalyzeRequest(BaseModel):
     lang: Literal['sl','it']
     text: str = Field(min_length=1,max_length=10000)
-    engine: Literal['default','spacy','classla']='default'
+    engine: Literal['default','spacy','classla','compare','klikai_experimental_v1','linghub_lexical_stable_v1']='default'
     include_loris: bool=True
 
 
 async def analyze_once(request,req):
     if not req.text.strip(): raise HTTPException(400,'Text is empty.')
+    from .analysis_profiles import PROFILES, analyze as profile_analysis
+    if req.engine in PROFILES or (req.engine=='classla' and getattr(request.app.state,'lexical_classla_url',None)):
+        return await profile_analysis(request,req)
     result=await analyzer_request(request,'/v1/analyze',req.model_dump())
     try:
         validate_analysis(result,req.text,'/loris/check')
@@ -161,12 +164,18 @@ async def capabilities_data(request):
               'analyzers':backend.get('identity',backend.get('engines',{})),
               'defaults':backend.get('defaults',{'sl':'spacy','it':'spacy'}),
               'contract':'linghub.platform.v1'}
+    experimental={}
+    if getattr(request.app.state,'lexical_classla_url',None):
+        try:
+            async with httpx.AsyncClient(timeout=2,trust_env=False)as client:
+                r=await client.get(request.app.state.lexical_classla_url+'/health');r.raise_for_status();experimental=r.json()['model']
+        except (httpx.HTTPError,ValueError,KeyError):experimental={'status':'unavailable'}
     models=[]
     for engine,info in backend.get('engines',{}).items():
         if isinstance(info,dict):
             models.extend(info.get('models',{}).values())
             if info.get('model'): models.append(info['model'])
-    return {'status':'ok','resources':resources,'models':models,'engines':backend.get('engines',{}),
+    return {'status':'ok','lexical_profile':{'available':getattr(request.app.state,'sloleks_profiles',None)is not None,'schema':'linghub.lexical-profile.v1','profiles':['klikai_experimental_v1','linghub_lexical_stable_v1','compare'],'legacy_default_unchanged':True,'resolved_release':__import__('os').environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'classla':experimental,'policy':'classla-primary-spacy-independent-spans-v1','sloleks':getattr(request.app.state,'sloleks_profiles',None).manifest if getattr(request.app.state,'sloleks_profiles',None)else None},'resources':resources,'models':models,'engines':backend.get('engines',{}),
         'defaults':backend.get('defaults',{'sl':'spacy','it':'spacy'}),'analyzer_service_reachable':reachable,
         'analyzer_capabilities':backend,'limits':LIMITS,'identity':hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
         'capabilities':{'morphology':available(request,'morphology'),'synonyms':available(request,'synonyms'),

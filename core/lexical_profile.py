@@ -178,10 +178,39 @@ async def make_profile(req,request):
    exact=[f for f in hit.get('matched_forms',[])if f.get('match_tier')in {'exact','morphology_exact'}and f.get('ambiguity_cost')==0]
    if exact:records.append(source_record('terminology',hit['external_id'],hit,{'resource_id':hit['source_slug'],'capture_basis':'exact existing terminology response','rights_mode':hit['rights_mode']},part['target']))
  records=list({r['record_id']:r for r in records}.values())
+ # Phrase morphology is a separate, explicitly predictive layer. It must not
+ # borrow grammatical authority from a collocation's citation-form tags.
+ phrase_analysis=[]
+ if interpretation['query_kind']=='phrase'and 'translation'not in interpretation['requested_facets']:
+  for target in targets:
+   engines={};forms={}
+   for engine,raw in analysis.get('raw_engines',{}).items():
+    tokens=[]
+    for w in raw.get('analysis',{}).get('words',[]):
+     if type(w.get('start'))is not int or not target['start']<=w['start']<w['end']<=target['end']:continue
+     tokens.append({k:w.get(k)for k in ('text','lemma','upos','feats','start','end')})
+     if w.get('upos')in {'NOUN','ADJ','PROPN','VERB','ADV'}and w['text']not in forms:
+      part=await morphology_lookup({'text':w['text']});readings=[];source_slots=[]
+      for le in (part.get('data')or{}).get('lexemes',[]):
+       for matched in le['submitted_analyses']:
+        if not any(s['source_entry_id']==le['source_entry_id']and s['slot']['slot_locator']==matched['slot_locator']for s in source_slots):
+         source_slots.append({'source_entry_id':le['source_entry_id'],'lemma':le['lemma'],'source_status':le['source_status'],'provenance':le['evidence'],'slot':copy.deepcopy(le['slots'][matched['slot_locator']])})
+        readings.append({'lemma':le['lemma'],'source_entry_id':le['source_entry_id'],'source_status':le['source_status'],
+            'selection':'primary'if le['lemma']==w['lemma']else'alternative',
+            'features':matched['features'],'original_msd':matched['original_msd'],'source_locator':matched['variant_locator']})
+      forms[w['text']]={'status':part['status'],'recorded_readings':readings,'source_slots':source_slots}
+    engines[engine]={'model':raw.get('analysis',{}).get('model'), 'tokens':tokens}
+   body={'submitted_expression':target['text'],'start':target['start'],'end':target['end'],
+         'engines':engines,'recorded_forms':forms,'authority':'contextual predictions and recorded candidates; not a normative rule',
+         'uncertainty':'Keep engine disagreements and all recorded case candidates; phrase without context may be ambiguous'}
+   phrase_analysis.append(body)
+   if any(e['tokens']for e in engines.values()):records.append(source_record('analysis','tokens:'+str(target['start'])+':'+str(target['end']),body,{'resource_id':'linguistic-analysis','version':'analysis-layer-v1'},target['text']))
+ facets['phrase_analysis']=facet('matched'if phrase_analysis else'not_applicable',phrase_analysis)
  if not targets:
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
- return LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v1-20261017','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump()
+ from .lexical_focus import focus_profile
+ return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v2-20261018','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
 def httpx_client():
  import httpx
  return httpx.AsyncClient(timeout=5,trust_env=False,follow_redirects=False)

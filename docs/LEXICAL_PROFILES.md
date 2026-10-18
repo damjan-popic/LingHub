@@ -109,3 +109,33 @@ are already in the versioned inventory. Environment locks are retained for rebui
 model weights are not added to each release archive. A successful installation is
 not a claim that the later publication or NAS checkpoint has completed: inspect
 its explicit receipts.
+
+## Focused lexical quality revision (2026-10-18)
+
+`lexical-focus-v2-20261018` annotates a new capture; historical captures are not
+rewritten. The shared interpretation assigns each unit `primary`, `alternative`
+or `excluded` with a reason. Writer eligibility and deterministic cards consume
+that annotation. Explicit uppercase acronyms, letters and common nouns remain
+available. The reviewed adjective leads a word overview; a secondary automatic
+analysis stays in a separate collapsed section. All raw candidates remain in the
+saved capture, even when omitted from the default cards.
+
+`editorial_status` retains the raw field and value alongside `normalized`:
+`MANUAL`, `manual`, `ssss-manual` → `reviewed`; `AUTOMATIC`, `automatic`,
+`ssss-automatic` → `automatic`; other or absent values → `unknown`. These are
+editorial-process labels, not usage registers or judgments of correctness. The
+reader translates the display label and keeps its raw value in source details.
+Lexeme counts, reading-specific surface counts, collocation counts and logDice
+keep their original scopes. Parallel variants share their original source slot;
+frequency does not create a preference or a synthetic declension pattern.
+
+Phrase analysis is separate from collocations: original-token offsets and actual
+engine identities/predictions accompany recorded Sloleks candidates and source
+slots. Disagreements remain visible. Equivalent collocation observations group
+only when edition, lexical-unit identity, content and measurements agree. The
+representative retains every source membership; counts are never summed.
+
+The quality update stages only a lexical router on a separate loopback port,
+reusing the already running analyzers and datasets. It checks four private answers
+before promoting that router and the API/gateway. Normal beta publication follows;
+CPU analyzer and GPU-worker services are not restarted by this update.

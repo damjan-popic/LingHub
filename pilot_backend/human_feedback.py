@@ -256,11 +256,14 @@ def csv_export(data):
 # One small additive record per existing run, in the same private/backed-up DB.
 # Families retain their frozen sources; results and revisioned feedback are joined,
 # never copied into a second feedback store.
+PROJECT_TEST_GROUPS = frozenset({'cu', 'slori', 'mk'})
+RECORDED_GROUPS = PROJECT_TEST_GROUPS | {'tehno'}
+
 def participant_at_submission(db, owner, automated=False):
     account=dict(db.execute('SELECT id,username,origin,cohort FROM accounts WHERE id=?',(owner,)).fetchone())
-    group=account['username'] if account['username'] in {'cu','slori','tehno'} else 'unknown'
+    group=account['username'] if account['username'] in RECORDED_GROUPS else 'unknown'
     origin=('automated_test' if automated or account['origin'] in {'test','synthetic'} else
-            'technical_manual' if group=='tehno' else 'project_use' if group in {'cu','slori'} else 'unknown')
+            'technical_manual' if group=='tehno' else 'project_use' if group in PROJECT_TEST_GROUPS else 'unknown')
     return {**account,'group':group,'account_origin':account['origin'],'origin':origin,'group_basis':'authenticated_account_at_submission'}
 
 
@@ -379,7 +382,7 @@ def attempt_case(db, run_id):
     account=dict(db.execute('SELECT id,username,cohort,origin FROM accounts WHERE id=?',(family['owner'],)).fetchone())
     row=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(run_id,)).fetchone()
     observed_at_submission=row is not None
-    observation=json.loads(row[0]) if row else {'participant':{**account,'group':account['username'] if account['username'] in {'cu','slori','tehno'} else 'unknown','origin':'unknown','group_basis':'historical_owner_identity_only'},'stages':{},'versions':{},'missing_fields':['submission_observation_not_recorded_historically']}
+    observation=json.loads(row[0]) if row else {'participant':{**account,'group':account['username'] if account['username'] in RECORDED_GROUPS else 'unknown','origin':'unknown','group_basis':'historical_owner_identity_only'},'stages':{},'versions':{},'missing_fields':['submission_observation_not_recorded_historically']}
     job=dict(db.execute('SELECT * FROM jobs WHERE run_id=?',(run_id,)).fetchone() or {})
     original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(family['id'],)).fetchone()
     bundle=json.loads(family['bundle'] or '{}');result=visible_result(run,family['locale'])
@@ -442,7 +445,7 @@ def export_attempts(store, directory, *, groups=None, origin=None, since=None, u
     directory=Path(directory).absolute()
     if directory.exists() or directory.is_symlink():raise ValueError('Choose a new private export directory')
     directory.mkdir(parents=True,mode=0o700);os.chmod(directory,0o700)
-    chosen=set(groups or ('cu','slori'))
+    chosen=set(groups or PROJECT_TEST_GROUPS)
     # Explicit TEHNO includes its ordinary technical traffic. Automated traffic
     # and historical unknown traffic require an explicit origin/all selection.
     default_origin={'project_use','technical_manual'} if groups else {'project_use'}

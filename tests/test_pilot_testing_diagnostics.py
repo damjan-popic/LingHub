@@ -32,7 +32,7 @@ class DiagnosticAdapter(Adapter):
 def testing(tmp_path):
     adapter=DiagnosticAdapter()
     app=create_app({'store':str(tmp_path/'state'/'pilot.sqlite'),'allowed_origins':[ORIGIN],'secure_cookies':False,'human_testing_mode':True,'release_id':'fixture-testing-r1'},adapter,PasswordHasher(time_cost=1,memory_cost=1024,parallelism=1),start_workers=False)
-    ids={name:app.state.auth.create(name,PASSWORD,origin='human',cohort='project_beta',must_change=False) for name in ('cu','slori','tehno')}
+    ids={name:app.state.auth.create(name,PASSWORD,origin='human',cohort='project_beta',must_change=False) for name in ('cu','slori','tehno','mk')}
     return app,adapter,ids
 
 def submit(app,owner,question='Fixture query',**extra):
@@ -84,9 +84,12 @@ def test_every_attempt_group_spoofing_and_offline_export(testing,tmp_path):
     # Model/search denied for the entire export, including case details.
     with patch.object(adapter,'freeze',side_effect=AssertionError('offline')),patch.object(adapter,'generate',side_effect=AssertionError('offline')):
         result=export_attempts(app.state.store,tmp_path/'project')
-        assert result['counts']['attempts']==2 and result['counts']['rated_outputs']==0
+        assert result['counts']['attempts']==3 and result['counts']['rated_outputs']==0
         rows=[json.loads(x) for x in (tmp_path/'project/attempts.jsonl').read_text().splitlines()]
-        assert {r['group'] for r in rows}=={'cu','slori'}
+        assert {r['group'] for r in rows}=={'cu','slori','mk'}
+        export_attempts(app.state.store,tmp_path/'ministry',groups=['mk'])
+        ministry=[json.loads(x)for x in (tmp_path/'ministry/attempts.jsonl').read_text().splitlines()]
+        assert len(ministry)==1 and ministry[0]['group']=='mk' and ministry[0]['origin']=='project_use'
         export_attempts(app.state.store,tmp_path/'technical',groups=['tehno'])
         rid=created['tehno']['family']['short']['run_id'];saved=json.loads((tmp_path/'technical'/f'{rid}.json').read_text())
         assert saved['observation']['stages']['generation']['writer']['requests']
@@ -94,9 +97,11 @@ def test_every_attempt_group_spoofing_and_offline_export(testing,tmp_path):
         assert (tmp_path/'technical'/f'{rid}.json').stat().st_mode&0o077==0
 
 @pytest.mark.parametrize('mode,outcome,stage',[('source_outage','timed_out','retrieval_and_freeze'),('writer_failure','failed','writer'),('writer_timeout','timed_out','writer'),('empty','no_support',None),('analyzer_failure','completed',None)])
-def test_injected_failures_survive_with_no_feedback(testing,mode,outcome,stage):
-    app,adapter,ids=testing;adapter.mode=mode;c=submit(app,ids['cu']);drain(app)
+@pytest.mark.parametrize('group',['cu','mk'])
+def test_injected_failures_survive_with_no_feedback(testing,mode,outcome,stage,group):
+    app,adapter,ids=testing;adapter.mode=mode;c=submit(app,ids[group]);drain(app)
     saved=case(app,c['family']['short']['run_id']);assert saved['summary']['outcome']==outcome
+    assert saved['summary']['group']==group and saved['summary']['origin']=='project_use'
     assert saved['summary']['rating']=='unrated' and 'SECRET' not in json.dumps(saved)
     if stage:assert saved['observation']['stages']['failure']['stage']==stage
     if mode=='analyzer_failure':assert saved['frozen_sources']['analysis']['status']=='failed'
@@ -109,15 +114,16 @@ def test_cancel_retained_and_missing_capture_is_explicit(testing,tmp_path):
     saved=case(app,c['family']['short']['run_id']);assert saved['summary']['trace_incomplete']
     assert saved['missing_fields'][0]['cause']['error_type']=='TypeError'
 
-def test_failure_feedback_delivery_hash_and_ownership(testing):
-    app,adapter,ids=testing;adapter.mode='writer_failure';c=submit(app,ids['cu']);drain(app)
-    d=app.state.domain;f=d.family(ids['cu'],c['family']['answer_family_id']);r=f['short']
+@pytest.mark.parametrize('group',['cu','mk'])
+def test_failure_feedback_delivery_hash_and_ownership(testing,group):
+    app,adapter,ids=testing;adapter.mode='writer_failure';c=submit(app,ids[group]);drain(app)
+    d=app.state.domain;f=d.family(ids[group],c['family']['answer_family_id']);r=f['short']
     with pytest.raises(Failure):d.family(ids['slori'],f['answer_family_id'])
-    with pytest.raises(Failure):d.delivered(ids['cu'],r['run_id'],{'display_sha256':'wrong'})
-    d.delivered(ids['cu'],r['run_id'],{'display_sha256':r['display_sha256']})
+    with pytest.raises(Failure):d.delivered(ids[group],r['run_id'],{'display_sha256':'wrong'})
+    d.delivered(ids[group],r['run_id'],{'display_sha256':r['display_sha256']})
     payload={'run_id':r['run_id'],'rating':'not_useful','comment':'Technical failure fixture','idempotency_key':'fixture-feedback-1'}
-    d.feedback(ids['cu'],payload)
-    d.feedback(ids['cu'],{**payload,'comment':'Updated fixture','idempotency_key':'fixture-feedback-2'})
+    d.feedback(ids[group],payload)
+    d.feedback(ids[group],{**payload,'comment':'Updated fixture','idempotency_key':'fixture-feedback-2'})
     saved=case(app,r['run_id']);assert saved['summary']['rating']=='not_useful'
     assert len(saved['feedback_revisions'])==2
     assert {e['display_hash'] for e in saved['feedback_revisions']}=={r['display_sha256']}

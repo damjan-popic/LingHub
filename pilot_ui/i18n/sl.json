@@ -65,7 +65,7 @@
   "loading_model": "Model se nalaga",
   "unavailable_model": "Model trenutno ni na voljo.",
   "answer_guard_failed": "Razlage ni bilo mogoče zanesljivo pripraviti. Oglejte si vire.",
-  "no_hit": "V pregledanih virih ni dovolj podatkov za zanesljiv odgovor.",
+  "no_hit": "Oprostite, za to vprašanje v virih ne najdem pravega odgovora.",
   "coverage_note": "Rezultat velja za trenutno vključene vire.",
   "offline": "Povezava je prekinjena. Vnos je ohranjen v tej seji.",
   "request_failed": "Zahteva ni uspela. Poskusite znova.",
@@ -292,7 +292,7 @@
   "generation_source_excerpt": "Prikazan je podprti odlomek vira; celoten odgovor ni bil oblikovan.",
   "generated_grounded": "Odgovor je pripravil model na podlagi navedenih virov. Citati odprejo uporabljeno gradivo.",
   "generation_fallback": "Model ni pripravil odgovora. Morebitni prikazani izseki so rezultati iskanja, ne ustvarjen odgovor; gradivo lahko še vedno pregledate.",
-  "generation_no_support": "Ni bilo najdenega dovolj podpornega gradiva za odgovor z viri. Vrnjene zadetke lahko pregledate spodaj.",
+  "generation_no_support": "Oprostite, za to vprašanje v virih ne najdem pravega odgovora.",
   "connected_resource": "Povezani vir",
   "retrieval_status_partial": "delni zadetki ali nepopolne podrobnosti",
   "retrieval_status_not_documentary": "jezikovno orodje ali podpora; ni dokumentarni vir",
@@ -376,5 +376,12 @@
   "copy_sources": "Viri",
   "answer_wait_long": "Priprava odgovora traja nekoliko dlje.",
   "answer_wait_sources": "Medtem lahko pod »Preberi več« pregledate najdene vire.",
-  "public_release": "Različica {version} · Posodobljeno {date}"
+  "public_release": "Različica {version} · Posodobljeno {date}",
+  "no_answer_feedback": "Sporočite nam, kaj ste iskali ali kateri vir bi lahko pomagal. Vaša povratna informacija nam pomaga izboljšati KLIKai.",
+  "no_answer_feedback_action": "Pošljite povratno informacijo",
+  "current_original_open": "Odpri trenutno dostopni izvirnik",
+  "current_original_heading": "Trenutno dostopni izvirnik",
+  "current_original_offer": "Celoten izvirnik ob pripravi tega odgovora ni bil dostopen. Lahko ga poskusite odpreti zdaj.",
+  "current_original_notice": "Ta izvirnik je pridobljen zdaj. Ob pripravi shranjenega odgovora ni bil dostopen in ni del njegovih ohranjenih citatov. Shranjeni odgovor in viri ostajajo nespremenjeni.",
+  "current_original_unavailable": "Izvirnik trenutno še ni dostopen. Ohranjeni iskalni izsek ostaja prikazan zgoraj."
 }

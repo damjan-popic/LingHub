@@ -268,7 +268,11 @@ def test_no_support_skips_generation_without_claiming_corpus_completeness(tmp_pa
 
 
 @pytest.mark.parametrize('support_state',['empty','ineligible'])
-def test_no_eligible_support_never_invokes_provider_and_keeps_owned_results(tmp_path,support_state):
+@pytest.mark.parametrize('locale,expected',[
+    ('sl','Oprostite, za to vprašanje v virih ne najdem pravega odgovora.'),
+    ('it','Mi dispiace, per questa domanda non trovo nelle fonti una risposta adeguata.'),
+])
+def test_no_eligible_support_never_invokes_provider_and_keeps_owned_results(tmp_path,support_state,locale,expected):
     class AdmissionGateway(UnifiedGateway):
         forbid_generation=False
         generation_invocations=0
@@ -285,19 +289,23 @@ def test_no_eligible_support_never_invokes_provider_and_keeps_owned_results(tmp_
         headers=login(client)
         # A previous successful request must not count against this case's
         # no-generation requirement, nor change its admission decision.
-        _,earlier=ask(app,client,headers,idempotency_key='eligible-control')
+        earlier_id,earlier=ask(app,client,headers,idempotency_key='eligible-control',locale=locale)
         assert earlier['short']['generation_status']=='generated'
+        with app.state.store.connect()as db:
+            earlier_stored=db.execute('SELECT result FROM runs WHERE family_id=?',(earlier_id,)).fetchone()[0]
         before=gateway.generation_invocations
         assert before==1
         gateway.forbid_generation=True
         gateway.no_hits=support_state=='empty'
-        fid,family=ask(app,client,headers,idempotency_key='no-eligible-support')
+        fid,family=ask(app,client,headers,idempotency_key='no-eligible-support',locale=locale)
         short=family['short']
         assert gateway.generation_invocations-before==0
         assert short['state']=='complete'and short['status']=='no_hit'
         assert short['generation']['status']=='no_support'and short['generation_status']=='not_generated'
-        assert short['short_answer']==('Ni bilo najdenih podpornih virov.' if support_state=='empty' else
-            'Najdeni zadetki ne dajejo dovolj podpore za odgovor na to vprašanje.')
+        assert short['short_answer']==expected
+        assert client.get('/api/pilot/families/'+earlier_id).json()==earlier
+        with app.state.store.connect()as db:
+            assert db.execute('SELECT result FROM runs WHERE family_id=?',(earlier_id,)).fetchone()[0]==earlier_stored
         assert short['evidence']==[]and short['source_badges']==[]
         matches_route='/api/pilot/families/'+fid+'/matches'
         page=client.get(matches_route).json()

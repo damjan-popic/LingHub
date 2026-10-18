@@ -383,9 +383,8 @@ def freeze(gateway, family, policy):
 
 def fallback(bundle, status, elapsed=0.0, error=None):
     it = bundle['locale'] == 'it'
-    no_support = ('I risultati trovati non offrono un sostegno sufficiente per rispondere alla domanda.' if it else
-                  'Najdeni zadetki ne dajejo dovolj podpore za odgovor na to vprašanje.') if bundle['matches'] else (
-                  'Nessuna fonte di supporto trovata.' if it else 'Ni bilo najdenih podpornih virov.')
+    no_support = ('Mi dispiace, per questa domanda non trovo nelle fonti una risposta adeguata.' if it else
+                  'Oprostite, za to vprašanje v virih ne najdem pravega odgovora.')
     message = no_support if status == 'no_support' else (
         'La risposta generata non è disponibile. Puoi consultare i risultati salvati.' if it else
         'Generirani odgovor ni na voljo. Pregledate lahko shranjene zadetke.')
@@ -532,8 +531,59 @@ def source(bundle, eid):
     checked(bundle)
     for item in bundle['matches']:
         if evidence_id(item) == eid:
-            return dict(deepcopy(item['source']), evidence_id=eid)
+            view=dict(deepcopy(item['source']), evidence_id=eid)
+            try:current_original_discovery(bundle,eid)
+            except Failure:pass
+            else:view.update(current_original_lookup=True,original_view='historical_unavailable')
+            return view
     raise Failure('not_found', 404)
+
+
+def current_original_discovery(bundle,eid):
+    """Resolve only an unavailable editorial identity from this frozen bundle.
+
+    Remote gateway match projections omit full discovery captures; their pinned
+    originals remain in the gateway payload. A failed gateway can instead leave
+    the same capture directly in the local match. Neither form accepts a new
+    resource ID from the browser or changes the answer's historical evidence.
+    """
+    checked(bundle)
+    item=next((row for row in bundle['matches']if evidence_id(row)==eid),None)
+    if (not item or item.get('source_slug')not in editorial.SOURCES or
+            item.get('capture_kind')not in {None,'resource_record'} or
+            item.get('detail_status')not in {'unavailable','timeout'}):
+        raise Failure('not_found',404)
+    child=bundle.get('gateway_bundle')or{}
+    retained=(child.get('payload')or{}).get('unified_evidence')or{}
+    candidates=[item,*retained.get('matches',[])]
+    original=next((row for row in candidates if isinstance(row.get('capture'),dict)
+        and row.get('capture_kind')=='resource_record'
+        and row.get('source_slug')==item['source_slug']
+        and row.get('external_id')==item.get('external_id')
+        and row.get('capture_sha256')==item.get('capture_sha256')
+        and digest(row['capture'])==item.get('capture_sha256')),None)
+    if original is None:raise Failure('not_found',404)
+    hit=original['capture']
+    if hit.get('source_slug')!=item['source_slug']or hit.get('resource_id')!=item.get('external_id'):
+        raise Failure('not_found',404)
+    discovery=editorial.freeze({'query':bundle['query'],'sources':[item['source_slug']],
+        'count':1,'hits':[hit]},bundle['query'],item['source_slug'],bundle['locale'])['bundle']
+    return discovery
+
+
+def current_original(gateway,bundle,eid):
+    """Explicit supplementary read; no generation, persistence or recitation."""
+    discovery=current_original_discovery(bundle,eid)
+    if not gateway.klikai_url or not gateway.editorial_full_records:
+        raise Failure('source_unavailable',503)
+    hit=discovery['hits'][0]
+    path='/api/editorial/records/'+quote(hit['source_slug'],safe='')+'/'+quote(hit['resource_id'],safe='')
+    record=gateway.request(path,None,gateway.klikai_url)
+    current=editorial.freeze_records(discovery,[record],gateway.editorial_operator_policy_id)['bundle']
+    source=editorial.record_source(current,editorial.record_evidence(current)[0]['evidence_id'])
+    # The owned historical evidence ID scopes the request, not the fresh text's
+    # citation status. Its distinct view label is mandatory in the reader.
+    return dict(source,evidence_id=eid,original_view='supplementary_current')
 
 
 def matches_page(bundle, used, offset=0, limit=20):

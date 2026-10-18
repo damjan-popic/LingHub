@@ -210,7 +210,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             if not isinstance(p.get('delivery_token'),str)or not hmac.compare_digest(p['delivery_token'],expected):raise Failure('display_changed',409)
             p={'display_sha256':display,'expanded':p.get('expanded',False)}
         return domain.delivered(u['id'],rid,p)
-    async def source_for(owner,fid,eid,tier,aid=None,side=None):
+    async def source_for(owner,fid,eid,tier,aid=None,side=None,current_original=False):
         if tier not in {'short','long'}:raise Failure('invalid_request')
         with store.connect()as db:
             f=domain.owned(db,'families',fid,owner)
@@ -223,14 +223,21 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)
             evidence=bundle['matches']if is_unified else json.loads(r['result']).get('evidence',[])
             if not any(unified.evidence_id(e)==eid for e in evidence):raise Failure('not_found',404)
+            if current_original and not is_unified:raise Failure('not_found',404)
             retained=historical_source(db,fid,r['id'],owner,eid)
-        result=retained if retained is not None else await run_in_threadpool(adapter.source,bundle,eid,tier)
+        if current_original:
+            unified.current_original_discovery(bundle,eid)
+            result=await run_in_threadpool(adapter.current_original,bundle,eid)
+        else:result=retained if retained is not None else await run_in_threadpool(adapter.source,bundle,eid,tier)
         if isinstance(result.get('evidence'),list):
             evidence=next((e for e in result['evidence']if e.get('citation_id',e.get('evidence_id'))==eid),None)
             if not evidence:raise Failure('not_found',404)
             labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis 2025'}
             result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope')}
-        return {k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope')if k in result}
+        return {k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view')if k in result}
+    @app.get(api+'/families/{fid}/sources/{eid:path}/current-original')
+    async def family_current_original(fid:str,eid:str,request:Request,tier:str='short'):
+        u=user(request);return present(u,await source_for(u['id'],fid,eid,tier,current_original=True))
     @app.get(api+'/families/{fid}/sources/{eid:path}')
     async def family_source(fid:str,eid:str,request:Request,tier:str='short'):
         u=user(request);return present(u,await source_for(u['id'],fid,eid,tier))

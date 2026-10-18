@@ -4,6 +4,12 @@ export function hasSupportedAnswer(tier) {
     ['generated','source_supported_partial','mixed_generated_and_source_partial'].includes(tier?.generation_status);
 }
 
+export function noAnswerFeedback(tier) {
+  // Lack of evidence is distinct from unavailable services or rejected prose.
+  return tier?.generation?.status === 'no_support' ||
+    tier?.status === 'no_hit' && tier?.generation_status === 'not_generated';
+}
+
 export function basePath(value) {
   if (!value || value === '/') return '';
   if (!/^\/[A-Za-z0-9_/-]+$/.test(value) || value.includes('//') || value.split('/').includes('..')) throw Error('Invalid application prefix');
@@ -118,6 +124,9 @@ export function sourceStatusNotes(source) {
     if(dates.length)notes.push({category:'source_date',key:'source_signed_date_note',values:{date:dates.join('; ')}});
   }
   return notes;
+}
+export function canOpenCurrentOriginal(source) {
+  return source?.current_original_lookup===true && source?.original_view==='historical_unavailable';
 }
 export function answerNotes(tier) {
   const notes=[],blocks=tierBlocks(tier),evidence=Array.isArray(tier?.evidence)?tier.evidence:[];

@@ -65,7 +65,7 @@
   "loading_model": "Caricamento del modello",
   "unavailable_model": "Il modello non è al momento disponibile.",
   "answer_guard_failed": "Non è stato possibile generare una spiegazione affidabile. Consulta le fonti.",
-  "no_hit": "Le fonti consultate non contengono informazioni sufficienti per una risposta affidabile.",
+  "no_hit": "Mi dispiace, per questa domanda non trovo nelle fonti una risposta adeguata.",
   "coverage_note": "Il risultato riguarda le fonti attualmente incluse.",
   "offline": "La connessione si è interrotta. Il testo rimane in questa sessione.",
   "request_failed": "La richiesta non è riuscita. Riprova.",
@@ -292,7 +292,7 @@
   "generation_source_excerpt": "È riportato un passaggio della fonte; non è stata formulata una risposta completa.",
   "generated_grounded": "Risposta generata dal modello sulla base delle fonti indicate. Le citazioni aprono il materiale utilizzato.",
   "generation_fallback": "Il modello non ha prodotto una risposta. Gli eventuali estratti mostrati sono risultati di ricerca, non una risposta generata; il materiale resta consultabile.",
-  "generation_no_support": "Non è stato trovato materiale sufficiente per una risposta supportata dalle fonti. Puoi consultare i risultati restituiti qui sotto.",
+  "generation_no_support": "Mi dispiace, per questa domanda non trovo nelle fonti una risposta adeguata.",
   "connected_resource": "Risorsa collegata",
   "retrieval_status_partial": "risultati parziali o dettagli incompleti",
   "retrieval_status_not_documentary": "strumento linguistico o supporto; non è una fonte documentaria",
@@ -376,5 +376,12 @@
   "copy_sources": "Fonti",
   "answer_wait_long": "La preparazione della risposta sta richiedendo un po’ più di tempo.",
   "answer_wait_sources": "Nel frattempo potete consultare le fonti trovate in «Leggi di più».",
-  "public_release": "Versione {version} · Aggiornato il {date}"
+  "public_release": "Versione {version} · Aggiornato il {date}",
+  "no_answer_feedback": "Indicateci che cosa cercavate o quale fonte potrebbe essere utile. Il vostro feedback ci aiuta a migliorare KLIKai.",
+  "no_answer_feedback_action": "Invia un feedback",
+  "current_original_open": "Apri l’originale attualmente disponibile",
+  "current_original_heading": "Originale attualmente disponibile",
+  "current_original_offer": "L’originale integrale non era disponibile quando è stata preparata questa risposta. Puoi provare ad aprirlo adesso.",
+  "current_original_notice": "Questo originale è stato recuperato adesso. Non era disponibile quando è stata preparata la risposta salvata e non fa parte delle sue citazioni conservate. La risposta e le fonti salvate rimangono invariate.",
+  "current_original_unavailable": "L’originale non è ancora disponibile. L’estratto di ricerca conservato rimane visibile sopra."
 }

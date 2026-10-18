@@ -115,3 +115,10 @@ test('explicit limitations are shown once and supersede matching source status n
   const unrelated={...proposal,evidence_id:'other',external_id:'other-entry'};
   assert.equal(answerNotes({...tier,evidence:[proposal,unrelated]}).filter(note=>note.key==='source_proposal_note').length,1);
 });
+
+test('no-answer feedback invitation distinguishes evidence absence from provider or validation failure', async()=>{
+ const {noAnswerFeedback}=await import('../pilot_ui/core.mjs');
+ assert.equal(noAnswerFeedback({generation:{status:'no_support'}}),true);
+ assert.equal(noAnswerFeedback({status:'no_hit',generation_status:'not_generated',answer_kind:'source_only'}),true);
+ for(const tier of [{status:'source_only',generation_status:'not_generated'},{state:'failed'},{generation:{status:'failed'}},{generation_status:'source_supported_partial'},{answer_kind:'generated'}])assert.equal(noAnswerFeedback(tier),false);
+});

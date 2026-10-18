@@ -1,4 +1,5 @@
 import {publicRelease} from './public-release.mjs';
+import {noAnswerFeedback,canOpenCurrentOriginal} from './core.mjs';
 import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel} from './interface-details.mjs';
 import {createSourceExplorer,recordUsed,citedEvidenceIds} from './source-explorer.mjs';
 import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
@@ -162,7 +163,7 @@ async function recordDelivered(tier,expanded) {
 function renderFeedback(tier,kind,node) {
   clear(node);if(!tier?.run_id||!(['complete','failed','cancelled'].includes(tier.state)||acceptedStates.has(jobState(tier))))return;
   const delivered=state.delivered.has(tier.run_id+':'+(kind==='long'));
-  if(beta()){const mark=localButton('mark_error',()=>openFeedback(tier,kind),'feedback-mark');mark.disabled=!delivered;node.append(mark);return;}
+  if(beta()){const missing=noAnswerFeedback(tier);if(missing)node.append(el('p',t('no_answer_feedback'),{class:'quality-hint'}));const mark=localButton(missing?'no_answer_feedback_action':'mark_error',()=>openFeedback(tier,kind),'feedback-mark');mark.disabled=!delivered;node.append(mark);return;}
   const old=state.feedback.get(tier.run_id),draft=state.feedbackDrafts.get(tier.run_id)||{quality_score:old?.quality_score??null,comment:old?.comment||''};
   const form=el('form',null,{class:'quality-form'}),scale=el('fieldset',null,{class:'quality-scale'});scale.append(el('legend',t('quality_question')));
   for(let score=1;score<=5;score++){const label=el('label',null,{class:'quality-choice'}),input=el('input',null,{type:'radio',name:'quality-'+tier.run_id,value:score,'aria-label':t('quality_score',{score})});input.checked=draft.quality_score===score;label.append(input,el('span',score));scale.append(label);input.addEventListener('change',()=>{draft.quality_score=score;update();});}
@@ -294,6 +295,24 @@ async function expand(button) {
   if(acceptedStates.has(jobState(state.family.long)))return;
   await action(button,async()=>{const result=await api('/families/'+encodeURIComponent(familyId())+'/expand',{method:'POST',body:{idempotency_key:keyFor('expand:'+familyId())}});if(result.family)renderFamily(result.family);else if(result.answer_family_id)renderFamily(result);const id=result.job?.job_id||result.job?.id||state.family.long?.job_id;if(id)pollJob(id,familyId(),'long');});
 }
+function appendCurrentOriginalAction(data,targetFamily,id,kind,current) {
+  if(!canOpenCurrentOriginal(data))return;
+  const section=el('section',null,{class:'source-current-original'}),output=el('div');
+  const button=localButton('current_original_open',async()=>{
+    button.disabled=true;clear(output);output.append(el('p',t('loading')));
+    try {
+      const latest=await api('/families/'+encodeURIComponent(targetFamily)+'/sources/'+encodeURIComponent(id)+'/current-original?tier='+encodeURIComponent(kind));
+      if(!current())return;
+      if(latest.original_view!=='supplementary_current'||typeof latest.excerpt!=='string')throw Error();
+      clear(output);output.append(el('h3',t('current_original_heading')),el('p',t('current_original_notice'),{class:'source-qualifier'}));
+      if(latest.title)output.append(el('h4',latest.title));
+      output.append(el('blockquote',latest.excerpt));
+      if(latest.bibliography?.source_date)output.append(el('p',String(latest.bibliography.source_date),{class:'source-locator'}));
+      const link=safeSourceLink(latest.url);if(link)output.append(el('a',t('open_original'),{href:link,target:'_blank',rel:'noopener noreferrer',class:'plain'}));
+    }catch(error){if(!current())return;clear(output);output.append(el('p',t('current_original_unavailable'),{class:'error'}));button.disabled=false;}
+  },'plain');
+  section.append(el('p',t('current_original_offer'),{class:'source-qualifier'}),button,output);$('source-content').append(section);
+}
 async function openSource(tier,id,kind,reference={}) {
   const request=++sourceRequest,boot=state.boot,targetFamily=familyId();
   const current=()=>request===sourceRequest&&boot===state.boot&&targetFamily===familyId()&&$('source-dialog').open;
@@ -313,6 +332,7 @@ async function openSource(tier,id,kind,reference={}) {
     if(beta()&&reference.recordEvidenceIds?.length>1){const parts=el('div',null,{class:'record-parts'});parts.append(el('p',t('beta_record_parts'),{class:'small muted'}));for(const [index,target] of reference.recordEvidenceIds.entries()){const choice=el('button',t('beta_record_part',{number:index+1}),{type:'button',class:'plain','data-record-part':target});choice.disabled=target===id;choice.addEventListener('click',()=>openSource(tier,target,kind,reference));parts.append(choice);}$('source-content').append(parts);}
     if(beta()&&data.bibliography){const bib=data.bibliography,authors=Array.isArray(bib.authors)?bib.authors.filter(a=>typeof a==='string'):[],dates=Array.isArray(bib.signed_date_text)?bib.signed_date_text:[bib.source_date||bib.date].filter(Boolean);if(authors.length)$('source-content').append(el('p',authors.join(', '),{class:'source-locator'}));if(dates.length)$('source-content').append(el('p',dates.join('; '),{class:'source-locator'}));}
     if(data.bibliography&&!beta()){const details=el('details',null,{class:'source-bibliography'}),summary=el('summary',t('source_bibliography'));details.append(summary);const bib=typeof data.bibliography==='string'?data.bibliography:Object.entries(data.bibliography).map(([key,value])=>key+': '+String(value)).join('\n');details.append(el('p',bib));if(excerpt.attributionHidden){details.append(el('p',t('original_source_excerpt')));details.append(el('pre',excerpt.original,{class:'source-original'}));}$('source-content').append(details);}
+    if(!reference.comparisonId)appendCurrentOriginalAction(data,targetFamily,id,kind,current);
   }catch(error){if(!current())return;clear($('source-content'));$('source-content').append(el('p',t('source_unavailable'),{class:'error'}));}
 }
 function captureSelection() {

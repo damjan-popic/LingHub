@@ -173,6 +173,8 @@ class Gateway:
         if bundle.get('task')=='morphology':return morphology.source(bundle,evidence_id,tier)
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
         return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
+    def current_original(self,bundle,evidence_id):
+        return unified.current_original(self,bundle,evidence_id)
 
 
 def deterministic_answer(data,locale):

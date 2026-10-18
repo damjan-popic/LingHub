@@ -42,9 +42,11 @@ VALIDATION_REASONS={
     'pattern_normality_not_established','frequency_scope_not_established','frequency_numbers_not_in_selected_support','scoped_abstention_not_factual_claim',
     'irrelevant_source_commentary','population_comprehension_requires_attribution','geographical_attestation_is_not_exclusivity',
     'language_is_not_country','per_form_recommendation_not_preserved','notification_is_not_permit',
-    'claim_case_not_in_supported_agreement','curated_recommendation_direction_reversed'}
+    'claim_case_not_in_supported_agreement','curated_recommendation_direction_reversed',
+    'contextual_form_not_in_cited_support','construction_application_rendered','source_personal_voice_not_attributed'}
 VALIDATION_ACTIONS={'accepted','withhold','omit','source_supported_partial','mixed_generated_and_source_partial',
-    'supported_claim_fragment','deterministic_repair','deterministic_glossary_repair','deterministic_temporal_attribution','normalize_abstention_envelope','deterministic_typed_scope_repair'}
+    'supported_claim_fragment','deterministic_repair','deterministic_glossary_repair','deterministic_temporal_attribution','normalize_abstention_envelope','deterministic_typed_scope_repair',
+    'deterministic_supported_application','source_bound_derivation'}
 VALIDATION_LIMITATION_REASONS={'model_found_insufficient_evidence','no_supported_generated_claims',
     'invalid_or_inconsistently_scoped_composition','native_tokenizer_unavailable','empty_indexed_evidence',
     'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested'}
@@ -60,7 +62,7 @@ def generation_validation_diagnostics(result):
         'gateway_status':('status',{'validated','partial','failed','no_hit','source_only','rejected','no_answer'}),
         'gateway_answer_kind':('answer_kind',{'generated','mixed','source_only','clarification'}),
         'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial','returned_abstention'}),
-        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial','abstention'})}
+        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial','abstention','deterministic_supported_application'})}
     for key,(original,allowed)in fields.items():
         value=raw.get(key if nested else original)
         if isinstance(value,str)and value in allowed:out[key]=value

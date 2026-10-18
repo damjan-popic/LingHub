@@ -101,7 +101,7 @@ def analyse(store,output_dir=None):
         cutoff,rows,runs=snapshot(store);policy=store.meta('active_policy')
         with store.connect()as db:
             votes=[dict(r)for r in db.execute('''SELECT v.*,a.origin,f.locale,asgn.prior_named_exposure,asgn.blind,asgn.revealed FROM votes v JOIN accounts a ON a.id=v.owner JOIN assignments asgn ON asgn.id=v.assignment_id JOIN families f ON f.id=asgn.family_id WHERE v.revision=(SELECT max(v2.revision)FROM votes v2 WHERE v2.assignment_id=v.assignment_id AND v2.tier=v.tier)ORDER BY v.seq''')]
-        cid=digest({'kind':'analysis','cutoff':cutoff,'feedback_ids':[{k:r[k]for k in ('id','revision','seq')}for r in rows],'runs':[{k:r[k]for k in ('id','state','delivered','finished')}for r in runs],'votes':[{k:v[k]for k in ('id','revision','seq')}for v in votes],'policy':policy,'analyser':VERSION})
+        cid=digest({'kind':'analysis','cutoff':cutoff,'feedback_ids':[{k:r[k]for k in ('id','revision','seq')}for r in rows],'runs':[{k:r[k]for k in ('id','state','delivered','finished')}for r in runs],'votes':[{k:v[k]for k in ('id','revision','seq')}for v in votes],'policy':policy,'analyser':VERSION,'output_classifier':CLASSIFICATION_VERSION})
         with store.connect()as db:old=db.execute('SELECT report FROM cycles WHERE id=?',(cid,)).fetchone()
         if old:
             report=json.loads(old[0])
@@ -225,7 +225,7 @@ def adapt(store,candidates=None,validations=None,implemented=None,replay_gateway
                     validations[pid]=json.loads(path.read_text())
         replay_index=store.path.parent/'replay/latest.json'
         from .replay import file_sha,gate as replay_gate
-        cid=digest({'kind':'adaptation','cutoff':cutoff,'base':base_id,'analyser':VERSION,'candidates':candidates,'validation_hash':digest(validations or{}),'replay_index_sha256':file_sha(replay_index)if replay_index.is_file()else None})
+        cid=digest({'kind':'adaptation','cutoff':cutoff,'base':base_id,'analyser':VERSION,'output_classifier':CLASSIFICATION_VERSION,'candidates':candidates,'validation_hash':digest(validations or{}),'replay_index_sha256':file_sha(replay_index)if replay_index.is_file()else None})
         with store.connect()as db:old=db.execute('SELECT report FROM cycles WHERE id=?',(cid,)).fetchone()
         if old:return json.loads(old[0])
         report={'schema':'klikai.pilot.adaptation.v1','cycle_id':cid,'cutoff':cutoff,'previous_cutoff':previous,'input_hash':input_hash,'status':'ANALYSIS_ONLY_NO_VALIDATED_PROMOTION','human_events':len(human),'all_new_human_events':sum(r['origin']=='human'for r in rows),'eligible_task':'reference','participants':len({r['owner']for r in human}),'cases':len({r['family_id']for r in human}),'candidates':[],'baseline_policy_id':base_id}

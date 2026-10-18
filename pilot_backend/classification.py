@@ -1,6 +1,6 @@
 """Classify retained output methods without editing historical answer bodies."""
-VERSION='pilot-output-method-v1'
-MODES={'generated','mixed_generated_and_source_partial','source_supported_partial'}
+VERSION='pilot-output-method-v2'
+MODES={'generated','mixed_generated_and_source_partial','source_supported_partial','deterministic_supported_application'}
 
 def method(result):
     if not isinstance(result,dict):return 'unknown'

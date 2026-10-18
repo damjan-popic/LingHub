@@ -49,5 +49,5 @@ def test_new_analysis_preserves_prior_cycle_bytes(tmp_path,monkeypatch):
  old=cycles.analyse(store)
  with store.connect()as db:old_bytes=db.execute('SELECT report FROM cycles WHERE id=?',(old['cycle_id'],)).fetchone()[0]
  monkeypatch.setattr(cycles,'VERSION',version);new=cycles.analyse(store)
- assert new['cycle_id']!=old['cycle_id']and new['counts']['output_classification_version']=='pilot-output-method-v1'
+ assert new['cycle_id']!=old['cycle_id']and new['counts']['output_classification_version']=='pilot-output-method-v2'
  with store.connect()as db:assert db.execute('SELECT report FROM cycles WHERE id=?',(old['cycle_id'],)).fetchone()[0]==old_bytes

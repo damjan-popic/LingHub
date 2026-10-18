@@ -37,7 +37,7 @@ _AUTO_INTENTS = {
         ('place_name', r'\b(?:krajevn\w*|zemljepisn\w*|naselbinsk\w*)\s+imen\w*\b'),
         ('spelling', r'\b(?:kako|ali)\s+(?:(?:naj|se|pravilno)\s+)*(?:piš\w*|zapiš\w*|napiš\w*)\b'),
         ('lexical_choice', r'\b(?:ali|kaj|kater[ai])\s+(?:je|sta|so)\s+(?:prav|pravil\w*|ustrez\w*)\b'),
-        ('lexical_meaning', r'\bkaj\s+pomen\w*\b'),
+        ('lexical_meaning', r'\bkaj\s+(?:je|pomen\w*)\b'),
     ),
     'it': (
         ('capitalization', r'\b(?:maiuscol\w*|minuscol\w*)\b'),
@@ -109,6 +109,10 @@ def automatic_plan(question, input_language='und'):
         match=spans[0]
         group=next(i for i,value in enumerate(match.groups(),1) if value is not None)
         start,end=match.span(group)
+    if not spans and not comparison:
+        from core.lexical_planner import plan as lexical_plan
+        targets=lexical_plan(question,'',input_language,{'raw_engines':{}})['targets']
+        if len(targets)==1:start,end=targets[0]['start'],targets[0]['end']
     focus=question[start:end]
     if not focus.strip():return None
     return {'version':VERSION,'operations':['loris'],'focus':focus,
@@ -129,8 +133,13 @@ def plan(question, input_language='und', focus=None):
     spans = list(_QUOTES.finditer(question))
     # One explicit focus avoids silently selecting one of several unrelated terms.
     if not explicit_focus:
-        if len(spans)!=1:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'one_quoted_focus_required'}
-        match=spans[0];focus=next(x for x in match.groups() if x is not None)
+        if len(spans)!=1:
+            from core.lexical_planner import plan as lexical_plan
+            targets=lexical_plan(question,'',input_language,{'raw_engines':{}})['targets']
+            if len(spans)>1 or len(targets)!=1 or targets[0].get('basis') not in {'natural lexical object; whole original span','unquoted translation object; whole original span','requested lexical object'}:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'one_quoted_focus_required'}
+            focus=targets[0]['text']
+        else:
+            match=spans[0];focus=next(x for x in match.groups() if x is not None)
     if not focus.strip()or len(focus)>512:return {'version':VERSION,'operations':operations,'status':'clarification_required','reason':'focus_outside_bound'}
     needs_language=any(x!='terminology'for x in operations)
     if needs_language and input_language not in {'sl','it'}:
@@ -144,14 +153,24 @@ def collect(gateway, family, *, automatic=False):
     if automatic and getattr(gateway,'lexical_profiles',False) and gateway.linghub_url and len(question)<=3000:
         capabilities=gateway.request('/v1/capabilities',None,gateway.linghub_url)
         if capabilities.get('lexical_profile',{}).get('available'):
-            request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_experimental_v1','limit':4}
+            request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_classla_primary_v1','limit':4,'request_plan':family.get('request_plan')}
             before=time.monotonic();response=gateway.request('/v1/lexical/profile',request,gateway.linghub_url)
             if response.get('request_schema_version')!='linghub.lexical-profile.v1' or response.get('query',{}).get('text')!=question:raise Failure('invalid_answer',502)
             cap={'operation':'lexical_profile','request':request,'response':response,'response_sha256':digest(response),'duration_ms':(time.monotonic()-before)*1000}
             value={'version':'klikai.lexical-collation.v1','plan':{'version':'klikai.lexical-collation.v1','status':'ready','operations':['morphology','loris','synonyms','collocations','terminology'],'routing_kind':'automatic_lexical_profile','focus':question},'captures':[cap],'capture_set_sha256':digest([cap]),'capabilities_identity':digest(response['provenance']['resource_editions'])}
             if len(canonical(value).encode())>1536*1024:raise Failure('unified_capture_too_large',413)
             return value
-    routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
+    shared_targets=(family.get('request_plan')or{}).get('target_spans',[])
+    routing=None
+    if automatic and len(shared_targets)==1 and shared_targets[0].get('span_scope')=='context':
+        target=shared_targets[0]
+        routing=single_word_plan(target['text'],family.get('input_language','und'))
+        if routing is None:
+            routing={'version':VERSION,'operations':['loris'],'focus':target['text'],
+                'input_language':family.get('input_language')if family.get('input_language')in {'sl','it'}else'sl',
+                'status':'ready','routing_kind':'automatic_question_rule_lookup','reason':'explicit_context_target',
+                'language_basis':'explicit_context_request','focus_span':{'start':target['start'],'end':target['end'],'span_scope':'context'}}
+    if routing is None:routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
     if routing is None:routing=plan(question,family.get('input_language','und'),family.get('focus'))
     if routing is None and automatic:
         routing=automatic_plan(question,family.get('input_language','und'))

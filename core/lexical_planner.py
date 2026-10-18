@@ -1,9 +1,10 @@
 """Original-span lexical planning from structure, cues and both raw analyses."""
-import re,unicodedata
-VERSION='lexical-target-spans-v2'
+import copy,re,unicodedata
+VERSION='lexical-target-spans-v3'
+REQUEST_VERSION='klikai.request-plan.v1'
 WORD=re.compile(r"[^\W\d_]+(?:[\u0300-\u036f]*[^\W\d_]*)(?:[-’'][^\W\d_]+)*",re.UNICODE)
-FACETS={'synonyms':r'sopomen|sinonim','morphology':r'sklanj|pregib|rodilnik|imenovalnik|dvojin|množin|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz'}
-SCAFFOLD={'kaj','kako','kateri','katera','katere','katero','katerih','kdo','ali','je','so','sta','se','v','za','beseda','besede','besedo','besedi','prav','pravilno','prosim','katerega','pomeni','pomen','oblika','oblike','obliko','primer','napiše','reče','naj','mi','razloži','kakšen','kakšna','katere','danes','ni','brez'}
+FACETS={'synonyms':r'sopomen|sinonim','morphology':r'sklanj|pregib|rodilnik|imenovalnik|dvojin|množin|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
+SCAFFOLD={'kaj','kako','kateri','katera','katere','katero','katerih','kdo','ali','je','so','sta','se','v','za','beseda','besede','besedo','besedi','prav','pravilno','prosim','katerega','pomeni','pomen','oblika','oblike','obliko','primer','napiše','reče','naj','mi','razloži','kakšen','kakšna','katere','danes','ni','brez','rečem','rečemo','rekel','iščem','stavek','stavka','kater','pravilen','poišči','navedi','pokaži','uporabi','preveri','to','ta','tisto','tem','tega','tale','več','povej','poveš','lahko','bolje','uporabiti','uporabljati'}
 def lexical_word(text):
  t=text.strip().strip('"«»“”‘’?!.,;:');return bool(WORD.fullmatch(t))and not any(c.isdigit()for c in t)
 
@@ -13,7 +14,7 @@ _TRANSLATION_FRAMES=(
  # The object's original span precedes or follows the translation action.
  rf'\s*(?:prosim[, ]+)?(?:kako\s+)?(?:se\s+)?(?:{_TRANSLATION_LANGUAGE}\s+)?{_TRANSLATION_ACTION}\s+(?P<target>.+?)\s*[.?!]*\s*',
  rf'\s*kako\s+(?:se\s+)?(?P<target>.+?)\s+{_TRANSLATION_ACTION}\s+{_TRANSLATION_LANGUAGE}\s*[.?!]*\s*',
- r'\s*(?:kakšen\s+je\s+)?prevod\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:(?:kakšen|kateri|kater)\s+je\s+(?:pravilen\s+)?)?prevod\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:kaj\s+je\s+)?(?:slovenska|italijanska)\s+ustreznica\s+za\s+(?P<target>.+?)\s*[.?!]*\s*',
  rf'\s*(?:come\s+si\s+)?(?:traduce|tradurre|traduci)\s+(?:{_TRANSLATION_LANGUAGE}\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r"\s*(?:qual\s+[èe]\s+la\s+)?traduzione\s+di\s+(?P<target>.+?)\s*[.?!]*\s*",
@@ -35,10 +36,68 @@ def translation_object_span(text):
   if label:start+=label.end()
   language=re.search(rf'\s+{_TRANSLATION_LANGUAGE}\s*$',text[start:end],re.I)
   if language:end=start+language.start()
+  domain=re.search(r'\s+v\s+[^,?;.]{1,50}\s+kontekstu\s*$',text[start:end],re.I)
+  if domain:end=start+domain.start()
   candidate=text[start:end].strip()
   if candidate and len(candidate)<=240 and len(list(WORD.finditer(candidate)))<=16 and not re.search(r'[?;\n]',candidate):
    return start,end
  return None
+
+_LEXICAL_FRAMES=(
+ r'\s*(?:kaj\s+(?:je(?!\s+(?:prav|pravil\w*|ustrez\w*)\b)|pomeni)|pomen\s+besede)\s+(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:(?:poišči|iščem|prosim|navedi|katere\s+so)\s+)?(?:sopomenk\w*|sinonim\w*)\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:v\s+katerem\s+sklonu\s+je|kateri\s+sklon\s+je)\s+(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:rodilnik|dajalnik|tožilnik|orodnik|mestnik)\s+(?:ednine|dvojine|množine)\s+(?:besede\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+)
+
+def lexical_object_span(text):
+ """Bounded natural wrappers keep the entire expression, including function words."""
+ for pattern in _LEXICAL_FRAMES:
+  match=re.fullmatch(pattern,text,re.I)
+  if not match:continue
+  start,end=match.span('target')
+  label=re.match(r'(?:besed[aeoiu]|izraz(?:a|u)?|termin(?:a)?|zveza|zvezo)\s+',text[start:end],re.I)
+  if label:start+=label.end()
+  domain=re.search(r'\s+v\s+[^,?;.]{1,50}\s+kontekstu\s*$',text[start:end],re.I)
+  if domain:end=start+domain.start()
+  if start<end and len(list(WORD.finditer(text[start:end])))<=16:return start,end
+ return None
+
+def is_referential_request(text):
+ """Only an explicit demonstrative task can bind its supplied context."""
+ return bool(re.fullmatch(r'\s*(?:(?:a|ali)\s+)?(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:tudi\s+)?(?:v\s+\w+\s+)?(?:uporablja|rabi|velja)(?:\s+.+)?[?.!]?\s*',text,re.I)
+  or re.fullmatch(r'\s*(?:kako|kaj)\s+(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:pomeni|reče|prevede|sklanja|napiše|zapiše)(?:\s+[^?!.]+)?[?.!]?\s*',text,re.I))
+
+def bound_context_target(text,context,language='und'):
+ """Resolve one explicitly supplied expression/question; never search user history."""
+ if not context.strip() or not is_referential_request(text):return None
+ interpretation=plan(context,'',language,{'raw_engines':{}})
+ targets=interpretation['targets']
+ allowed={'single lexical surface','bounded whole phrase before component lookup','quoted original span',
+  'natural lexical object; whole original span','unquoted translation object; whole original span','requested lexical object'}
+ if len(targets)!=1 or targets[0]['basis']not in allowed:return None
+ target=copy.deepcopy(targets[0]);offset=len(text)+1
+ target.update(start=target['start']+offset,end=target['end']+offset,span_scope='context',
+  context_target_basis=target['basis'],basis='explicit_context_target')
+ return target
+
+def portable_request_plan(interpretation,language='und'):
+ """Portable request data: no ontology assignment or guessed spelling correction."""
+ text=interpretation['original'];context=interpretation.get('context','');combined=text+'\n'+context
+ destination=[code for code,pattern in [('sl',r'v\s+slovenščin[io]|po\s+slovensko|slovenska\s+ustreznica|in\s+sloveno'),('it',r'v\s+italijanščin[io]|po\s+italijansko|italijanska\s+ustreznica|in\s+italiano')]if re.search(pattern,combined,re.I)]
+ facets=interpretation['requested_facets'];operation=('translation_help'if'translation'in facets else'explanation'if'meaning'in facets else'rule_lookup'if any(x in facets for x in ('morphology','orthography'))else None)
+ domain=re.search(r'\bv\s+([^,?;.]{1,50})\s+kontekstu\b',combined,re.I)
+ proposal=bool(re.search(r'predlog\w*\s+pravil|pravopis\s*8|predlagan\w*\s+pravopis',combined,re.I))
+ geography=[{'raw':m.group(),'start':m.start(),'end':m.end(),'basis':'explicit_location_wording'}for m in re.finditer(r'\b(?:v|po)\s+(?:Italij[ai]|Slovenij[ai]|Trstu|Goric[ai])\b',combined,re.I)]
+ targets=[{key:copy.deepcopy(target[key])for key in ('text','start','end','basis','context_span','span_scope','context_target_basis')if key in target}for target in interpretation['targets']]
+ return {'version':REQUEST_VERSION,'original':text,'context':context,'target_spans':targets,
+  'candidate_lemmas':[{'target':t['text'],'candidates':list(t.get('lemma_candidates',[])),'basis':'analyzer_nomination_requires_resource_match'}for t in interpretation['targets'] if t.get('lemma_candidates')],
+  'operation':operation,'source_language':language if language in {'sl','it'}else None,
+  'translation_language':destination[0]if len(destination)==1 else None,'response_language':None,
+  'requested_facets':list(dict.fromkeys([*facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen')]if re.search(pattern,combined,re.I)]])),'domain':domain.group(1)if domain else None,'geography':geography,'jurisdiction':None,
+  'requested_source':'pravopis8'if proposal else None,'requested_edition':'proposal'if proposal else None,
+  'ambiguities':(['translation_direction_unspecified']if operation=='translation_help'and len(destination)!=1 else[])+(['unresolved_reference']if not targets and is_referential_request(text)else[]),
+  'confidence':'bounded_surface'if targets else'broad_routes'}
 
 _COMPARISON_CONTEXT={'brez','ni','ne','je','so','sta','smo','ste','sem','si','se','v','za','na','pri','od','do','z','s','iz','ob','po','k','h'}
 
@@ -82,7 +141,7 @@ def negated_existence_frame(text,spans):
  stripped=re.sub(r'^\s*(?:je\s+prav\s+|ali\s+|danes\s+)', '',text,flags=re.I)
  return bare(stripped)
 
-def plan(text,context,language,analysis):
+def plan(text,context,language,analysis,request_plan=None):
  words=list(WORD.finditer(text));requested=[k for k,p in FACETS.items()if re.search(p,text,re.I)]
  hints=[w for r in analysis.get('raw_engines',{}).values()for w in r.get('analysis',{}).get('words',[])];spans=[];kind='question';basis=[]
  def add(a,b,why):
@@ -90,9 +149,22 @@ def plan(text,context,language,analysis):
   while a<b and text[a].isspace():a+=1
   while b>a and text[b-1]in' \n\t?.!,;:':b-=1
   if a<b and not any(s['start']==a and s['end']==b for s in spans):spans.append({'start':a,'end':b,'text':text[a:b],'basis':why})
- if lexical_word(text):
+ if request_plan is not None:
+  if request_plan.get('version')!=REQUEST_VERSION or request_plan.get('original')!=text or request_plan.get('context','')!=context:raise ValueError('Request plan input differs')
+  for target in request_plan.get('target_spans',[]):
+   a,b=target.get('start'),target.get('end')
+   source=text+'\n'+context if target.get('span_scope')=='context'else text
+   if type(a)is not int or type(b)is not int or not 0<=a<b<=len(source) or source[a:b]!=target.get('text') or (target.get('span_scope')=='context'and a<=len(text)):raise ValueError('Request target span differs')
+   spans.append(copy.deepcopy(target))
+ elif is_referential_request(text):
+  target=bound_context_target(text,context,language)
+  if target:spans.append(target)
+ if spans:
+  kind='comparison'if len(spans)>1 else'word'if lexical_word(text)else'phrase'if len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
+ elif is_referential_request(text):pass
+ elif lexical_word(text):
   m=WORD.search(text);add(m.start(),m.end(),'single lexical surface');kind='word'
- elif len(words)<=8 and not requested and words and words[0].group().casefold()not in SCAFFOLD and '?'not in text:
+ elif len(words)<=8 and not requested and words and (words[0].group().casefold()not in SCAFFOLD or words[0].group().casefold()in {'v','na','pri','ob','po','k','h','z','s','od','do','iz'}) and '?'not in text and not re.search(r'[«»“”"]|\bali\b',text,re.I):
   add(0,len(text),'bounded whole phrase before component lookup');kind='phrase'
  else:
   for m in re.finditer(r'«([^»]+)»|»([^«]+)«|“([^”]+)”|"([^"]+)"',text):
@@ -103,6 +175,9 @@ def plan(text,context,language,analysis):
   if not spans and 'translation'in requested:
    span=translation_object_span(text)
    if span:add(*span,'unquoted translation object; whole original span')
+  if not spans:
+   span=lexical_object_span(text)
+   if span:add(*span,'natural lexical object; whole original span')
   # Comparative alternatives stay separate and retain spelling, casing and case context.
   if not spans and re.search(r'\bali\b',text,re.I):
    pieces=[];begin=0
@@ -125,6 +200,7 @@ def plan(text,context,language,analysis):
    for w in words:
     if w.group().casefold()not in SCAFFOLD and not any(re.search(p,w.group(),re.I)for p in FACETS.values()):add(w.start(),w.end(),'degraded lexical candidate; source match required')
  if len(spans)>1 and len({s['text'].casefold()for s in spans})==1 and len({s['text']for s in spans})>1 and 'orthography'not in requested:requested.append('orthography')
+ if kind=='question'and len(spans)==1 and len(list(WORD.finditer(spans[0]['text'])))>1:kind='phrase'
  langs=[language]if language in {'sl','it'}else ['sl','it']
  # Direction cues describe target policy, not certain input-language detection.
  if language=='und'and re.search(r'\b(?:besed|sopomen|sklanj|rodilnik|kako|kaj|kdo|kateri|ali|brez|danes ni)',text,re.I):langs=['sl']
@@ -133,4 +209,7 @@ def plan(text,context,language,analysis):
   s['lemma_sequences']=list(dict.fromkeys(' '.join(w['lemma']for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end'])for r in analysis.get('raw_engines',{}).values()))
   s['context_features']=[{'engine':name,'feats':w['feats'],'upos':w['upos']}for name,r in analysis.get('raw_engines',{}).items()for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end']]
  case='genitive'if re.search(r'\b(?:brez|rodilnik\w*)\b',text,re.I)or negated_existence_frame(text,spans)else'nominative'if re.search(r'\b(?:imenovalnik\w*|kdo je)\b',text,re.I)else None
- return {'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':'singular'if case and not re.search(r'dvojin|množin',text,re.I)else None,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
+ result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':'singular'if case and not re.search(r'dvojin|množin',text,re.I)else None,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
+
+ result['request_plan']=portable_request_plan(result,language)
+ return result

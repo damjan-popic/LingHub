@@ -39,7 +39,7 @@ def test_phrase_groups_equivalent_observation_without_summing_or_deleting():
     chosen=[u for u in q['evidence']if u['kind']=='collocations'and u['selection']['state']=='primary']
     assert len(chosen)==1 and len(chosen[0]['source_memberships'])==2
     assert len(p['evidence'])==len(q['evidence'])
-    assert not any(s['title']=='Sopomenke po pomenih'for s in v['sections'])
+    assert not any(s['title']=='Pomenske povezave'for s in v['sections'])
     # A conflicting measurement is a second observation, not a summed count.
     candidates=[u for u in p['evidence']if u['kind']=='collocations'and u['match_relation']=='inflected_equivalent']
     candidates[-1]['fields']['frequency']+=1
@@ -71,7 +71,7 @@ def checked_profile(case):
     if not root:pytest.skip('Fresh read-only profile fixtures required')
     return json.loads((Path(root)/(case+'.profile.private.json')).read_text())
 
-@pytest.mark.parametrize('case,title',[('acronym','Terminologija'),('letter','Oblike in pregibanje'),('port','Sopomenke po pomenih'),('parallel','Oblike in pregibanje')])
+@pytest.mark.parametrize('case,title',[('acronym','Terminologija'),('letter','Oblike in pregibanje'),('port','Pomenske povezave'),('parallel','Oblike in pregibanje')])
 def test_explicit_counterexamples_remain_available(case,title):
     p=checked_profile(case);v=view(p)
     assert any(s['title']==title and s['items']for s in v['sections'])
@@ -86,6 +86,6 @@ def test_actual_phrase_analyses_and_source_slots_remain_distinct():
     assert 'spaCy'in raw or 'spacy'in raw
     assert 'locative'in raw and 'dative'in raw and 'source_slots'in raw
     v=view(p)
-    assert any(s['title']=='Analiza vnesene oblike'for s in v['sections'])
+    assert any(s['title']=='Zapisane slovnične možnosti'for s in v['sections'])
     grouped=next(u for u in p['evidence']if u['kind']=='collocations'and u['selection']['state']=='primary')
     assert all(any(m['record_id']==x['captured_unit_id']for x in p['evidence'])for m in grouped['source_memberships'])

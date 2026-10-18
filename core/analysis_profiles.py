@@ -7,6 +7,9 @@ import httpx
 from fastapi import HTTPException
 PROFILES={'compare','klikai_experimental_v1','linghub_lexical_stable_v1'}
 REVISION='classla-primary-spacy-independent-spans-v1'
+PRIMARY_PROFILE='klikai_classla_primary_v1'
+PRIMARY_REVISION='classla-once-canonical-loris-v1'
+PROFILES.add(PRIMARY_PROFILE)
 SHORT_CHARS=512
 
 def align(raw,text):
@@ -48,8 +51,8 @@ async def _analyze(request,req):
    ws=[a['words'][i]for i in t['word_ids']]
    tokens.append({'text':t['text'],'start':t['start'],'end':t['end'],'lemma':' '.join(w['lemma']for w in ws),'pos':ws[0]['upos']})
   return {'analysis':a,'tokens':tokens,'engine_used':'classla','text':req.text,'lang':req.lang,'issues':[],'spans':[]}
- engines=['spacy']if req.lang=='it'or req.engine=='spacy'else['classla']if req.engine=='classla'or len(req.text)>SHORT_CHARS else['classla','spacy']
- # The declared long-input policy is one contextual primary, never hidden sampling.
+ engines=['spacy']if req.lang=='it'or req.engine=='spacy'else['classla']if req.engine in {'classla',PRIMARY_PROFILE}or len(req.text)>SHORT_CHARS and req.engine!='compare' else['classla','spacy']
+ # Explicit comparison always compares; old opt-in profiles retain their long-input policy.
  results=await asyncio.gather(*(spacy()if x=='spacy'else classla()for x in engines),return_exceptions=True)
  for name,result in zip(engines,results):
   if isinstance(result,BaseException):failures[name]={'status':'unavailable','error_type':type(result).__name__}
@@ -66,6 +69,18 @@ async def _analyze(request,req):
  # Curated rules execute only through their established full-context matcher.
  # Alternative statistical lemmas do not independently activate a LORIS rule.
  loris=raw.get('spacy',{});provenance=loris.get('provenance',{})
+ if req.engine==PRIMARY_PROFILE and req.lang=='sl' and req.include_loris:
+  try:
+   loris=await analyzer_request(request,'/v1/loris/from-analysis',{'lang':'sl','text':req.text,'profile':PRIMARY_PROFILE,'analysis':chosen['analysis']},timeout=7)
+   if loris.get('text')!=req.text or loris.get('lang')!='sl' or loris.get('provenance',{}).get('rules_sha256')!='0dee12b10298bb381f09f1b3c454a477df09f04eaafa6364a174f5b537511d1c':raise ValueError('LORIS identity mismatch')
+   for issue in loris.get('issues',[])+loris.get('spans',[]):
+    a,b=issue.get('start'),issue.get('end')
+    if type(a)is not int or type(b)is not int or not 0<=a<b<=len(req.text):raise ValueError('LORIS offsets invalid')
+   provenance=loris.get('provenance',{})
+  except (AnalyzerFailure,ValueError,KeyError,TypeError)as error:
+   failures['loris']={'status':'unavailable','error_type':type(error).__name__};loris={}
+ if req.engine==PRIMARY_PROFILE:
+  return {'status':'partial'if failures else'ok','lang':req.lang,'text':req.text,'offset_convention':'unicode_codepoint_half_open','engine_requested':req.engine,'engine_used':primary,'engines_used':list(raw),'analysis':chosen['analysis'],'tokens':chosen['tokens'],'loris_status':'not_attempted'if not req.include_loris else'unavailable'if 'loris'in failures else'checked','issues':loris.get('issues',[]),'spans':loris.get('spans',[]),'raw_engines':raw,'alignment':aligned,'disagreements':[g for g in aligned if g['disagreement']],'failures':failures,'degraded':bool(failures),'selected_analysis_basis':{'policy_revision':PRIMARY_REVISION,'primary':'CLASSLA once for Slovene; existing spaCy pipeline for Italian','uncertainty':'raw predictions retained independently of supported grammatical applications','loris_basis':'canonical matcher reuses this contextual analysis and exact original-surface aliases; no second trained model'},'provenance':{**provenance,'analysis_profile':req.engine,'analysis_profile_revision':PRIMARY_REVISION,'models':{k:v['analysis']['model']for k,v in raw.items()}},'operations':{'classla_calls':int('classla'in engines),'trained_spacy_calls':int('spacy'in engines),'loris_reused_analysis_calls':int(req.lang=='sl'and req.include_loris)},'timings':{'analysis_ms':round((time.monotonic()-start)*1000,3)}}
  return {'status':'partial'if failures else'ok','lang':req.lang,'text':req.text,'offset_convention':'unicode_codepoint_half_open','engine_requested':req.engine,'engine_used':primary,'engines_used':list(raw),'analysis':chosen['analysis'],'tokens':chosen['tokens'],'loris_status':'checked'if'spacy'in raw else'not_attempted','issues':loris.get('issues',[]),'spans':loris.get('spans',[]),'raw_engines':raw,'alignment':aligned,'disagreements':[g for g in aligned if g['disagreement']],'failures':failures,'degraded':bool(failures),'selected_analysis_basis':{'policy_revision':REVISION,'primary':'CLASSLA contextual prediction; spaCy independent lookup candidates','uncertainty':'agreement is not linguistic verification; lexical alternatives remain separate','long_input_policy':'CLASSLA primary above 512 characters; Italian spaCy only','loris_basis':'established spaCy/context matcher and exact surface aliases; not arbitrary alternate-lemma activation'},'provenance':{**provenance,'analysis_profile':req.engine,'analysis_profile_revision':REVISION,'models':{k:v['analysis']['model']for k,v in raw.items()}},'timings':{'analysis_ms':round((time.monotonic()-start)*1000,3)}}
 
 
@@ -76,7 +91,9 @@ async def analyze(request,req):
  key=hashlib.sha256(json.dumps([scope,REVISION,req.model_dump()],sort_keys=True).encode()).hexdigest()
  now=time.monotonic()
  if scope and key in _CACHE and now-_CACHE[key][0]<60:
-  result=copy.deepcopy(_CACHE[key][1]);result['cache']={'status':'hit','scope':'client','ttl_seconds':60};return result
+  result=copy.deepcopy(_CACHE[key][1]);result['cache']={'status':'hit','scope':'client','ttl_seconds':60}
+  if 'operations'in result:result['operations']={name:0 for name in result['operations']}
+  return result
  result=await _analyze(request,req)
  if scope and not result['degraded']:
   _CACHE[key]=(now,copy.deepcopy(result));_CACHE.move_to_end(key)

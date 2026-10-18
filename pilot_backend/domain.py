@@ -3,7 +3,7 @@ from __future__ import annotations
 import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
-from . import collation, editorial, unified
+from . import collation, editorial, unified, request_tasks
 from .classification import method
 from . import human_feedback
 from .adoption import historical_record
@@ -36,7 +36,7 @@ class Domain:
         if self.generation_admission:self.generation_admission(models)
     def answer_actions(self,run):
         value=json.loads(run['result'])if run and run['result']else {}
-        return method(value)not in {'clarification_required','capability_unavailable','failed'}
+        return value.get('answer_kind')!='deterministic_guidance' and method(value)not in {'clarification_required','capability_unavailable','failed'}
     def owned(self,db,table,identifier,owner):
         if table not in {'families','jobs','assignments','feedback'}:raise ValueError('Invalid owned table')
         row=db.execute(f'SELECT * FROM {table} WHERE id=? AND owner=?',(identifier,owner)).fetchone()
@@ -62,8 +62,10 @@ class Domain:
         if historical_record(db,family,owner=owner)is not None:raise Failure('historical_generation_unavailable',409)
         rid,jid=uid(),uid();now=stamp()
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
-        task=db.execute('SELECT task FROM families WHERE id=?',(family,)).fetchone()[0]
-        job_model='cpu'if task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
+        stored=db.execute('SELECT task,question,context,locale FROM families WHERE id=?',(family,)).fetchone()
+        task=stored['task']
+        guidance=self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
+        job_model='cpu'if guidance or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         human_feedback.accepted(db,rid,owner,automated=automated,release=self.release)
         return {'run_id':rid,'job_id':jid}
@@ -98,12 +100,18 @@ class Domain:
         with self.store.tx()as db:
             def action():
                 if task=='reference'and not self.unified_answers:self.require_generation([model])
+                parent=payload.get('parent_run_id');effective_context=context
+                if parent:
+                    prior=self.run(db,parent,owner)
+                    # Only an explicitly supplied, owned run can bind a referent.
+                    # Shared account chronology is never consulted.
+                    if not context.strip() and request_tasks.unresolved_reference(q):
+                        previous=self.owned(db,'families',prior['family_id'],owner)['question']
+                        if len(previous)<=3000:effective_context=previous
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
-                db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,context,task,locale,interface,input_language,model,policy,None,None,stamp()))
+                db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
-                parent=payload.get('parent_run_id')
-                if parent:self.run(db,parent,owner) # Same-owner retry link only.
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test');return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
@@ -145,8 +153,8 @@ class Domain:
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             bundle=json.loads(f['bundle'])if f['bundle']else{}
-            out['matches_available']=bundle.get('contract')==unified.CONTRACT
-            if out['matches_available']:
+            out['matches_available']=bundle.get('contract')==unified.CONTRACT or (bundle.get('contract')==request_tasks.CONTRACT and bool(bundle['decision']['resources']))
+            if bundle.get('contract')==unified.CONTRACT:
                 from .lexical import reader
                 lexical=reader(bundle)
                 if lexical:out['lexical_profile']=lexical
@@ -164,6 +172,7 @@ class Domain:
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
+            if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.matches(bundle,offset,limit,source,summary)
             if bundle.get('contract')!=unified.CONTRACT:raise Failure('not_found',404)
             latest={}
             for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):
@@ -224,6 +233,7 @@ class Domain:
         with self.store.tx()as db:
             f=self.owned(db,'families',fid,owner)
             if f['task']!='reference':raise Failure('comparison_unavailable')
+            if self.unified_answers and request_tasks.interpret(f['question'],f['context'],f['locale']) is not None:raise Failure('comparison_unavailable',409)
             def action():
                 parent=db.execute("SELECT *FROM runs WHERE family_id=?AND tier='short'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
                 if parent and parent['state']=='complete'and not self.answer_actions(parent):raise Failure('comparison_unavailable',409)

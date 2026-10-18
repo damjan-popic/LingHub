@@ -14,8 +14,9 @@ class ProfileRequest(BaseModel):
  text:str=Field(min_length=1,max_length=3000)
  context:str=Field(default='',max_length=3000)
  lang:Literal['sl','it','und']='und'
- profile:Literal['klikai_experimental_v1','linghub_lexical_stable_v1','compare','spacy','classla']='klikai_experimental_v1'
+ profile:Literal['klikai_classla_primary_v1','klikai_experimental_v1','linghub_lexical_stable_v1','compare','spacy','classla']='klikai_experimental_v1'
  limit:int=Field(default=4,ge=1,le=8)
+ request_plan:dict|None=None
 class LexicalProfile(BaseModel):
  request_schema_version:str
  request_id:str
@@ -57,7 +58,7 @@ async def make_profile(req,request):
   analysis_text=req.text+('\n'+req.context if req.context else'')
   analysis=await profile_analysis(request,AnalyzeRequest(text=analysis_text,lang='it'if req.lang=='it'else'sl',engine=req.profile,include_loris=True))
  except AnalyzerFailure as error:analysis={'status':'unavailable','raw_engines':{},'engines_used':[],'degraded':True,'reason':error.reason}
- interpretation=plan(req.text,req.context,req.lang,analysis);targets=interpretation['targets'];records=[];facets={};coverage={}
+ interpretation=plan(req.text,req.context,req.lang,analysis,request_plan=req.request_plan);targets=interpretation['targets'];records=[];facets={};coverage={}
  # Exact surfaces lead; analyzer nominations remain visibly secondary candidates.
  async def morphology_lookup(target):
   surface=target['text'];reader=getattr(state,'sloleks_profiles',None)
@@ -151,9 +152,9 @@ async def make_profile(req,request):
   if identity in seen or type(a)is not int or type(b)is not int:continue
   seen.add(identity);matching=[t for t in targets if t['start']<=a<b<=t['end']]
   if not matching:continue
-  t=matching[0];relation='whole_expression'if a==t['start']and b==t['end']else'component_only';rec={**issue,'matched_text':req.text[a:b],'match_relation':relation,'analysis_basis':'established contextual LORIS matcher; original-surface aliases preserved'};loris.append(rec)
+  t=matching[0];relation='whole_expression'if a==t['start']and b==t['end']else'component_only';rec={**issue,'matched_text':analysis_text[a:b],'match_relation':relation,'analysis_basis':'established contextual LORIS matcher; original-surface aliases preserved'};loris.append(rec)
   records.append(source_record('loris',issue['rule_id'],rec,{'resource_id':'loris',**analysis.get('provenance',{})},t['text'],relation))
- facets['loris']=facet('matched'if loris else'unavailable'if analysis['status']=='unavailable'else'not_attempted'if analysis.get('loris_status')=='not_attempted'else'no_match',loris)
+ facets['loris']=facet('matched'if loris else'unavailable'if analysis['status']=='unavailable'or analysis.get('loris_status')=='unavailable'else'not_attempted'if analysis.get('loris_status')=='not_attempted'else'no_match',loris)
  # The same existing local KLIKai record service, not a parallel import stack.
  term=[];documentary=[];base=getattr(state,'lexical_klikai_url',None)
  if base:
@@ -181,7 +182,7 @@ async def make_profile(req,request):
  # Phrase morphology is a separate, explicitly predictive layer. It must not
  # borrow grammatical authority from a collocation's citation-form tags.
  phrase_analysis=[]
- if interpretation['query_kind']=='phrase'and 'translation'not in interpretation['requested_facets']:
+ if 'translation'not in interpretation['requested_facets'] and any(not lexical_word(t['text'])for t in targets):
   for target in targets:
    engines={};forms={}
    for engine,raw in analysis.get('raw_engines',{}).items():
@@ -195,14 +196,16 @@ async def make_profile(req,request):
        for matched in le['submitted_analyses']:
         if not any(s['source_entry_id']==le['source_entry_id']and s['slot']['slot_locator']==matched['slot_locator']for s in source_slots):
          source_slots.append({'source_entry_id':le['source_entry_id'],'lemma':le['lemma'],'source_status':le['source_status'],'provenance':le['evidence'],'slot':copy.deepcopy(le['slots'][matched['slot_locator']])})
-        readings.append({'lemma':le['lemma'],'source_entry_id':le['source_entry_id'],'source_status':le['source_status'],
+        readings.append({'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'source_entry_id':le['source_entry_id'],'source_status':le['source_status'],
             'selection':'primary'if le['lemma']==w['lemma']else'alternative',
-            'features':matched['features'],'original_msd':matched['original_msd'],'source_locator':matched['variant_locator']})
-      forms[w['text']]={'status':part['status'],'recorded_readings':readings,'source_slots':source_slots}
+            'features':matched['features'],'original_msd':matched['original_msd'],'source_locator':matched['variant_locator'],'slot_locator':matched['slot_locator'],'exact_surface':matched['exact_surface']})
+      forms[w['text']]={'status':part['status'],'recorded_readings':readings,'source_slots':source_slots,'candidate_inventory_truncated':bool((part.get('data')or{}).get('truncated'))}
     engines[engine]={'model':raw.get('analysis',{}).get('model'), 'tokens':tokens}
    body={'submitted_expression':target['text'],'start':target['start'],'end':target['end'],
          'engines':engines,'recorded_forms':forms,'authority':'contextual predictions and recorded candidates; not a normative rule',
          'uncertainty':'Keep engine disagreements and all recorded case candidates; phrase without context may be ambiguous'}
+   from .phrase_interpretation import interpret_phrase
+   body.update(interpret_phrase(body,analysis_text))
    phrase_analysis.append(body)
    if any(e['tokens']for e in engines.values()):records.append(source_record('analysis','tokens:'+str(target['start'])+':'+str(target['end']),body,{'resource_id':'linguistic-analysis','version':'analysis-layer-v1'},target['text']))
  facets['phrase_analysis']=facet('matched'if phrase_analysis else'not_applicable',phrase_analysis)

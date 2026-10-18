@@ -133,3 +133,40 @@ def test_same_login_independent_sessions_and_retry_link(testing):
         assert first['family']['short']['run_id']!=second['family']['short']['run_id']
         assert case(app,second['family']['short']['run_id'])['summary']['parent_run_id']==first['family']['short']['run_id']
         with pytest.raises(Failure):submit(app,ids['slori'],parent_run_id=first['family']['short']['run_id'])
+
+
+def test_derived_stages_preserve_returned_refusal_and_historical_labels():
+    import copy
+    from pilot_backend.human_feedback import derived_attempt_analysis
+    observed={'stages':{'generation':{'writer':{'status':'failed','raw_final_content':json.dumps({
+        'claims':[{'text':'Priloženi viri ne vsebujejo podatkov.'}],'no_sufficient_evidence':True})},
+        'result_checks':{'validation':{'status':'invalid_composition_envelope','reason':'abstention_contradicts_claims'}}}}}
+    old=copy.deepcopy(observed)
+    result=derived_attempt_analysis(observed,{'status':'failed'})
+    assert observed==old
+    assert result['writer_execution']=='returned_completion'
+    assert result['content_kind']=='abstention'
+    assert result['validation_stage']=='invalid_composition'
+    assert result['delivery_stage']=='not_observed'
+
+
+def test_derived_stages_separate_no_writer_all_withheld_partial_and_delivery():
+    from pilot_backend.human_feedback import derived_attempt_analysis
+    assert derived_attempt_analysis({'stages':{'generation':{'writer':{'status':'not_invoked'}}}}, {})['validation_stage']=='no_writer_invoked'
+    observed={'stages':{'generation':{'writer':{'status':'returned','raw_final_content':'{"claims":[{"text":"Some candidate"}]}'},
+        'result_checks':{'validation':{'status':'all_claims_withheld'}}}}}
+    assert derived_attempt_analysis(observed, {})['validation_stage']=='all_claims_withheld'
+    observed['stages']['generation']['result_checks']={'omitted_claims':[{'claim_id':'C2'}]}
+    result=derived_attempt_analysis(observed,{'claims':[{'claim_id':'C1'}]},delivered=0)
+    assert result['validation_stage']=='partial_supported_output' and result['delivery_stage']=='delivered'
+
+
+def test_inconsistent_abstention_flag_does_not_relabel_substantive_content():
+    from pilot_backend.human_feedback import derived_attempt_analysis
+    observed={'stages':{'generation':{'writer':{'status':'returned','raw_final_content':json.dumps({
+        'claims':[{'text':'Izraz A je samostalnik.'}],'no_sufficient_evidence':True})},
+        'result_checks':{'validation':{'status':'invalid_composition_envelope','reason':'abstention_contradicts_claims'}}}}}
+    result=derived_attempt_analysis(observed,{})
+    assert result['writer_execution']=='returned_completion'
+    assert result['content_kind']=='substantive_candidate'
+    assert result['validation_stage']=='invalid_composition'

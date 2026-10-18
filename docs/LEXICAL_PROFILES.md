@@ -8,13 +8,28 @@ it only when `LINGHUB_SLOLEKS_PROFILE_RELEASE` is explicitly configured.
 
 ## Profiles and isolation
 
+`klikai_classla_primary_v1` is the ordinary KLIKai opt-in profile added on
+2026-10-18. It runs the configured local CLASSLA worker once for the effective
+question/context, and sends that same native annotation to
+`POST /v1/loris/from-analysis` on the existing lemmatizer. This bounded endpoint
+validates the complete original-text mapping and runs the existing LORIS matcher,
+including exact aliases, without invoking a trained model. A matcher failure is
+reported separately; it never triggers a spaCy fallback. Indexed synonym and
+collocation lookups use string normalization only. Italian continues to use spaCy.
+`compare` explicitly runs both Slovene engines, including for longer input.
+
+The existing external profiles and `/v1/analyze` default remain unchanged. The
+new response records operation counts and the effective policy revision; a scoped
+cache hit reports zero new operations. Activation requires the updated CPU
+lemmatizer endpoint and the updated lexical service, with no model or worker change.
+
 `klikai_experimental_v1` and `linghub_lexical_stable_v1` initially resolve the same
 2026-10-17 implementation. Every response identifies the actual immutable code
 release, resource checksums and analysis policy revision. The stable external URL
 is separately configurable as `linghub_stable_url`; future experimental releases
 must change only `linghub_url` until a stable promotion is authorized.
 
-Short Slovene inputs use CLASSLA 2.2.3 / standard Slovene 2.0 as contextual primary,
+For those legacy profiles, short Slovene inputs use CLASSLA 2.2.3 / standard Slovene 2.0 as contextual primary,
 and spaCy 3.8.16 / sl_core_news_lg 3.8.0 independently. Both raw analyses and
 character-span disagreement are retained. Agreement is not linguistic proof.
 Above 512 characters, the declared policy uses CLASSLA alone; Italian uses spaCy.
@@ -46,6 +61,17 @@ alternative homographs. Normative claims still require appropriate source suppor
 A rich overview uses the bounded `lexical_overview` writer profile; simple
 translations retain the short profile. All admitted evidence is fitted with native
 tokenizers and the actual model context/output limits.
+
+`phrase_interpretation.py` adds typed supported applications alongside unchanged
+raw predictions. The bounded ordinary adjective–noun construction intersects
+exact Sloleks slots for case, number and gender, with source-entry and slot locators.
+Its agreement basis is [Slo na dlani, Pridevniška beseda in pridevnik](https://www.slo-na-dlani.si/znanje/147).
+This is an application within the existing morphology/syntax ontology areas,
+not a new ontology code or dictionary quotation. Homographs, raw model conflicts
+and isolated-form alternatives stay in the capture. An unestablished relationship,
+missing slots or truncated incompatible candidates remain unresolved; adjacent
+words alone are insufficient. An incompatible recorded pair is conditional on the
+ordinary attributive construction, never a universal incorrectness verdict.
 
 ## Authenticated API
 

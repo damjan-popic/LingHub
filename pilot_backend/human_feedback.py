@@ -17,7 +17,7 @@ PROVIDER_FAILURE_CODES={'ambiguous_remote_generation','shared_response_identity_
 PROVIDER_FAILURE_STAGES={'writer_request','generation','post_identity','response_shape','hidden_reasoning','completion_stop','response_json','correction','usage','token_budget','source_verification'}
 PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','response_model_identity_mismatch','post_generation_identity_unavailable','post_generation_identity_mismatch','cpu_execution_identity_mismatch','cpu_execution_allowance_mismatch','invalid_response_shape','invalid_response_json','invalid_execution_shape','invalid_content_type','unexpected_hidden_reasoning','completion_not_stopped','invalid_final_json','correction_without_parent','parent_consistency_failed','invalid_usage_shape','invalid_reasoning_token_accounting','final_token_accounting_unavailable','total_output_budget_exceeded','final_output_budget_exceeded','reasoning_token_budget_exceeded','frozen_source_verification_failed'}
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
-VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed'}
+VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed','consistent_abstention'}
 VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','paragraph_id','depends_on','limitations',
     'code','scope','claim_ids','no_sufficient_evidence','correction_required'}
 VALIDATION_ERROR_TYPES={'model_type','missing','extra_forbidden','string_type','string_too_short','string_too_long',
@@ -39,9 +39,12 @@ VALIDATION_REASONS={
     'comparative_polarity_changed','frequency_domain_not_preserved','frequency_predicate_negation_changed',
     'measurement_date_not_established','historical_current_norm_not_attributed','source_uncertainty_not_preserved',
     'qualified_domain_not_preserved','attached_exception_lost','literal_sense_transferred_to_term',
-    'pattern_normality_not_established','frequency_scope_not_established','frequency_numbers_not_in_selected_support'}
+    'pattern_normality_not_established','frequency_scope_not_established','frequency_numbers_not_in_selected_support','scoped_abstention_not_factual_claim',
+    'irrelevant_source_commentary','population_comprehension_requires_attribution','geographical_attestation_is_not_exclusivity',
+    'language_is_not_country','per_form_recommendation_not_preserved','notification_is_not_permit',
+    'claim_case_not_in_supported_agreement','curated_recommendation_direction_reversed'}
 VALIDATION_ACTIONS={'accepted','withhold','omit','source_supported_partial','mixed_generated_and_source_partial',
-    'supported_claim_fragment','deterministic_repair','deterministic_glossary_repair','deterministic_temporal_attribution'}
+    'supported_claim_fragment','deterministic_repair','deterministic_glossary_repair','deterministic_temporal_attribution','normalize_abstention_envelope','deterministic_typed_scope_repair'}
 VALIDATION_LIMITATION_REASONS={'model_found_insufficient_evidence','no_supported_generated_claims',
     'invalid_or_inconsistently_scoped_composition','native_tokenizer_unavailable','empty_indexed_evidence',
     'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested'}
@@ -56,8 +59,8 @@ def generation_validation_diagnostics(result):
     fields={
         'gateway_status':('status',{'validated','partial','failed','no_hit','source_only','rejected','no_answer'}),
         'gateway_answer_kind':('answer_kind',{'generated','mixed','source_only','clarification'}),
-        'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial'}),
-        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial'})}
+        'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial','returned_abstention'}),
+        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial','abstention'})}
     for key,(original,allowed)in fields.items():
         value=raw.get(key if nested else original)
         if isinstance(value,str)and value in allowed:out[key]=value
@@ -327,6 +330,46 @@ def visible_result(run, locale):
     return result
 
 
+def derived_attempt_analysis(observation, result, *, delivered=None):
+    """Additive stage interpretation; never replace any recorded outcome/trace.
+
+    A completion is observed from retained final text, independently of old
+    writer.status or provider-failure labels. Unknown delivery remains unknown.
+    """
+    stages=observation.get('stages',{});generation=stages.get('generation',{})
+    writer=generation.get('writer',{});raw=writer.get('raw_final_content')
+    returned=isinstance(raw,str) and bool(raw.strip())
+    invocation=('returned_completion' if returned else 'not_invoked' if writer.get('status')=='not_invoked'
+        else 'attempted_without_retained_completion' if writer.get('requests') or writer.get('status') in {'attempted','failed'} else 'unknown')
+    checks=generation.get('result_checks') or result.get('generation_validation') or result
+    validation=checks.get('validation',{})
+    content=None
+    if returned:
+        try:content=json.loads(raw)
+        except (ValueError,TypeError):pass
+    claims=content.get('claims',[]) if isinstance(content,dict) else []
+    def refusal(text):
+        return isinstance(text,str) and bool(re.search(r'(?:priložen\w*|predložen\w*|izbran\w*)\s+vir\w*',text,re.I) and
+            re.search(r'ne\s+vsebujejo|ni\s+(?:podatk\w*|naveden\w*|na\s+voljo|dovolj)|ni\s+zajet\w*',text,re.I))
+    refused=(isinstance(content,dict) and (content.get('no_sufficient_evidence') is True and claims==[] or
+        bool(claims) and all(isinstance(c,dict) and refusal(c.get('text')) for c in claims)))
+    reason=validation.get('reason');status=validation.get('status')
+    if status=='invalid_composition_envelope' or reason=='abstention_contradicts_claims':stage='invalid_composition'
+    elif status=='all_claims_withheld':stage='all_claims_withheld'
+    elif status=='consistent_abstention' or refused:stage='returned_abstention'
+    elif result.get('claims') and (checks.get('omitted_claims') or result.get('answer_support')=='partial'):stage='partial_supported_output'
+    elif result.get('claims'):stage='supported_output'
+    elif invocation=='not_invoked':stage='no_writer_invoked'
+    elif not returned and invocation=='attempted_without_retained_completion':stage='writer_unavailable_or_incomplete'
+    else:stage='unknown'
+    delivery=('delivered' if delivered is not None else
+        'delivery_failure' if stages.get('failure',{}).get('stage') in {'delivery','browser_delivery'} else 'not_observed')
+    return {'schema':'attempt-stage-analysis-v1','writer_execution':invocation,
+        'content_kind':'abstention' if refused or status=='consistent_abstention' else 'substantive_candidate' if claims else 'unknown',
+        'validation_stage':stage,'delivery_stage':delivery,'semantic_correctness':'not_established',
+        'historical_labels_preserved':True}
+
+
 def attempt_case(db, run_id):
     """Offline-only joins over original persisted data. Never calls a provider."""
     run=dict(db.execute('SELECT * FROM runs WHERE id=?',(run_id,)).fetchone())
@@ -382,6 +425,7 @@ def attempt_case(db, run_id):
         'review_status':reviews[-1]['status'] if reviews else 'unreviewed','trace_incomplete':bool(missing or observation.get('trace_incomplete')),
         'display_sha256':run['display_hash'] or digest(result.get('blocks',[])),'tier':run['tier']}
     return {'summary':summary,'observation':data_only(observation),'missing_fields':missing,
+        'derived_analysis':derived_attempt_analysis(observation,result,delivered=run['delivered']),
         'context':family['context'],'languages':{'input':family['input_language'],'input_basis':'explicit_input' if family['input_language']!='und' else 'not_supplied','answer':family['locale'],'answer_basis':'submitted_answer_locale'},
         'job':job,'frozen_sources':data_only(bundle),'family_identity':json.loads(family['identity'] or '{}'),
         'display':data_only(result),'display_paragraphs':display_paragraphs(result,run['tier'],family['locale']),

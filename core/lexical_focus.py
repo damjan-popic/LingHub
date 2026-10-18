@@ -5,7 +5,7 @@ of grammatical register, normative authority and contextual correctness.
 """
 import copy,hashlib,json
 
-VERSION='lexical-focus-v2-20261018'
+VERSION='lexical-focus-v3-20261018'
 
 def editorial(fields):
     key=next((k for k in ('source_status','head_status','status')if fields.get(k)),None)
@@ -14,6 +14,15 @@ def editorial(fields):
                 'ssss-automatic':'automatic'}.get(str(raw).lower(),'unknown')
     return {'raw':raw,'field':key,'normalized':normalized,'mapping_version':'editorial-status-v1',
             'scope':'source editorial process; not register or normative approval'}
+
+def accepted_target_match(match,target):
+    """A recorded whole-surface inflection remains a term match downstream."""
+    fold=lambda value:' '.join(str(value or '').casefold().split())
+    if fold(match.get('term'))==fold(target):return True
+    return (fold(match.get('matched_query'))==fold(target)
+        and match.get('match_tier') in {'exact','morphology_exact'}
+        and match.get('ambiguity_cost',0)==0
+        and (match.get('match_tier')=='exact' or bool(match.get('query_signature')and match.get('lexicon_release_id'))))
 
 def focus_profile(profile):
     """Return a new annotated revision; old saved captures remain untouched."""
@@ -57,14 +66,16 @@ def focus_profile(profile):
             if u['target']in acronym_targets and f.get('headword')!=u['target']:state,reason='excluded','explicit_acronym_not_folded_word'
             elif proper_only and kind not in plan['requested_facets']:state,reason='excluded','personal_name_not_common_noun_profile'
             elif u['match_relation']in {'component_only','alternative_lexical_identity'}:state,reason='excluded','incidental_component_or_reading'
+            elif not primary_ids and len(targets)==1 and str(f.get('headword','')).casefold()!=u['target'].casefold() and u['match_relation'] not in {'whole_expression','inflected_equivalent'}:state,reason='alternative','unverified_analyzer_lemma_not_target_identity'
             elif primary_ids and plan['query_kind']=='word' and f.get('headword')not in {lexemes[i]['lemma']for i in primary_ids}:state,reason='excluded','different_headword'
             elif kind=='collocations'and u['target'].islower()and primary_ids and all(lexemes[i]['grammatical_features'].get('type')=='common'for i in primary_ids):
                 heads=[c for c in f.get('components',[])if c.get('role')=='headword']
                 if heads and all(str(c.get('text',''))[:1].isupper()for c in heads):state,reason='alternative','capitalized_headword_context_not_resolved'
+        elif kind=='loris' and u['match_relation']=='component_only':state,reason='alternative','rule_matches_component_not_whole_target'
         elif kind=='terminology':
             matches=f.get('matched_forms',[])
             if matches and not any(m.get('term')in targets for m in matches)and all(str(m.get('term','')).isupper()for m in matches)and any(t.islower()for t in targets):state,reason='excluded','case_distinct_acronym_not_requested'
-            elif translation and not any(' '.join(str(m.get('term','')).lower().split())==' '.join(t.lower().split())for m in matches for t in targets):state,reason='excluded','not_whole_translation_target'
+            elif translation and not any(accepted_target_match(m,t) for m in matches for t in targets):state,reason='excluded','not_whole_translation_target'
         if kind=='collocations'and f.get('lexical_unit_id')is not None:
             # The source lexical unit, structure and all measurement/content
             # fields must agree. Homonymous strings alone are never merged.

@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,urlencode,quote
 import httpx
 from .security import Failure
-from . import terminology, collation, morphology, editorial, unified
+from . import terminology, collation, morphology, editorial, unified, request_tasks
 
 
 def private_url(url):
@@ -109,6 +109,8 @@ class Gateway:
         if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
     def freeze(self,family,policy):
         if family['task']=='reference'and self.unified_answers:
+            guidance=request_tasks.freeze(family)
+            if guidance is not None:return guidance
             return unified.freeze(self,family,policy)
         if family['task'] in editorial.SOURCES:
             if not self.klikai_url:raise Failure('task_unavailable',503)
@@ -153,6 +155,7 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.answer(bundle,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.generate(self,bundle,tier,model,parent)
         if bundle.get('task')=='editorial_search':return editorial.answer(bundle,tier)
         if bundle.get('task')=='morphology':return morphology.answer(bundle,tier)
@@ -168,6 +171,7 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.source(bundle,evidence_id,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.source(bundle,evidence_id)
         if bundle.get('task')=='editorial_search':return editorial.source(bundle,evidence_id,tier)
         if bundle.get('task')=='morphology':return morphology.source(bundle,evidence_id,tier)

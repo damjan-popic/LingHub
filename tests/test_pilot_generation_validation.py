@@ -67,10 +67,14 @@ def test_owned_frozen_api_keeps_withholding_diagnostics_without_admitting_genera
     gateway=WithheldGateway();app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as client:
         fid,family=ask(app,client,login(client));run=family['short']
-        assert run['state']=='complete'and run['status']=='source_only'
+        no_support=outcome.get('status')=='no_hit'
+        assert run['state']=='complete'and run['status']==('no_hit' if no_support else 'source_only')
         assert run['answer_kind']=='source_only'and run['generation_status']=='not_generated'
-        assert run['generation']['status']=='failed'
-        assert run['generation']['error_code']=='generation_not_admitted'
+        assert run['generation']['status']==('no_support' if no_support else 'failed')
+        expected=('insufficient_selected_evidence' if no_support else
+                  'unknown_citation' if outcome.get('generation_status')=='source_supported_partial' else
+                  outcome['validation']['status'])
+        assert run['generation']['error_code']==expected
         assert run['generation_validation']==generation_validation_diagnostics(outcome)
         assert PRIVATE not in json.dumps(run)
         assert sum(path=='/internal/pilot/generate'for path,_,_ in gateway.calls)==1

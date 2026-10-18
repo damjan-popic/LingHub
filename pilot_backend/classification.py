@@ -12,6 +12,7 @@ def method(result):
     if kind=='mixed':return 'mixed_generated_and_source_partial'
     if kind in {'clarification','clarification_required'}:return 'clarification_required'
     if result.get('status')in {'no_hit','no_answer'}:return 'no_hit'
+    if kind=='deterministic_guidance':return 'clarification_required' if result.get('answer_support')=='clarification' else 'deterministic'
     if kind in {'generated','source_only','deterministic'}:return kind
     return 'unknown'
 

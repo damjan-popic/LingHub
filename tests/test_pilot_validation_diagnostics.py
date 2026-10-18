@@ -47,7 +47,7 @@ def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_
         family, job = submit(app, client, login(client),question='Kako sklanjamo Hugo?')
         short = family['short']
         assert short['state'] == 'complete' and short['generation_status'] == 'not_generated'
-        assert short['generation'].get('error_code') == 'generation_not_admitted', (short['generation'], short.get('retrieval'), [row[0] for row in gateway.calls])
+        assert short['generation'].get('error_code') == 'invalid_composition_envelope', (short['generation'], short.get('retrieval'), [row[0] for row in gateway.calls])
         validation=short['generation_validation']['validation']
         if reason=='limitation_names_unknown_claims':
             assert validation['reason']==reason and validation['error_type']=='ValueError'

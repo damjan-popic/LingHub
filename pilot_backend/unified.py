@@ -120,11 +120,22 @@ def collect_source(gateway, family, definition, detail_pool=None):
     started = time.monotonic()
     slug, adapter = definition['slug'], definition['adapter_key']
     query, locale = family['question'], family['locale']
+    request_plan = family.get('request_plan') or {}
+    targets = request_plan.get('target_spans', [])
+    if len(targets) == 1 and request_plan.get('original') == family.get('original_question', family['question']):
+        target = targets[0]
+        original = request_plan['original'] + ('\n' + request_plan.get('context','') if target.get('span_scope') == 'context' else '')
+        a, b = target.get('start'), target.get('end')
+        if type(a) is int and type(b) is int and 0 <= a < b <= len(original) and original[a:b] == target.get('text'):
+            # Exact original expression first; the resource owns any inflectional
+            # expansion. Explicit domain remains visible in the request plan.
+            query = target['text']
+    variants = list(dict.fromkeys([query, family['question']]))
     limit = 20 if adapter in TERM_ADAPTERS else 3 if slug in editorial.SOURCES else 10
     coverage = {'family': slug, 'source_label': definition['display_name'], 'status': 'unavailable', 'returned_count': 0,
                 'limit': limit, 'has_more': None, 'elapsed_ms': 0.0,
                 'search_ms': 0.0, 'detail_ms': 0.0, 'detail_requests': 0,
-                'detail_reused': 0, 'details': [],'query':query,'query_variants':[query],'adapter':adapter,'score_method':'source_native_unspecified','candidates':[]}
+                'detail_reused': 0, 'details': [],'query':query,'query_variants':[],'original_question':family['question'],'request_plan':deepcopy(request_plan) or None,'adapter':adapter,'score_method':'source_native_unspecified','candidates':[]}
     matches = []
     detail_started = None
     try:
@@ -136,12 +147,17 @@ def collect_source(gateway, family, definition, detail_pool=None):
             return matches, coverage
         search_started = time.monotonic()
         try:
-            if adapter in TERM_ADAPTERS:
-                params = {'q': query, 'sources': slug, 'limit': limit,
-                          'allow_partial': 'true', 'include_prose': 'true', 'use_morphology': 'true'}
-                data = gateway.request('/api/terminology/lookup?' + urlencode(params), None, gateway.klikai_url)
-            else:
-                data = gateway.request('/api/search?' + urlencode({'q': query, 'sources': slug, 'limit': limit}), None, gateway.klikai_url)
+            for query in variants:
+                coverage['query_variants'].append(query)
+                coverage['query'] = query
+                if adapter in TERM_ADAPTERS:
+                    params = {'q': query, 'sources': slug, 'limit': limit,
+                              'allow_partial': 'true', 'include_prose': 'true', 'use_morphology': 'true'}
+                    data = gateway.request('/api/terminology/lookup?' + urlencode(params), None, gateway.klikai_url)
+                else:
+                    data = gateway.request('/api/search?' + urlencode({'q': query, 'sources': slug, 'limit': limit}), None, gateway.klikai_url)
+                if data.get('hits'):
+                    break
         finally:
             coverage['search_ms'] = round((time.monotonic() - search_started) * 1000, 3)
         hits = data.get('hits')
@@ -283,6 +299,13 @@ def collect_tools(gateway, family):
 
 
 def freeze(gateway, family, policy):
+    # One request plan travels to source discovery, lexical profiles, writer and
+    # cards. Family/history text remains immutable; only this request copy is used.
+    from core.lexical_planner import plan as lexical_plan
+    family = deepcopy(family)
+    original = family.get('original_question', family['question'])
+    family['request_plan'] = lexical_plan(original, family.get('context', ''),
+        family.get('input_language', 'und'), {'raw_engines': {}})['request_plan']
     started = time.monotonic()
     stage_started = started
     timings = {}
@@ -323,7 +346,7 @@ def freeze(gateway, family, policy):
         # must not depend on insertion order lost at the storage boundary.
         freeze_request = json.loads(canonical({'question': family['question'],
             'context': family.get('context', ''), 'locale': family['locale'], 'task': 'reference',
-            'policy': policy, 'unified_evidence': packet,
+            'policy': policy, 'unified_evidence': packet, 'request_plan': family['request_plan'],
             **({'tool_evidence':tool_capture}if tool_capture is not None else{})}))
         response = gateway.request('/internal/pilot/freeze', freeze_request)
         remote = response.get('matches')
@@ -521,8 +544,10 @@ def _generate(gateway, bundle, tier, model, parent=None):
     except (Failure, KeyError, TypeError, ValueError) as error:
         out = fallback(bundle, 'failed', round((time.monotonic() - started) * 1000, 3), diagnostic(error,stage))
         if isinstance(result, dict):
-            from .human_feedback import provider_diagnostics
+            from .human_feedback import provider_diagnostics,generation_validation_diagnostics
             out.update(provider_diagnostics(result))
+            validation=generation_validation_diagnostics(result)
+            if validation:out['generation_validation']=validation
             if 'diagnostics' in result:out['diagnostics']=deepcopy(result['diagnostics'])
         return out
 

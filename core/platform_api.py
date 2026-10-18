@@ -85,7 +85,7 @@ async def analyzer_request(request,route,payload=None,timeout=30):
 class AnalyzeRequest(BaseModel):
     lang: Literal['sl','it']
     text: str = Field(min_length=1,max_length=10000)
-    engine: Literal['default','spacy','classla','compare','klikai_experimental_v1','linghub_lexical_stable_v1']='default'
+    engine: Literal['default','spacy','classla','compare','klikai_classla_primary_v1','klikai_experimental_v1','linghub_lexical_stable_v1']='default'
     include_loris: bool=True
 
 
@@ -175,7 +175,7 @@ async def capabilities_data(request):
         if isinstance(info,dict):
             models.extend(info.get('models',{}).values())
             if info.get('model'): models.append(info['model'])
-    return {'status':'ok','lexical_profile':{'available':getattr(request.app.state,'sloleks_profiles',None)is not None,'schema':'linghub.lexical-profile.v1','profiles':['klikai_experimental_v1','linghub_lexical_stable_v1','compare'],'legacy_default_unchanged':True,'resolved_release':__import__('os').environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'classla':experimental,'policy':'classla-primary-spacy-independent-spans-v1','sloleks':getattr(request.app.state,'sloleks_profiles',None).manifest if getattr(request.app.state,'sloleks_profiles',None)else None},'resources':resources,'models':models,'engines':backend.get('engines',{}),
+    return {'status':'ok','lexical_profile':{'available':getattr(request.app.state,'sloleks_profiles',None)is not None,'schema':'linghub.lexical-profile.v1','profiles':['klikai_classla_primary_v1','klikai_experimental_v1','linghub_lexical_stable_v1','compare'],'legacy_default_unchanged':True,'profile_policies':{'klikai_classla_primary_v1':'CLASSLA once for Slovene; canonical LORIS reuses annotations; Italian spaCy','compare':'explicit independent engine comparison','linghub_lexical_stable_v1':'legacy profile unchanged','klikai_experimental_v1':'legacy profile unchanged'},'resolved_release':__import__('os').environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'classla':experimental,'policy':'classla-primary-spacy-independent-spans-v1','sloleks':getattr(request.app.state,'sloleks_profiles',None).manifest if getattr(request.app.state,'sloleks_profiles',None)else None},'resources':resources,'models':models,'engines':backend.get('engines',{}),
         'defaults':backend.get('defaults',{'sl':'spacy','it':'spacy'}),'analyzer_service_reachable':reachable,
         'analyzer_capabilities':backend,'limits':LIMITS,'identity':hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
         'capabilities':{'morphology':available(request,'morphology'),'synonyms':available(request,'synonyms'),

@@ -38,6 +38,36 @@ def test_explicit_domain_and_direction_are_separate_from_the_target():
     assert shared['jurisdiction']is None
 
 
+@pytest.mark.parametrize('question,targets',[
+    ('Kaj pomeni VMI v občinski upravi in kako se to pove slovensko?',['VMI']),
+    ('Ali se izraz VMI uporablja samo v FVG?',['VMI']),
+    ('Kako prevedemo carta verde? Ali je zelena izkaznica priporočeni izraz?',['carta verde','zelena izkaznica']),
+    ('Kaj pomeni življenje v mestu?',['življenje v mestu']),
+    ('Kako prevedemo društvo za kulturo in šport?',['društvo za kulturo in šport']),
+    ('Kaj pomeni »dan in noč« v tem primeru?',['dan in noč']),
+])
+def test_task_clauses_and_scope_are_not_lexical_components(question,targets):
+    original=plan(question,'','und',{})
+    assert [t['text']for t in original['targets']]==targets
+    enriched=plan(question,'','und',{},request_plan=original['request_plan'])
+    assert original['targets']==enriched['targets'] and original['query_kind']==enriched['query_kind']
+    assert all(question[t['start']:t['end']]==t['text']for t in original['targets'])
+    if 'priporočeni'in question:assert 'recommendation'in original['request_plan']['requested_facets']
+
+
+def test_compound_request_retains_domain_direction_and_context_binding():
+    q='Kaj pomeni VMI v občinski upravi in kako se to pove slovensko?'
+    shared=plan(q,'','und',{})['request_plan']
+    assert shared['domain']=='občinski upravi' and shared['translation_language']=='sl'
+    assert set(shared['requested_facets'])=={'meaning','translation'}
+    followup='Ali se to uporablja tudi drugje?'
+    bound=plan(followup,q,'und',{})['request_plan'];target,=bound['target_spans']
+    assert target['span_scope']=='context' and target['text']=='VMI'
+    assert (followup+'\n'+q)[target['start']:target['end']]=='VMI'
+    usage=plan('Ali se izraz VMI uporablja samo v FVG?','','und',{})['request_plan']
+    assert usage['geography'][0]['raw']=='v FVG' and 'usage'in usage['requested_facets']
+
+
 def test_natural_routes_do_not_require_quotation_marks():
     for question in ['barvanka','kaj je barvanka?','kaj pomeni barvanka?']:
         routing=collation.automatic_plan(question)

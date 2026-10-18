@@ -1,9 +1,9 @@
 """Original-span lexical planning from structure, cues and both raw analyses."""
 import copy,re,unicodedata
-VERSION='lexical-target-spans-v3'
+VERSION='lexical-target-spans-v4'
 REQUEST_VERSION='klikai.request-plan.v1'
 WORD=re.compile(r"[^\W\d_]+(?:[\u0300-\u036f]*[^\W\d_]*)(?:[-’'][^\W\d_]+)*",re.UNICODE)
-FACETS={'synonyms':r'sopomen|sinonim','morphology':r'sklanj|pregib|rodilnik|imenovalnik|dvojin|množin|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
+FACETS={'synonyms':r'sopomen|sinonim','morphology':r'sklanj|pregib|rodilnik|imenovalnik|dvojin|množin|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz|(?:pove|povemo|reče|rečemo)\s+(?:po\s+)?(?:slovensko|italijansko)','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
 SCAFFOLD={'kaj','kako','kateri','katera','katere','katero','katerih','kdo','ali','je','so','sta','se','v','za','beseda','besede','besedo','besedi','prav','pravilno','prosim','katerega','pomeni','pomen','oblika','oblike','obliko','primer','napiše','reče','naj','mi','razloži','kakšen','kakšna','katere','danes','ni','brez','rečem','rečemo','rekel','iščem','stavek','stavka','kater','pravilen','poišči','navedi','pokaži','uporabi','preveri','to','ta','tisto','tem','tega','tale','več','povej','poveš','lahko','bolje','uporabiti','uporabljati'}
 def lexical_word(text):
  t=text.strip().strip('"«»“”‘’?!.,;:');return bool(WORD.fullmatch(t))and not any(c.isdigit()for c in t)
@@ -19,6 +19,40 @@ _TRANSLATION_FRAMES=(
  rf'\s*(?:come\s+si\s+)?(?:traduce|tradurre|traduci)\s+(?:{_TRANSLATION_LANGUAGE}\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r"\s*(?:qual\s+[èe]\s+la\s+)?traduzione\s+di\s+(?P<target>.+?)\s*[.?!]*\s*",
 )
+
+_TASK_BOUNDARY=re.compile(r'(?:[?!.;]\s*|\s+(?:in|ter)\s+)(?=(?:ali|kaj|kako|zakaj)\b)',re.I)
+_ACRONYM_SCOPE=re.compile(r'(?P<target>[^\W\d_]{2,})\s+(?:v|na|pri)\s+(?P<domain>[^,?;.!\n]{1,80})$',re.U)
+
+def _scope_cut(text,start,end):
+ """Separate explicit scope, without splitting ordinary prepositional terms."""
+ candidate=text[start:end]
+ domain=re.search(r'\s+v\s+[^,?;.]{1,50}\s+kontekstu\s*$',candidate,re.I)
+ if domain:return start+domain.start()
+ acronym=_ACRONYM_SCOPE.fullmatch(candidate)
+ if acronym and acronym['target'].isupper():return start+acronym.end('target')
+ return end
+
+def request_object_spans(text):
+ """Parse bounded task clauses independently; keep all original offsets.
+
+ Coordinated requests are not pieces of a requested expression. Quoted spans
+ are handled before this helper, and ordinary internal conjunctions stay whole.
+ """
+ starts=[0];ends=[]
+ for boundary in _TASK_BOUNDARY.finditer(text):
+  ends.append(boundary.start());starts.append(boundary.end())
+ ends.append(len(text));result=[]
+ for start,end in zip(starts,ends):
+  clause=text[start:end]
+  if is_referential_request(clause):continue
+  for extractor,basis in ((translation_object_span,'unquoted translation object; whole original span'),
+                          (lexical_object_span,'natural lexical object; whole original span')):
+   span=extractor(clause)
+   if span:
+    a,b=span
+    if clause[a:b].casefold()not in {'to','ta izraz','ta beseda'}:result.append((start+a,start+b,basis))
+    break
+ return result
 
 def translation_object_span(text):
  """Keep an unquoted translation object whole; exact source lookup validates it.
@@ -36,8 +70,7 @@ def translation_object_span(text):
   if label:start+=label.end()
   language=re.search(rf'\s+{_TRANSLATION_LANGUAGE}\s*$',text[start:end],re.I)
   if language:end=start+language.start()
-  domain=re.search(r'\s+v\s+[^,?;.]{1,50}\s+kontekstu\s*$',text[start:end],re.I)
-  if domain:end=start+domain.start()
+  end=_scope_cut(text,start,end)
   candidate=text[start:end].strip()
   if candidate and len(candidate)<=240 and len(list(WORD.finditer(candidate)))<=16 and not re.search(r'[?;\n]',candidate):
    return start,end
@@ -48,6 +81,8 @@ _LEXICAL_FRAMES=(
  r'\s*(?:(?:poišči|iščem|prosim|navedi|katere\s+so)\s+)?(?:sopomenk\w*|sinonim\w*)\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:v\s+katerem\s+sklonu\s+je|kateri\s+sklon\s+je)\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:rodilnik|dajalnik|tožilnik|orodnik|mestnik)\s+(?:ednine|dvojine|množine)\s+(?:besede\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:ali|a)\s+se\s+(?P<target>.+?)\s+(?:uporablja|rabi|velja)\b[^?!.]*[?!.]?\s*',
+ r'\s*(?:ali\s+)?je\s+(?P<target>.+?)\s+(?:priporočen[ai]?|odsvetovan[ai]?|nezaželen[ai]?|pravilen)\s+(?:izraz|termin|beseda)\s*[?!.]*\s*',
 )
 
 def lexical_object_span(text):
@@ -58,15 +93,14 @@ def lexical_object_span(text):
   start,end=match.span('target')
   label=re.match(r'(?:besed[aeoiu]|izraz(?:a|u)?|termin(?:a)?|zveza|zvezo)\s+',text[start:end],re.I)
   if label:start+=label.end()
-  domain=re.search(r'\s+v\s+[^,?;.]{1,50}\s+kontekstu\s*$',text[start:end],re.I)
-  if domain:end=start+domain.start()
+  end=_scope_cut(text,start,end)
   if start<end and len(list(WORD.finditer(text[start:end])))<=16:return start,end
  return None
 
 def is_referential_request(text):
  """Only an explicit demonstrative task can bind its supplied context."""
  return bool(re.fullmatch(r'\s*(?:(?:a|ali)\s+)?(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:tudi\s+)?(?:v\s+\w+\s+)?(?:uporablja|rabi|velja)(?:\s+.+)?[?.!]?\s*',text,re.I)
-  or re.fullmatch(r'\s*(?:kako|kaj)\s+(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:pomeni|reče|prevede|sklanja|napiše|zapiše)(?:\s+[^?!.]+)?[?.!]?\s*',text,re.I))
+  or re.fullmatch(r'\s*(?:kako|kaj)\s+(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:pomeni|pove|reče|prevede|sklanja|napiše|zapiše)(?:\s+[^?!.]+)?[?.!]?\s*',text,re.I))
 
 def bound_context_target(text,context,language='und'):
  """Resolve one explicitly supplied expression/question; never search user history."""
@@ -84,17 +118,26 @@ def bound_context_target(text,context,language='und'):
 def portable_request_plan(interpretation,language='und'):
  """Portable request data: no ontology assignment or guessed spelling correction."""
  text=interpretation['original'];context=interpretation.get('context','');combined=text+'\n'+context
- destination=[code for code,pattern in [('sl',r'v\s+slovenščin[io]|po\s+slovensko|slovenska\s+ustreznica|in\s+sloveno'),('it',r'v\s+italijanščin[io]|po\s+italijansko|italijanska\s+ustreznica|in\s+italiano')]if re.search(pattern,combined,re.I)]
+ destination=[code for code,pattern in [('sl',r'v\s+slovenščin[io]|po\s+slovensko|(?:pove|povemo|reče|rečemo)\s+slovensko|slovenska\s+ustreznica|in\s+sloveno'),('it',r'v\s+italijanščin[io]|po\s+italijansko|(?:pove|povemo|reče|rečemo)\s+italijansko|italijanska\s+ustreznica|in\s+italiano')]if re.search(pattern,combined,re.I)]
  facets=interpretation['requested_facets'];operation=('translation_help'if'translation'in facets else'explanation'if'meaning'in facets else'rule_lookup'if any(x in facets for x in ('morphology','orthography'))else None)
  domain=re.search(r'\bv\s+([^,?;.]{1,50})\s+kontekstu\b',combined,re.I)
+ domain_text=domain.group(1)if domain else None
+ if domain_text is None:
+  for target in interpretation['targets']:
+   if target['text'].isupper() and len(target['text'])>1:
+    suffix=combined[target['start']:]
+    boundary=_TASK_BOUNDARY.search(suffix)
+    suffix=suffix[:boundary.start()]if boundary else suffix
+    scoped=_ACRONYM_SCOPE.fullmatch(suffix.strip().rstrip('?.!'))
+    if scoped:domain_text=scoped['domain'];break
  proposal=bool(re.search(r'predlog\w*\s+pravil|pravopis\s*8|predlagan\w*\s+pravopis',combined,re.I))
- geography=[{'raw':m.group(),'start':m.start(),'end':m.end(),'basis':'explicit_location_wording'}for m in re.finditer(r'\b(?:v|po)\s+(?:Italij[ai]|Slovenij[ai]|Trstu|Goric[ai])\b',combined,re.I)]
+ geography=[{'raw':m.group(),'start':m.start(),'end':m.end(),'basis':'explicit_location_wording'}for m in re.finditer(r'\b(?:v|po)\s+(?:Italij[ai]|Slovenij[ai]|Trstu|Goric[ai]|FJK|FVG)\b',combined,re.I)]
  targets=[{key:copy.deepcopy(target[key])for key in ('text','start','end','basis','context_span','span_scope','context_target_basis')if key in target}for target in interpretation['targets']]
  return {'version':REQUEST_VERSION,'original':text,'context':context,'target_spans':targets,
   'candidate_lemmas':[{'target':t['text'],'candidates':list(t.get('lemma_candidates',[])),'basis':'analyzer_nomination_requires_resource_match'}for t in interpretation['targets'] if t.get('lemma_candidates')],
   'operation':operation,'source_language':language if language in {'sl','it'}else None,
   'translation_language':destination[0]if len(destination)==1 else None,'response_language':None,
-  'requested_facets':list(dict.fromkeys([*facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen')]if re.search(pattern,combined,re.I)]])),'domain':domain.group(1)if domain else None,'geography':geography,'jurisdiction':None,
+  'requested_facets':list(dict.fromkeys([*facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen'),('recommendation',r'priporočen|odsvetovan|nezaželen'),('usage',r'uporablja|rabi\b')]if re.search(pattern,combined,re.I)]])),'domain':domain_text,'geography':geography,'jurisdiction':None,
   'requested_source':'pravopis8'if proposal else None,'requested_edition':'proposal'if proposal else None,
   'ambiguities':(['translation_direction_unspecified']if operation=='translation_help'and len(destination)!=1 else[])+(['unresolved_reference']if not targets and is_referential_request(text)else[]),
   'confidence':'bounded_surface'if targets else'broad_routes'}
@@ -172,12 +215,9 @@ def plan(text,context,language,analysis,request_plan=None):
   if len(spans)>1 and 'translation'not in requested:
    contrasted=comparison_lexical_spans(text,spans)
    if contrasted!=spans:spans=contrasted;kind='comparison'
-  if not spans and 'translation'in requested:
-   span=translation_object_span(text)
-   if span:add(*span,'unquoted translation object; whole original span')
   if not spans:
-   span=lexical_object_span(text)
-   if span:add(*span,'natural lexical object; whole original span')
+   for a,b,why in request_object_spans(text):add(a,b,why)
+   if len(spans)>1:kind='comparison'
   # Comparative alternatives stay separate and retain spelling, casing and case context.
   if not spans and re.search(r'\bali\b',text,re.I):
    pieces=[];begin=0

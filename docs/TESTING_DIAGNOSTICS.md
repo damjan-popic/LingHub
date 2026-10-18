@@ -1,7 +1,7 @@
 # Private project testing records
 
 Every accepted run receives a server-derived participant/group/origin observation
-in the existing pilot database. CU/SLORI default to project_use; TEHNO defaults
+in the existing pilot database. CU/SLORI/MK default to project_use; TEHNO defaults
 to technical_manual. An explicit origin=automated_test only excludes a submitted
 attempt from natural-use totals; it cannot change group, ownership, model or
 permissions. Synthetic accounts are always automated. Existing records are not
@@ -22,11 +22,13 @@ Each command resolves the currently installed web release itself. It works in a
 new terminal without first setting KLIKAI_CODE. An empty or stale PYTHONPATH can
 cause `No module named pilot_backend`; the application is not missing.
 
-CU/SLORI project-use attempts, including unrated attempts:
+CU/SLORI/MK project-use attempts, including unrated attempts:
 
 ```bash
 sudo env PYTHONPATH="$(systemctl show klikai-pilot.service -p WorkingDirectory --value)" /data/envs/lingstack/pilot/bin/python -B -m pilot_backend --config-file /data/services/lingstack/releases/platform-control/synthesis-20260918-review-r3/config/pilot-editorial.json export-attempts --output-dir /data/scratch/damjan/klikai-testing-exports/project-$(date +%Y%m%d-%H%M%S) --owner damjan
 ```
+
+For ministry-only triage, add `--group mk` to the export command. MK submissions, failures, no-support outcomes and feedback revisions use the same retained trace as the other project groups. A shared group login identifies the group, not an individual tester.
 
 TEHNO manual technical attempts explicitly:
 

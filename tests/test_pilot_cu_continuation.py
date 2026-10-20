@@ -9,6 +9,15 @@ from test_pilot_backend import rig, login, family, completed
 from test_request_guidance import app_for, NoNetwork, ORIGIN, login as unified_login
 
 
+def test_zrcola_display_projection_preserves_original_and_other_private_glyphs():
+    source={'source_label':'ePravopis','excerpt':'p\ue466rvi ak\ue72f \uebd5 \ue951'}
+    before=copy.deepcopy(source)
+    assert source_view(source)['reader_blocks'][0]['text']=='pə̀rvi aku̯ ž̄ d̄'
+    assert source==before
+    other=dict(source,source_label='Druga pisava')
+    assert source_view(other)['reader_blocks'][0]['text']==source['excerpt']
+
+
 def test_submission_recovery_is_owned_read_only_and_does_not_repeat_generation(rig):
     app,c,adapter,ids=rig;h=login(c)
     first=family(c,h,'submission-recovery-001')

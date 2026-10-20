@@ -142,7 +142,8 @@ def collect_source(gateway, family, definition, detail_pool=None):
         if definition.get('source_type') == 'tool' or adapter in NON_DOCUMENTARY:
             coverage['status'] = 'not_documentary'
             return matches, coverage
-        if not 2 <= len(query) <= 500:
+        minimum = 1 if adapter == 'official_reference_jsonl' else 2
+        if not minimum <= len(query) <= 500:
             coverage.update(status='unsupported', reason='query_outside_search_bound')
             return matches, coverage
         search_started = time.monotonic()

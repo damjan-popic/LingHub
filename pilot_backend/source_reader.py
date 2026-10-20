@@ -3,6 +3,12 @@ from html import escape
 from html.parser import HTMLParser
 import json
 import re
+import unicodedata
+
+# Verified character descriptions in the publisher's Amebis/ZRCola database.
+# This is a display projection for that publication, never a raw-text rewrite.
+ZRCOLA_UNICODE = {'\ue466':'ə\u0300', '\ue72f':'u\u032f',
+                 '\uebd5':'ž\u0304', '\ue951':'d\u0304'}
 
 
 class Prose(HTMLParser):
@@ -224,4 +230,9 @@ def source_view(source, locale='sl'):
                     pass
             lines.append(line)
         rows = [{'heading': '', 'text': '\n'.join(lines)}]
+    identity = ' '.join(str(source.get(k, '')) for k in
+                        ('source_id', 'source_slug', 'source_label', 'title')).casefold()
+    if 'epravopis' in identity:
+        rows = [{k: unicodedata.normalize('NFC', ''.join(ZRCOLA_UNICODE.get(c,c) for c in v))
+                 for k,v in row.items()} for row in rows]
     return dict(source, reader_blocks=rows)

@@ -18,6 +18,7 @@ from .store import canonical, digest
 CONTRACT = 'klikai.pilot.unified-capture.v1'
 PACKET = 'klikai.unified-evidence.v1'
 MAX_BYTES = 2 * 1024 * 1024
+MAX_FROZEN_BYTES = 8 * 1024 * 1024
 DETAIL_WORKERS = 4
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
@@ -397,7 +398,9 @@ def freeze(gateway, family, policy):
     if not found and retrieval['status'] == 'partial':retrieval['status'] = 'unavailable'
     body = {'analysis':tool_capture,'contract': CONTRACT, 'task': 'reference', 'query': family['question'], 'locale': family['locale'],
             'matches': found, 'retrieval': retrieval, 'gateway_bundle': child}
-    if len(canonical(body).encode()) > 2*MAX_BYTES:
+    # Keep the full source explorer beside the signed gateway family. The
+    # original capture/request bound remains MAX_BYTES.
+    if len(canonical(body).encode()) > MAX_FROZEN_BYTES:
         raise Failure('unified_capture_too_large', 413)
     pin = digest(body)
     return {'bundle': dict(body, snapshot_sha256=pin),

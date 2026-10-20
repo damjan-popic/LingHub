@@ -77,6 +77,7 @@ def translation_object_span(text):
  return None
 
 _LEXICAL_FRAMES=(
+ r'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:sklanjamo|sklanjati|pregibamo|pregibati|se\s+(?:sklanja|sklanjajo|pregiba|pregibajo))\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:kaj\s+(?:je(?!\s+(?:prav|pravil\w*|ustrez\w*)\b)|pomeni)|pomen\s+besede)\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:(?:poišči|iščem|prosim|navedi|katere\s+so)\s+)?(?:sopomenk\w*|sinonim\w*)\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:v\s+katerem\s+sklonu\s+je|kateri\s+sklon\s+je)\s+(?P<target>.+?)\s*[.?!]*\s*',
@@ -91,7 +92,7 @@ def lexical_object_span(text):
   match=re.fullmatch(pattern,text,re.I)
   if not match:continue
   start,end=match.span('target')
-  label=re.match(r'(?:besed[aeoiu]|izraz(?:a|u)?|termin(?:a)?|zveza|zvezo)\s+',text[start:end],re.I)
+  label=re.match(r'(?:besed[aeoiu]|izraz(?:a|u)?|termin(?:a)?|zveza|zvezo|(?:osebno\s+)?im(?:e|ena)|samostalnik)\s+',text[start:end],re.I)
   if label:start+=label.end()
   end=_scope_cut(text,start,end)
   if start<end and len(list(WORD.finditer(text[start:end])))<=16:return start,end
@@ -232,7 +233,7 @@ def plan(text,context,language,analysis,request_plan=None):
     for a,b in pieces:add(a,b,'comparison alternative; whole original phrase')
     kind='comparison'
   if not spans:
-   cue=re.search(r'\b(?:besed[aeoiu]|izraza?|imena?|termina?)\s+(.+)',text,re.I)
+   cue=re.search(r'\b(?:besed[aeoiu]|izraza?|im(?:e|ena)|termina?)\s+(.+)',text,re.I)
    if cue:add(cue.start(1),cue.end(1),'requested lexical object')
   if not spans:
    # Statistical structure nominates content spans; lookup verifies them later.

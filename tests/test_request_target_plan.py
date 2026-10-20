@@ -15,6 +15,14 @@ from pilot_backend import collation, unified
     ('Kateri sklon je modrem zvezku?', 'modrem zvezku'),
     ('Kako prevedemo tempo pieno v slovenščino?', 'tempo pieno'),
     ('Kaj pomeni izraz non vedo l’ora?', 'non vedo l’ora'),
+    ('Kako sklanjamo ime Luka?', 'Luka'),
+    ('Kako sklanjamo ime Miha?', 'Miha'),
+    ('Kako sklanjamo osebno ime Aljoša?', 'Aljoša'),
+    ('Kako se sklanja vojvoda?', 'vojvoda'),
+    ('Kako pregibamo samostalnik mati?', 'mati'),
+    ('Kako lahko sklanjamo ime Oto?', 'Oto'),
+    ('Kako se sklanja Novo mesto?', 'Novo mesto'),
+    ('Kako sklanjamo modri zvezek?', 'modri zvezek'),
 ])
 def test_natural_request_keeps_entire_case_preserving_object(question,target):
     interpretation=plan(question,'','und',{'raw_engines':{}})

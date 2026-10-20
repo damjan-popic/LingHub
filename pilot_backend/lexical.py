@@ -18,6 +18,10 @@ def profile(bundle):
 
 def overview(bundle):
  p=profile(bundle)
+ if p and p['interpretation'].get('targets')and all(t.get('basis')in {
+   'analyzer content span','degraded lexical candidate; source match required'}
+   for t in p['interpretation']['targets']):
+  return False
  return bool(p and p['interpretation']['query_kind']in {'word','phrase','comparison'}and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])and len({u['kind']for u in p['evidence']if u['kind']!='analysis'and u.get('selection',{}).get('state','primary')=='primary'and u['match_relation']not in {'component_only','alternative_lexical_identity'}})>=2)
 
 def reader(bundle):

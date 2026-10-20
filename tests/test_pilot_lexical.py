@@ -39,3 +39,15 @@ def test_client_legacy_profile_does_not_probe_experimental():
   linghub_url='http://127.0.0.1:1'
   def request(self,*a):raise AssertionError('Unselected feature must not call a service')
  assert collation.collect(Old(),{'question':'https://example.test/123'},automatic=True)is None
+
+@pytest.mark.parametrize('basis,expected',[
+ ('degraded lexical candidate; source match required',False),
+ ('analyzer content span',False),('single lexical surface',True),
+ ('requested lexical object',True)])
+def test_component_nominations_do_not_turn_a_broad_question_into_a_lexical_overview(basis,expected):
+ p={'interpretation':{'query_kind':'comparison','requested_facets':[],
+     'targets':[{'text':'seznam','basis':basis}]},
+    'evidence':[{'kind':kind,'match_relation':'exact'}for kind in ('morphology','terminology')]}
+ bundle={'analysis':{'version':'klikai.lexical-collation.v1','captures':[{'response':p}]}}
+ before=copy.deepcopy(bundle)
+ assert lexical.overview(bundle)is expected and bundle==before

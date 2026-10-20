@@ -9,6 +9,7 @@ import json
 import math
 import re
 import time
+import unicodedata
 from urllib.parse import quote, urlencode
 
 from . import collation, editorial, terminology
@@ -20,6 +21,8 @@ PACKET = 'klikai.unified-evidence.v1'
 MAX_BYTES = 2 * 1024 * 1024
 MAX_FROZEN_BYTES = 8 * 1024 * 1024
 DETAIL_WORKERS = 4
+REFERENCE_LEMMA_LIMIT = 8
+REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 
@@ -114,16 +117,17 @@ def fetch_editorial_detail(gateway, slug, rid):
         return None, error, round((time.monotonic() - started) * 1000, 3)
 
 
-def collect_source(gateway, family, definition, detail_pool=None):
+def collect_source(gateway, family, definition, detail_pool=None, *, query_override=None, lemma_candidate=None):
     if detail_pool is None:
         with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
-            return collect_source(gateway, family, definition, pool)
+            return collect_source(gateway, family, definition, pool, query_override=query_override,
+                                  lemma_candidate=lemma_candidate)
     started = time.monotonic()
     slug, adapter = definition['slug'], definition['adapter_key']
-    query, locale = family['question'], family['locale']
+    query, locale = family['question'] if query_override is None else query_override, family['locale']
     request_plan = family.get('request_plan') or {}
     targets = request_plan.get('target_spans', [])
-    if len(targets) == 1 and request_plan.get('original') == family.get('original_question', family['question']):
+    if query_override is None and len(targets) == 1 and request_plan.get('original') == family.get('original_question', family['question']):
         target = targets[0]
         original = request_plan['original'] + ('\n' + request_plan.get('context','') if target.get('span_scope') == 'context' else '')
         a, b = target.get('start'), target.get('end')
@@ -131,7 +135,7 @@ def collect_source(gateway, family, definition, detail_pool=None):
             # Exact original expression first; the resource owns any inflectional
             # expansion. Explicit domain remains visible in the request plan.
             query = target['text']
-    variants = list(dict.fromkeys([query, family['question']]))
+    variants = list(dict.fromkeys([query, family['question']])) if query_override is None else [query]
     limit = 20 if adapter in TERM_ADAPTERS else 3 if slug in editorial.SOURCES else 10
     coverage = {'family': slug, 'source_label': definition['display_name'], 'status': 'unavailable', 'returned_count': 0,
                 'limit': limit, 'has_more': None, 'elapsed_ms': 0.0,
@@ -244,9 +248,12 @@ def collect_source(gateway, family, definition, detail_pool=None):
                           'url': hit.get('url'), 'locator': {k: hit[k] for k in ('section', 'subsection', 'page_start', 'page_end') if hit.get(k) is not None},
                           'bibliography': {'record_id': hit['resource_id'], 'rights_mode': hit['rights_mode'],
                               **{key:hit[key]for key in ('source_revision','source_status','source_date','release_id','coverage_note','normative_status')if hit.get(key)is not None}}}
-                item=match(hit, 'resource_record', definition['display_name'], rendered, source, locale, hit.get('score'))
-                if hit['rights_mode']=='linked_only':item['context_eligible']=False
-                matches.append(item)
+                lookups = dictionary_lookups(hit, query, family, lemma_candidate) if adapter == 'official_reference_jsonl' else []
+                for lookup in lookups or [None]:
+                    capture = dict(hit, dictionary_lookup=lookup) if lookup is not None else hit
+                    item=match(capture, 'resource_record', definition['display_name'], rendered, source, locale, hit.get('score'))
+                    if hit['rights_mode']=='linked_only':item['context_eligible']=False
+                    matches.append(item)
         if coverage['status'] != 'partial':
             coverage['status'] = 'ok' if hits else 'no_match'
         return matches, coverage
@@ -300,6 +307,129 @@ def collect_tools(gateway, family):
     finally:status['elapsed_ms']=round((time.monotonic()-started)*1000,3)
 
 
+def _lookup_key(value):
+    # Case and Slovene letters distinguish dictionary identities. A lookup may
+    # remove display stress later, but discovery must not collapse Luka/luka.
+    return ' '.join(unicodedata.normalize('NFC', value).split())
+
+
+def literal_targets(rows, original, context):
+    result = set()
+    for target in rows:
+        start, end = target.get('start'), target.get('end')
+        text = target.get('text')
+        source = original + '\n' + context if target.get('span_scope') == 'context' else original
+        if type(start) is int and type(end) is int and 0 <= start < end <= len(source) and source[start:end] == text:
+            result.add(text)
+    return result
+
+
+def dictionary_lookups(hit, query, family, candidate=None):
+    """Bind exact source lookup provenance into each immutable entry capture."""
+    if (hit.get('semantic_unit') != 'dictionary_entry'
+            or hit.get('score_method') != 'official_reference_exact_headword'
+            or not isinstance(hit.get('published_headword'), str) or not hit['published_headword']):
+        return []
+    grouped = {}
+    if candidate is not None:
+        if candidate.get('query') != query or candidate.get('basis') != 'recorded_morphology_identity':
+            return []
+        for record in candidate['source_records']:
+            grouped.setdefault(record['target'], set()).add(record['source_entry_id'])
+        basis = 'recorded_morphology_lemma'
+    else:
+        plan = family.get('request_plan') or {}
+        original = family.get('original_question', family['question'])
+        if plan.get('original') != original:
+            return []
+        for target in literal_targets(plan.get('target_spans', []), original, family.get('context', '')):
+            if _lookup_key(query) == _lookup_key(target):
+                grouped[target] = set()
+        basis = 'original_surface'
+    return [{'version': 'recorded-dictionary-lookup-v1', 'target': target, 'query': query,
+             'basis': basis, 'source_entry_ids': sorted(entries)} for target, entries in sorted(grouped.items())]
+
+
+def validated_reference_lemmas(tool_capture, family):
+    """Use attested morphological identities for discovery, never a verdict.
+
+    Analyzer nominations alone are insufficient. Keep each resource identity
+    behind an attested form, including alternatives; do not prefer frequency,
+    a parser's predicted case, or one homograph over another.
+    """
+    captures=(tool_capture or {}).get('captures',[])
+    if len(captures)!=1 or captures[0].get('operation')!='lexical_profile':return []
+    profile=captures[0].get('response',{})
+    original=family.get('original_question',family['question'])
+    context=family.get('context','')
+    query=profile.get('query',{})
+    if query.get('text')!=original or query.get('context','')!=context:return []
+    interpretation=profile.get('interpretation',{})
+    targets=literal_targets(interpretation.get('targets',[]),original,context)
+    grouped={}
+    for unit in profile.get('evidence',[]):
+        if unit.get('kind')!='morphology' or unit.get('target')not in targets or unit.get('match_relation')!='recorded_target':continue
+        fields=unit.get('fields',{});provenance=unit.get('provenance',{})
+        lemma=fields.get('lemma');target=unit['target'];match=fields.get('matched_by')
+        if not isinstance(lemma,str) or not 1<=len(lemma.strip())<=160 or len(lemma.split())>8:continue
+        entry=fields.get('source_entry_id')
+        if not isinstance(entry,str) or not entry or provenance.get('source_entry_id')!=entry or not provenance.get('resource_id'):continue
+        if match=='recorded_form':
+            if fields.get('submitted_form')!=target or not any(row.get('exact_surface')is True for row in fields.get('submitted_analyses',[])):continue
+        elif match in {'exact_headword','folded_headword'}:
+            if _lookup_key(lemma)!=_lookup_key(target):continue
+        else:continue
+        key=_lookup_key(lemma)
+        record={'target':target,'resource_id':provenance['resource_id'],'source_entry_id':entry,
+                'captured_unit_id':unit.get('captured_unit_id'),'match_basis':match}
+        value=grouped.setdefault(key,{'query':lemma.strip(),'basis':'recorded_morphology_identity','source_records':[]})
+        if record not in value['source_records']:value['source_records'].append(record)
+    return list(grouped.values())
+
+
+def expand_reference_sources(gateway, family, definitions, tool_capture, found, coverage, detail_pool, pool):
+    """Supplement surface searches after the single lexical capture finishes."""
+    candidates=validated_reference_lemmas(tool_capture,family)
+    if not candidates:return
+    profile=tool_capture['captures'][0]['response']
+    lookup_family=deepcopy(family)
+    lookup_family['request_plan']=deepcopy(profile.get('interpretation',{}).get('request_plan') or family['request_plan'])
+    jobs=[];by_source={row['family']:row for row in coverage};pending=[]
+    for definition in sorted(definitions,key=lambda row:row['slug']):
+        if definition['adapter_key']!='official_reference_jsonl':continue
+        status=by_source[definition['slug']]
+        existing={_lookup_key(value)for value in status.get('query_variants',[])}
+        additions=[row for row in candidates if _lookup_key(row['query'])not in existing]
+        status['lemma_expansion']={'basis':'recorded_morphology_identity','candidate_queries':len(additions),
+                                  'queried':0,'omitted_by_bound':len(additions),'lookups':[]}
+        pending.append((definition,additions[:REFERENCE_LEMMA_LIMIT]))
+    # Round-robin sources before taking another lemma; a long comparison must
+    # not let the first source consume every request or expand without bounds.
+    for index in range(REFERENCE_LEMMA_LIMIT):
+        for definition,additions in pending:
+            if index>=len(additions) or len(jobs)>=REFERENCE_LOOKUP_REQUEST_LIMIT:continue
+            candidate=additions[index];expansion=by_source[definition['slug']]['lemma_expansion']
+            expansion['queried']+=1;expansion['omitted_by_bound']-=1
+            jobs.append((definition['slug'],candidate,pool.submit(collect_source,gateway,lookup_family,
+                definition,detail_pool,query_override=candidate['query'],lemma_candidate=candidate)))
+    for slug,candidate,future in jobs:
+        matches,extra=future.result();found.extend(matches);status=by_source[slug]
+        status.setdefault('surface_returned_count',status['returned_count'])
+        status.setdefault('per_query_limit',status['limit'])
+        status['lemma_expansion']['lookups'].append({**deepcopy(candidate),
+            'status':extra['status'],'returned_count':extra['returned_count'],
+            'elapsed_ms':extra['elapsed_ms'],'candidates':deepcopy(extra.get('candidates',[]))})
+        status['query_variants']=list(dict.fromkeys([*status['query_variants'],*extra['query_variants']]))
+        status['limit']=status['per_query_limit']*(1+len(status['lemma_expansion']['lookups']))
+        status['returned_count']=len({(row['external_id'],row['capture_kind'],row['capture_sha256'])for row in found if row['source_slug']==slug})
+        status['search_ms']+=extra['search_ms']
+        status['elapsed_ms']+=extra['elapsed_ms']
+        failed={'partial','timeout','unavailable','unsupported'}
+        if status['status']in failed or extra['status']in failed:
+            status['status']='partial' if status['returned_count'] else (status['status'] if status['status']in failed else extra['status'])
+        else:status['status']='ok' if status['returned_count'] else 'no_match'
+
+
 def freeze(gateway, family, policy):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
@@ -330,6 +460,7 @@ def freeze(gateway, family, policy):
             coverage.append(status)
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
+        expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.

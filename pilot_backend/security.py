@@ -27,6 +27,7 @@ def password_valid(value):
 def token_hash(value):return hashlib.sha256(value.encode()).hexdigest()
 
 class Auth:
+    remembered_seconds = 30 * 86400
     def __init__(self,store,hasher=None,idle_seconds=1800,absolute_seconds=28800):
         self.store=store;self.hasher=hasher or PasswordHasher(time_cost=3,memory_cost=65536,parallelism=1,type=Type.ID)
         self.idle=idle_seconds;self.absolute=absolute_seconds;self.dummy=self.hasher.hash(secrets.token_urlsafe(32))
@@ -57,7 +58,8 @@ class Auth:
     def throttle_keys(self,username,source):
         salt=self.store.meta('audit_salt')
         return ['account:'+hmac.new(salt.encode(),username.encode(),hashlib.sha256).hexdigest(),'source:'+hmac.new(salt.encode(),source.encode(),hashlib.sha256).hexdigest()]
-    def login(self,username,password,source):
+    def login(self,username,password,source,remember=False):
+        if type(remember)is not bool:raise Failure('invalid_request')
         try:key=username_key(username)
         except Failure:key='invalid'
         keys=self.throttle_keys(key,source);now=stamp()
@@ -74,17 +76,25 @@ class Auth:
         if not allowed:raise Failure('login_failed',401)
         if self.hasher.check_needs_rehash(row['password_hash']):
             with self.store.tx()as db:db.execute('UPDATE accounts SET password_hash=?WHERE id=?',(self.hasher.hash(password),row['id']))
-        return self.issue(row['id'])
-    def issue(self,account):
+        return self.issue(row['id'],remember=remember)
+    def issue(self,account,remember=False):
         token=secrets.token_urlsafe(32);csrf=secrets.token_urlsafe(32);now=stamp()
-        with self.store.tx()as db:db.execute('INSERT INTO sessions VALUES(?,?,?,?,?,?)',(token_hash(token),account,csrf,now,now,now+self.absolute))
+        with self.store.tx()as db:
+            owner=db.execute('SELECT role,must_change FROM accounts WHERE id=?',(account,)).fetchone()
+            # Only ordinary tester accounts can opt in. Privileged and temporary
+            # credentials retain the existing short session policy.
+            remembered=bool(remember and owner and owner['role']=='tester'and not owner['must_change'])
+            expires=now+(self.remembered_seconds if remembered else self.absolute)
+            db.execute('INSERT INTO sessions VALUES(?,?,?,?,?,?)',(token_hash(token),account,csrf,now,now,expires))
+            if remembered:db.execute('INSERT INTO remembered_sessions VALUES(?)',(token_hash(token),))
         return token,self.session(token)
     def session(self,token,touch=True):
         if not token or len(token)>200:raise Failure('login_required',401)
         now=stamp()
         with self.store.tx()as db:
-            row=db.execute('SELECT a.*,s.csrf,s.token_hash,s.created AS session_created,s.last_seen,s.expires FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE token_hash=?',(token_hash(token),)).fetchone()
-            if not row or not row['enabled']or row['deleted']or row['expires']<=now or row['last_seen']<=now-self.idle:
+            row=db.execute('SELECT a.*,s.csrf,s.token_hash,s.created AS session_created,s.last_seen,s.expires,EXISTS(SELECT 1 FROM remembered_sessions r WHERE r.token_hash=s.token_hash) AS remembered FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token_hash=?',(token_hash(token),)).fetchone()
+            remembered=bool(row and row['remembered']and row['role']=='tester'and not row['must_change'])
+            if not row or not row['enabled']or row['deleted']or row['expires']<=now or(not remembered and row['last_seen']<=now-self.idle)or(row['remembered']and not remembered):
                 db.execute('DELETE FROM sessions WHERE token_hash=?',(token_hash(token),));db.commit();raise Failure('login_required',401)
             if touch:db.execute('UPDATE sessions SET last_seen=? WHERE token_hash=?',(now,token_hash(token)))
             return dict(row)

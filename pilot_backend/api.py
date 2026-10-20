@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio,csv,hashlib,hmac,io,ipaddress,json,os,re,secrets,threading
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,parse_qs,urlencode
 from fastapi import FastAPI,Request
 from fastapi.responses import JSONResponse,HTMLResponse,FileResponse,RedirectResponse,Response
 from starlette.concurrency import run_in_threadpool
@@ -88,7 +88,9 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if request.method not in {'GET','HEAD','POST'}:return early(Failure('invalid_request',405))
         if request.method=='POST':
             if not request.url.path.startswith('/api/linghub/v1/') and (request.headers.get('origin')not in config['allowed_origins']or urlsplit(request.headers.get('origin','')).netloc!=request.headers.get('host')):return early(Failure('forbidden',403))
-            if request.headers.get('content-type','').split(';')[0]!='application/json':return early(Failure('invalid_request',415))
+            content_type=request.headers.get('content-type','').split(';')[0]
+            native_login=request.url.path==api+'/login'and content_type=='application/x-www-form-urlencoded'
+            if content_type!='application/json'and not native_login:return early(Failure('invalid_request',415))
             try:
                 if int(request.headers.get('content-length','0'))>65536:return early(Failure('request_too_large',413))
             except ValueError:return early(Failure('invalid_request'))
@@ -131,9 +133,10 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     def capability_result(s):
         if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
-    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
-    def set_session(token,s):
-        result=JSONResponse(session_result(s));result.set_cookie(cookie,token,httponly=True,secure=config['secure_cookies'],samesite='strict',path=base+'/'if base else'/',max_age=auth.absolute);return result
+    def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
+    def set_session(token,s,result=None):
+        if result is None:result=JSONResponse(session_result(s))
+        result.set_cookie(cookie,token,httponly=True,secure=config['secure_cookies'],samesite='strict',path=base+'/'if base else'/',max_age=max(1,int(s['expires']-s['session_created'])));return result
     @app.get(base+'/health')
     async def health():return {'status':'ok',**({'release_id':config['release_id']}if config.get('release_id')else{})}
     @app.get(api+'/session')
@@ -142,16 +145,39 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         except Failure:return {'authenticated':False,'csrf_token':None,'user':None,'capabilities':{}}
     @app.post(api+'/login')
     async def login(request:Request):
-        p=await payload(request);username=text(p.get('username'),80);password=text(p.get('password'),1024)
+        native=request.headers.get('content-type','').split(';')[0]=='application/x-www-form-urlencoded'
+        if native:
+            try:
+                fields=parse_qs((await request.body()).decode('utf-8'),keep_blank_values=True,max_num_fields=8)
+                if any(len(v)!=1 for v in fields.values()):raise ValueError()
+                p={k:v[0]for k,v in fields.items()}
+                if p.get('remember','')not in {'','on'}:raise ValueError()
+                p['remember']=p.get('remember')=='on'
+            except(UnicodeError,ValueError):raise Failure('invalid_request')from None
+        else:p=await payload(request)
+        if type(p.get('remember',False))is not bool:raise Failure('invalid_request')
+        # A native form POST followed by navigation is recognized by password
+        # managers. Credentials never enter a URL or browser web storage.
+        destination=base+('/it/'if p.get('locale')=='it'else'/')
+        query={key:p[key]for key in ('answer','comparison')if isinstance(p.get(key),str)and re.fullmatch(r'[a-f0-9-]{36}',p[key])}
+        def redirect(error=None):
+            params={**query,**({'login_error':error}if error else{})}
+            return RedirectResponse(destination+('?' + urlencode(params)if params else''),status_code=303)
+        username=text(p.get('username'),80);password=text(p.get('password'),1024)
         # Only the actual peer is a rate-limit source. Spoofed forwarded headers are ignored.
         source=request.client.host if request.client else'unknown'
         if config.get('edge_token'):
             try:source=str(ipaddress.ip_address(request.headers['X-Pilot-Client-IP']))
             except(KeyError,ValueError):raise Failure('forbidden',403)from None
-        token,s=await password_call(auth.login,username,password,source)
+        try:
+            args=(username,password,source,True)if p.get('remember')else(username,password,source)
+            token,s=await password_call(auth.login,*args)
+        except Failure as error:
+            if native:return redirect('login_throttled'if error.code in {'login_throttled','login_busy'}else'login_failed')
+            raise
         old=request.cookies.get(cookie)
         if old:auth.logout(old)
-        return set_session(token,s)
+        return set_session(token,s,redirect()if native else None)
     @app.post(api+'/logout')
     async def logout(request:Request):
         user(request,False);auth.logout(request.cookies.get(cookie));r=JSONResponse({'acknowledged':True});r.delete_cookie(cookie,path=base+'/'if base else'/');return r

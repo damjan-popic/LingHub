@@ -28,7 +28,7 @@ def backup(store,archive):
         # SQLite online backup is a consistent committed snapshot, including queued job identities.
         source=store.connect();target=sqlite3.connect(dbpath)
         try:
-            source.backup(target);target.execute('PRAGMA secure_delete=ON');target.execute('DELETE FROM sessions');target.commit()
+            source.backup(target);target.execute('PRAGMA foreign_keys=ON');target.execute('PRAGMA secure_delete=ON');target.execute('DELETE FROM sessions');target.commit()
             # Only the disposable snapshot is normalized to a standalone database.
             # Never retain session runtime material or require a companion WAL file.
             target.execute('PRAGMA journal_mode=DELETE')

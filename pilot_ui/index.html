@@ -8,7 +8,7 @@
   <script type="module" src="__PILOT_BASE__/assets/pilot.mjs"></script>
 </head>
 <body>
-<a class="skip" href="#main" data-i18n="skip_main">Preskoči na vsebino / Salta al contenuto</a>
+<a class="skip" href="#main" data-i18n="skip_main">Preskočite na vsebino / Salta al contenuto</a>
 <header class="site-header">
   <div class="brand-group"><a href="__PILOT_BASE__/" class="wordmark" aria-label="klikai">klik<span>ai</span></a></div>
   <div class="header-actions"><button id="beta-logout" class="plain" type="button" data-i18n="logout" hidden></button><nav id="locale-nav" class="locales" data-i18n-aria="ui_language"><a href="__PILOT_BASE__/" lang="sl" hreflang="sl" data-locale="sl" aria-label="Slovenščina">SL</a><span aria-hidden="true">/</span><a href="__PILOT_BASE__/it/" lang="it" hreflang="it" data-locale="it" aria-label="Italiano">IT</a></nav><button id="account-button" class="icon-button" type="button" data-i18n-aria="account" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button></div>
@@ -18,8 +18,12 @@
   <div id="global-status" class="status" role="status" aria-live="polite"></div>
   <section id="login-view" class="login-card" hidden>
     <div class="small-rule" aria-hidden="true"></div><h1 class="login-greeting"><span data-i18n="welcome"></span> <span class="wordmark" role="img" aria-label="KLIKai">klik<span>ai</span></span></h1><p class="muted" data-i18n="login_intro"></p>
-    <form id="login-form"><label for="username" data-i18n="username"></label><input id="username" name="username" autocomplete="username" maxlength="200" required>
+    <form id="login-form" method="post" action="__PILOT_BASE__/api/pilot/login" autocomplete="on">
+      <input id="login-locale" type="hidden" name="locale" value="__PILOT_LOCALE__"><input id="login-answer" type="hidden" name="answer"><input id="login-comparison" type="hidden" name="comparison">
+      <label for="username" data-i18n="username"></label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="80" required>
       <label for="password" data-i18n="password"></label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required><button id="password-visibility" class="plain" type="button" data-i18n="show_password"></button></div>
+      <label class="remember-login" for="remember-login"><input id="remember-login" type="checkbox" name="remember"><span data-i18n="remember_login"></span></label>
+      <p class="small muted login-help" data-i18n="password_manager_hint"></p>
       <p id="login-error" class="error" role="alert"></p><button class="primary wide" type="submit" data-i18n="sign_in"></button>
     </form>
   </section>

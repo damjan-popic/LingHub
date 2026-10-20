@@ -9,6 +9,8 @@ const base = basePath(document.documentElement.dataset.pilotBase);
 const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false};
 let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0;
 let registry = {sources:[]};
+let signInResume = null;
+const loginDraftKey = 'klikai-login-draft:'+base;
 const beta = () => state.capabilities.project_beta === true;
 const t = (key, values={}) => (state.messages[state.locale]?.[beta() && state.messages[state.locale]?.['beta_'+key] ? 'beta_'+key : key] || key).replace(/\{(\w+)\}/g,(_,name)=>String(values[name]??''));
 const keyFor = name => {if(!state.requestKeys.has(name))state.requestKeys.set(name,crypto.randomUUID());return state.requestKeys.get(name);};
@@ -26,6 +28,7 @@ function setLocale(locale,push=true) {
   document.querySelectorAll('[data-i18n-aria]').forEach(n=>n.setAttribute('aria-label',t(n.dataset.i18nAria)));
   document.querySelectorAll('[data-i18n-placeholder]').forEach(n=>n.setAttribute('placeholder',t(n.dataset.i18nPlaceholder)));
   $('public-release').textContent=releaseLabel(publicRelease,state.locale,t);
+  $('login-locale').value=state.locale;
   document.querySelectorAll('[data-locale]').forEach(n=>{const active=n.dataset.locale===state.locale;n.href=localePath(base,n.dataset.locale)+location.search;n.toggleAttribute('aria-current',false);if(active)n.setAttribute('aria-current','page');});
   if(!state.answerLocaleExplicit)$('answer-locale').value=state.locale;
   if(state.clarification)clarificationText();
@@ -45,7 +48,7 @@ async function api(path, options={}) {
     const res=await fetch(base+'/api/pilot'+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',headers,body:method==='GET'?undefined:JSON.stringify(options.body||{}),signal:controller.signal});
     const data=options.response==='text'&&res.ok?await res.text():await res.json().catch(()=>({}));
     if(!res.ok){const err=Error(data.error?.message||t(errorKey(data.error?.code)));err.code=data.error?.code;err.localized=data.error?.locale===state.locale;err.status=res.status;
-      if(res.status===401&&path!=='/login'){resetPrivate();$('login-view').hidden=false;textStatus('login-error','session_expired');}throw err;}
+      if(res.status===401&&path!=='/login'){const resume=signInResume||{question:$('question').value,answer:familyId(),comparison:state.comparison?.comparison_id};resetPrivate();signInResume=resume;$('login-view').hidden=false;textStatus('login-error','session_expired');}throw err;}
     return data;
   } catch(err){if(err.name==='AbortError'){err.code='timeout';err.localized=false;}throw err;}finally{clearTimeout(timer);}
 }
@@ -101,12 +104,15 @@ function clarificationText(){textStatus('clarification-message',state.clarificat
 function showClarification(value){clearFeedbackContext();resetMatches();state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');if(beta()){$('text-language-control').hidden=!value.fields.includes('input_language');}else if(value.fields.includes('input_language')){$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');}clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
 async function bootstrap() {
   const before=new URL(location.href),answer=before.searchParams.get('answer'),comparison=before.searchParams.get('comparison');textStatus('global-status','loading');
+  const loginError=before.searchParams.get('login_error');
+  if(loginError){before.searchParams.delete('login_error');history.replaceState({},'',before);}
   const session=await api('/session');state.csrf=session.csrf_token;state.capabilities=session.capabilities||{};applyBetaPresentation();
-  if(!session.authenticated){$('login-view').hidden=false;textStatus('global-status','');return;}
+  if(!session.authenticated){$('login-view').hidden=false;textStatus('global-status','');if(['login_failed','login_throttled'].includes(loginError))textStatus('login-error',loginError);return;}
   authenticated(session);textStatus('global-status','');if(state.user.must_change_password)return;
   await refreshCapabilities();
   await loadFeedback();
   if(answer){await loadFamily(answer);if(comparison&&!beta())await loadComparison(comparison);}
+  try{const draft=sessionStorage.getItem(loginDraftKey);sessionStorage.removeItem(loginDraftKey);if(draft&&!answer)$('question').value=draft;}catch{}
 }
 function evidenceId(item) {return item?.evidence_id||item?.passage_id||item?.id||item?.citation_id;}
 function evidenceFor(tier) {return Array.isArray(tier?.evidence)?tier.evidence:[];}
@@ -391,7 +397,7 @@ function download(data,name,raw=false){const blob=new Blob([raw?data:JSON.string
 function bind() {
   document.querySelectorAll('[data-locale]').forEach(a=>a.addEventListener('click',event=>{event.preventDefault();setLocale(a.dataset.locale);}));window.addEventListener('popstate',()=>setLocale(location.pathname.endsWith('/it/')?'it':'sl',false));
   document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).close()));
-  $('login-form').addEventListener('submit',event=>{event.preventDefault();action(event.submitter,async()=>{textStatus('login-error','');const username=$('username').value,password=$('password').value;const session=await api('/login',{method:'POST',body:{username,password}});$('password').value='';authenticated(session);if(!session.user.must_change_password){await refreshCapabilities();await loadFeedback();}},'login-error');});
+  $('login-form').addEventListener('submit',()=>{const current=new URL(location.href);$('login-locale').value=state.locale;$('login-answer').value=signInResume?.answer||current.searchParams.get('answer')||'';$('login-comparison').value=signInResume?.comparison||current.searchParams.get('comparison')||'';try{if(signInResume?.question)sessionStorage.setItem(loginDraftKey,signInResume.question);}catch{}textStatus('login-error','');$('login-form').setAttribute('aria-busy','true');});
   $('password-visibility').addEventListener('click',()=>{const show=$('password').type==='password';$('password').type=show?'text':'password';$('password-visibility').textContent=t(show?'hide_password':'show_password');});
   $('password-form').addEventListener('submit',event=>{event.preventDefault();if($('new-password').value!==$('confirm-password').value){textStatus('password-error','password_mismatch');return;}action(event.submitter,async()=>{await api('/password',{method:'POST',body:{current_password:$('current-password').value,new_password:$('new-password').value}});$('password-form').reset();authenticated(await api('/session'));textStatus('global-status','password_changed');},'password-error');});
   $('password-cancel').addEventListener('click',()=>{if(state.user&&!state.user.must_change_password){$('password-view').hidden=true;$('app-view').hidden=false;}});

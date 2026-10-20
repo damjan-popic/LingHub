@@ -22,6 +22,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,username TEXT NOT NULL,username_key TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('tester','reviewer','admin')),cohort TEXT NOT NULL,origin TEXT NOT NULL CHECK(origin IN ('human','synthetic','imported','test')),enabled INTEGER NOT NULL DEFAULT1,must_change INTEGER NOT NULL DEFAULT1,password_expires REAL,created REAL NOT NULL,deleted INTEGER NOT NULL DEFAULT0);
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,csrf TEXT NOT NULL,created REAL NOT NULL,last_seen REAL NOT NULL,expires REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS remembered_sessions(token_hash TEXT PRIMARY KEY REFERENCES sessions(token_hash) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT NOT NULL,at REAL NOT NULL,success INTEGER NOT NULL,PRIMARY KEY(key,at));
 CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,account_id TEXT,detail TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS policies(id TEXT PRIMARY KEY,config TEXT NOT NULL,parent_id TEXT REFERENCES policies(id),created REAL NOT NULL,status TEXT NOT NULL);

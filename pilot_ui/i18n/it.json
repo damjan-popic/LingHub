@@ -134,7 +134,7 @@
   "slori_website": "Sito web · SLORI",
   "task_mode": "Modalità",
   "loading": "Caricamento…",
-  "welcome": "Ciao, sono",
+  "welcome": "Buongiorno, sono",
   "password_current": "Password attuale",
   "password_new": "Nuova password",
   "password_confirm": "Ripeti la nuova password",
@@ -383,5 +383,7 @@
   "current_original_heading": "Originale attualmente disponibile",
   "current_original_offer": "L’originale integrale non era disponibile quando è stata preparata questa risposta. Puoi provare ad aprirlo adesso.",
   "current_original_notice": "Questo originale è stato recuperato adesso. Non era disponibile quando è stata preparata la risposta salvata e non fa parte delle sue citazioni conservate. La risposta e le fonti salvate rimangono invariate.",
-  "current_original_unavailable": "L’originale non è ancora disponibile. L’estratto di ricerca conservato rimane visibile sopra."
+  "current_original_unavailable": "L’originale non è ancora disponibile. L’estratto di ricerca conservato rimane visibile sopra.",
+  "remember_login": "Mantieni l’accesso per 30 giorni",
+  "password_manager_hint": "Puoi salvare la password nel gestore di password del browser. Scegli di mantenere l’accesso sul tuo dispositivo personale."
 }

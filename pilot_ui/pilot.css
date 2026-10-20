@@ -47,3 +47,6 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 .login-greeting{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:.3em;row-gap:.05em;font-size:1.5rem;line-height:1.3}.login-greeting .wordmark{font-size:inherit;line-height:inherit;letter-spacing:-.06em;white-space:nowrap}
 
 .lexical-profile {margin-block:1.2rem;border-block:1px solid var(--border,#d9dfd9);padding-block:1rem}.lexical-profile>details {padding:.6rem 0}.lexical-profile summary{cursor:pointer;font-weight:600}.lexical-entry{padding:.5rem 1rem;border-left:3px solid #43806b;margin:.7rem 0}.lexical-entry h4,.lexical-entry p{margin:.3rem 0}.lexical-entry small{color:#53665c}.lexical-alternative{font-weight:600}
+
+/* A labelled, comfortable sign-in preference on desktop and mobile. */
+.remember-login{display:flex;align-items:center;gap:10px;margin:18px 0 8px;min-height:36px;font-weight:500;cursor:pointer}.remember-login input{width:18px;height:18px;margin:0;flex:none;accent-color:var(--green)}.login-help{line-height:1.55;margin:8px 0 18px}.login-greeting{flex-wrap:wrap}

@@ -109,7 +109,7 @@ class Gateway:
         if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
     def freeze(self,family,policy):
         if family['task']=='reference'and self.unified_answers:
-            guidance=request_tasks.freeze(family)
+            guidance=request_tasks.freeze(family,self)
             if guidance is not None:return guidance
             return unified.freeze(self,family,policy)
         if family['task'] in editorial.SOURCES:

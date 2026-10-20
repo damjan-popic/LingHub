@@ -260,7 +260,9 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             if not evidence:raise Failure('not_found',404)
             labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis 2025'}
             result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope')}
-        return {k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view')if k in result}
+        from .source_reader import source_view
+        result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view')if k in result}
+        return source_view(result,f['locale'])
     @app.get(api+'/families/{fid}/sources/{eid:path}/current-original')
     async def family_current_original(fid:str,eid:str,request:Request,tier:str='short'):
         u=user(request);return present(u,await source_for(u['id'],fid,eid,tier,current_original=True))
@@ -272,6 +274,12 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/feedback')
     async def feedback_history(request:Request):
         u=user(request);return present(u,domain.feedback_history(owner=u['id']))
+    @app.get(api+'/runs/{rid}/feedback')
+    async def run_feedback(rid:str,request:Request):
+        u=user(request);return present(u,domain.run_feedback(u['id'],rid))
+    @app.get(api+'/submissions/{key}')
+    async def submission(key:str,request:Request):
+        u=user(request);return present(u,domain.submission(u['id'],key))
     @app.post(api+'/comparisons')
     async def comparison_new(request:Request):return await run_in_threadpool(domain.create_comparison,operator_presentation(request)['id'],await payload(request))
     @app.get(api+'/comparisons/{aid}')
@@ -434,7 +442,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'pilot.css','pilot.mjs','core.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
+        if asset not in {'pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n',ui/'brand'}:raise Failure('not_found',404)
         return FileResponse(target)

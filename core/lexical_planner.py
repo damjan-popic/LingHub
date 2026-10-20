@@ -100,7 +100,9 @@ def lexical_object_span(text):
 def is_referential_request(text):
  """Only an explicit demonstrative task can bind its supplied context."""
  return bool(re.fullmatch(r'\s*(?:(?:a|ali)\s+)?(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:tudi\s+)?(?:v\s+\w+\s+)?(?:uporablja|rabi|velja)(?:\s+.+)?[?.!]?\s*',text,re.I)
-  or re.fullmatch(r'\s*(?:kako|kaj)\s+(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:pomeni|pove|reče|prevede|sklanja|napiše|zapiše)(?:\s+[^?!.]+)?[?.!]?\s*',text,re.I))
+  or re.fullmatch(r'\s*(?:kako|kaj)\s+(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:pomeni|pove|reče|prevede|sklanja|napiše|zapiše)(?:\s+[^?!.]+)?[?.!]?\s*',text,re.I)
+  or re.fullmatch(r'\s*(?:kako\s+se\s+(?:prevede|sklanja|napiše|zapiše)|(?:ali\s+)?(?:to\s+)?obstaja|(?:ali\s+)?se\s+(?:to\s+)?uporablja)(?:\s+(?:tudi\s+)?(?:v|na|po)\s+[^?!.]+)?[?.!]?\s*',text,re.I)
+  or re.fullmatch(r'\s*(?:come\s+si\s+(?:traduce|declina|scrive)|(?:questo\s+)?esiste|si\s+usa)(?:\s+(?:anche\s+)?in\s+[^?!.]+)?[?.!]?\s*',text,re.I))
 
 def bound_context_target(text,context,language='und'):
  """Resolve one explicitly supplied expression/question; never search user history."""

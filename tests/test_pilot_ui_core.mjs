@@ -65,8 +65,8 @@ test('both locales have every static UI key and an identical nonempty dictionary
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');for(const m of html.matchAll(/data-i18n(?:-aria|-placeholder)?="([a-z_]+)"/g)){assert(sl[m[1]],m[1]);assert(it[m[1]],m[1]);}
   assert.equal((html.match(/id="question"/g)||[]).length,1);assert(!/<script(?![^>]*src=)[^>]*>/i.test(html));
 });
-test('public browser code has no browser storage, raw model endpoint or unsafe HTML sink',()=>{
-  const code=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');assert(!/\.innerHTML\s*=|insertAdjacentHTML|localStorage|sessionStorage|127\.0\.0\.1|localhost|18221|8021|eval\(/.test(code));assert(code.includes("credentials:'same-origin'"));assert(code.includes("headers['X-CSRF-Token']"));
+test('public browser code has no persistent local storage, raw model endpoint or unsafe HTML sink',()=>{
+  const code=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');assert(!/\.innerHTML\s*=|insertAdjacentHTML|localStorage|127\.0\.0\.1|localhost|18221|8021|eval\(/.test(code));assert(code.includes("credentials:'same-origin'"));assert(code.includes("headers['X-CSRF-Token']"));
 });
 test('unrecognized API internals use generic translated error',()=>{
   assert.equal(errorKey('database_private_path_leak'),'request_failed');assert.equal(errorKey('invalid_credentials'),'login_failed');assert.equal(errorKey('generation_rejected'),'answer_guard_failed');

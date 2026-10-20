@@ -421,7 +421,8 @@ def attempt_case(db, run_id):
     degraded=bool(retrieval.get('status') in {'partial','unavailable'} or frozen.get('retrieval',{}).get('degraded'))
     latest=feedback[-1] if feedback else {}
     rating=latest.get('quality_score') or latest.get('rating') or 'unrated'
-    summary={'run_id':run_id,'family_id':family['id'],'job_id':job.get('id'),'parent_run_id':run['parent_run_id'],
+    relation=db.execute('SELECT kind FROM run_relations WHERE run_id=?',(run_id,)).fetchone()
+    summary={'parent_relation':relation[0]if relation else None,'run_id':run_id,'family_id':family['id'],'job_id':job.get('id'),'parent_run_id':run['parent_run_id'],
         'participant_id':account['id'],'participant':observation['participant']['username'],'group':observation['participant']['group'],
         'origin':observation['participant']['origin'],'timestamp':run['created'],'question':original[0] if original else family['question'],
         'release':result.get('application_release') or observation.get('versions',{}).get('application_release'),

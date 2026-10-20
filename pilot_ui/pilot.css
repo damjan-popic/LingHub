@@ -50,3 +50,14 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 
 /* A labelled, comfortable sign-in preference on desktop and mobile. */
 .remember-login{display:flex;align-items:center;gap:10px;margin:18px 0 8px;min-height:36px;font-weight:500;cursor:pointer}.remember-login input{width:18px;height:18px;margin:0;flex:none;accent-color:var(--green)}.login-help{line-height:1.55;margin:8px 0 18px}.login-greeting{flex-wrap:wrap}
+
+/* Saved group feedback is readable alongside the answer at every width. */
+.saved-feedback{flex-basis:100%;width:100%;text-align:left;border-top:1px solid var(--border,#ddd);padding-top:1rem}
+.saved-feedback summary{font-weight:600;cursor:pointer}
+.feedback-event{border-left:3px solid #e7a04a;padding:.35rem 1rem;margin:.8rem 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.project-beta #short-feedback{display:flex;flex-wrap:wrap;width:100%;gap:.7rem}
+.project-beta .answer-actions{flex-wrap:wrap}
+.source-external-link{display:inline-block;padding:.65rem 0;text-decoration:underline;font-weight:600}
+#source-content blockquote{white-space:pre-wrap;overflow-wrap:anywhere}
+#testing-guide p{line-height:1.65}
+#followup-context{overflow-wrap:anywhere}

@@ -8,7 +8,7 @@ from .classification import method
 from . import human_feedback
 from .adoption import historical_record
 
-RATINGS={None,'useful','partly_useful','not_useful'}
+RATINGS={None,'useful','partly_useful','not_useful','cannot_judge'}
 TAGS={'linguistic','missing_context','source','accent','language','interface','slow','incorrect','incomplete','unclear','too_long','too_short','source_issue','wrong_language','unsupported','other','wrong_form','missing_qualification','citation','style','translation','factual_error','irrelevant','unsafe','formatting'}
 VOTES={'A','B','equivalent','both_inadequate','cannot_judge'}
 
@@ -58,6 +58,22 @@ class Domain:
     def admit(self,db,owner,count=1):
         active="state IN ('queued','running')"
         if db.execute(f'SELECT count(*)FROM jobs WHERE {active}').fetchone()[0]+count>self.max_queue or db.execute(f'SELECT count(*)FROM jobs WHERE owner=?AND {active}',(owner,)).fetchone()[0]+count>self.per_owner:raise Failure('queue_full',429)
+    def submission(self,owner,key):
+        checked_key(key)
+        with self.store.connect()as db:
+            row=db.execute("SELECT response FROM request_keys WHERE owner=? AND scope='family' AND key=?",(owner,key)).fetchone()
+            if not row:raise Failure('not_found',404)
+            saved=json.loads(row['response'])
+        return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
+    def run_feedback(self,owner,rid):
+        with self.store.connect()as db:
+            self.run(db,rid,owner)
+            rows=[]
+            for row in db.execute('SELECT e.revision,e.rating,e.tags,e.comment,e.correction,e.anchor,e.target,e.created,a.username AS "group" FROM feedback_events e JOIN feedback f ON f.id=e.feedback_id JOIN accounts a ON a.id=f.owner WHERE f.owner=? AND f.run_id=? ORDER BY e.revision',(owner,rid)):
+                value=dict(row)
+                for key in ('tags','anchor','target'):value[key]=json.loads(value[key])if value[key]else None
+                rows.append(value)
+        return {'run_id':rid,'events':rows}
     def new_run(self,db,family,owner,tier,model,assignment=None,parent=None,automated=False):
         if historical_record(db,family,owner=owner)is not None:raise Failure('historical_generation_unavailable',409)
         rid,jid=uid(),uid();now=stamp()
@@ -77,7 +93,10 @@ class Domain:
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
     def create_family(self,owner,payload):
-        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id'})
+        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id','parent_relation'})
+        relation=payload.get('parent_relation')
+        if relation is not None and (relation not in ('retry','followup') or not isinstance(payload.get('parent_run_id'),str) or not payload['parent_run_id']):raise Failure('invalid_request')
+        if 'parent_run_id'in payload and (not isinstance(payload['parent_run_id'],str) or not payload['parent_run_id']):raise Failure('invalid_request')
         original_question=text(payload.get('question'),5000);q=original_question.strip();context=text(payload.get('context',''),3000)
         locale=payload.get('locale','sl');interface=payload.get('interface_locale',locale);input_language=payload.get('input_language','und');task=payload.get('task','reference');model=payload.get('model',self.default_model)
         if any(not isinstance(v,str)for v in (locale,interface,input_language,task,model)):raise Failure('invalid_request')
@@ -102,17 +121,24 @@ class Domain:
                 if task=='reference'and not self.unified_answers:self.require_generation([model])
                 parent=payload.get('parent_run_id');effective_context=context
                 if parent:
+                    if not isinstance(parent,str):raise Failure('invalid_request')
                     prior=self.run(db,parent,owner)
+                    previous=self.owned(db,'families',prior['family_id'],owner)
+                    if task!='reference'or previous['task']!='reference':raise Failure('invalid_request')
+                    if relation=='retry' and (prior['state']not in {'failed','cancelled'} or q!=previous['question']or context!=previous['context']):raise Failure('invalid_request')
                     # Only an explicitly supplied, owned run can bind a referent.
                     # Shared account chronology is never consulted.
                     if not context.strip() and request_tasks.unresolved_reference(q):
-                        previous=self.owned(db,'families',prior['family_id'],owner)['question']
-                        if len(previous)<=3000:effective_context=previous
+                        from core.lexical_planner import is_referential_request
+                        bound=previous['context']if is_referential_request(previous['question'])else previous['question']
+                        if len(bound)<=3000:effective_context=bound
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
-                r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test');return dict(family_id=fid,**r)
+                r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')
+                if relation:db.execute('INSERT INTO run_relations VALUES(?,?)',(r['run_id'],relation))
+                return dict(family_id=fid,**r)
             saved=self.idem(db,owner,'family',payload,action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
     def expand(self,owner,fid,payload):
@@ -130,6 +156,8 @@ class Domain:
     def tier(self,db,run,blind=False):
         historical=historical_record(db,run['family_id'],run_id=run['id'])
         r=dict(run);out={k:r[k]for k in ('state','revision','parent_run_id')};out['run_id']=r['id']
+        relation=db.execute('SELECT kind FROM run_relations WHERE run_id=?',(r['id'],)).fetchone()
+        out['parent_relation']=relation[0]if relation else None
         job=db.execute('SELECT id,error_code FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
         if not blind:
             out['job_id']=job[0]if job else None
@@ -151,7 +179,7 @@ class Domain:
         return out
     def family(self,owner,fid):
         with self.store.connect()as db:
-            f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
+            f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'context':f['context'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             out['matches_available']=bundle.get('contract')==unified.CONTRACT or (bundle.get('contract')==request_tasks.CONTRACT and bool(bundle['decision']['resources']))
             if bundle.get('contract')==unified.CONTRACT:
@@ -199,7 +227,7 @@ class Domain:
                 if a['blind']and not a['revealed']and terminal<2:return {'job_id':jid,'state':'queued','family_id':r['family_id'],'tier':r['tier'],'position':None,'error_code':None,'pair_state':'preparing'}
             result=json.loads(r['result'])if r['result']else{}
             cancellation_mode='queued_removed'if j['state']=='cancelled'and j['started']is None else'stop_before_generation'if result.get('progress',{}).get('stage')=='retrieval'else'finish_current_operation'
-            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress'),'cancel_requested':bool(j['cancel_requested']),'cancellation_mode':cancellation_mode if j['cancel_requested']else None,'provider_interruption_supported':False}
+            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress'),'cancel_requested':bool(j['cancel_requested']),'cancellation_mode':cancellation_mode if j['cancel_requested']else None,'provider_interruption_supported':False,'created':j['created'],'started':j['started'],'finished':j['finished'],'elapsed_seconds':max(0,(j['finished'] or stamp())-j['created'])}
     def cancel(self,owner,jid):
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)

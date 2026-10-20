@@ -24,9 +24,9 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(handler){
   const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,new Node());return nodes.get(id);};
   const family=id=>({answer_family_id:id,question:'Question '+id,locale:'sl',task:'reference',short:{run_id:'run-'+id,state:'complete'},long:null});
-  const state={boot:0,locale:'sl',family:family('a'),feedbackTarget:null,feedback:new Map(),feedbackDrafts:new Map(),delivered:new Set(),requestKeys:new Map(),polling:new Map(),capabilities:{},longOpen:false};
+  const state={boot:0,user:{id:'fixture'},locale:'sl',family:family('a'),feedbackTarget:null,feedback:new Map(),feedbackEvents:new Map(),feedbackDrafts:new Map(),delivered:new Set(),requestKeys:new Map(),polling:new Map(),capabilities:{},longOpen:false};
   const renders=[],calls=[];
-  const context={state,$,document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,
+  const context={state,$,submission:{clear(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,
     beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,
     textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:()=>new Node(),clear:n=>n.replaceChildren(),
     resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),

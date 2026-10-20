@@ -29,7 +29,7 @@ def packaged_documentary_sources():
 SAFE = frozenset({
     'family', 'families', 'job', 'answer_family_id', 'family_id', 'run_id', 'job_id',
     'question', 'context', 'locale', 'input_language', 'task', 'created', 'short', 'long',
-    'state', 'status', 'parent_run_id', 'matches_available', 'unified_answers', 'focus',
+    'state', 'status', 'parent_run_id', 'parent_relation', 'matches_available', 'unified_answers', 'focus',
     'short_answer', 'answer_md', 'blocks', 'block_id', 'text', 'paragraph_id', 'evidence_ids',
     'evidence', 'evidence_id', 'citation_id', 'citations', 'claim_id', 'local_number',
     'source_badges', 'source_slug', 'source_label', 'source_key', 'label', 'display_name',
@@ -42,6 +42,8 @@ SAFE = frozenset({
     'anchor', 'target', 'kind', 'quote', 'start', 'end', 'prefix', 'suffix',
     'sources', 'items', 'record_id', 'preview', 'offset', 'limit', 'returned_count',
     'next_offset', 'corpus_total', 'count_scope', 'usage_final', 'used_in_answer', 'answer_status',
+    'reader_blocks', 'heading', 'revision', 'correction', 'group', 'events',
+    'started', 'finished', 'elapsed_seconds', 'followup',
 })
 
 LIMITATION_CODES = frozenset({'partial_evidence', 'no_answer_evidence', 'conflicting_evidence',
@@ -84,5 +86,5 @@ def tester_view(value, owner, secret):
     if value.get('error_code'):out['error_code']='answer_unavailable'
     if isinstance(out.get('progress'),dict):
         stage=out['progress'].get('stage')
-        out['progress']={'stage':stage if stage in {'retrieval','generation','complete'}else'generation'}
+        out['progress']={'stage':stage if stage in {'retrieval','generation','validation','complete'}else'generation'}
     return out

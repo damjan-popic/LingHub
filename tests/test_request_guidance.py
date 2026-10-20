@@ -160,3 +160,15 @@ def test_missing_or_unrelated_forms_are_not_recommended():
  # Upstream failure must remain an availability error, not a fabricated no-hit.
  with pytest.raises(Exception):
   documents.lookup(NoNetwork(),'Kje najdem obrazec za samoizjavo?','sl')
+
+def test_metadata_only_resource_cards_do_not_show_ingestion_diagnostics():
+ from pilot_backend import documents
+ class Search:
+  klikai_url='http://127.0.0.1:8000'
+  def request(self,*a,**k):
+   hit=form_hits()[0]
+   hit.update(chunk_kind='resource_metadata',snippet='Status ekstrakcije: empty; internal diagnostic')
+   return {'hits':[hit]}
+ result=documents.lookup(Search(),'Kje najdem obrazec za samoizjavo?','sl')
+ assert result['resources'][0]['preview']==result['resources'][0]['title']
+ assert 'internal diagnostic' in result['retrieval']['response']['hits'][0]['snippet']

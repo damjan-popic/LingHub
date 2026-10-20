@@ -90,10 +90,11 @@ def lookup(gateway, question, locale):
     for _, hit in selected[:12]:
         fmt = hit.get('format') or 'HTML'
         title = hit['title'] + ' · ' + fmt
+        preview = hit.get('snippet', '') if hit.get('chunk_kind') == 'resource_fulltext' else title
         resources.append({'key': hit['resource_id'], 'title': title, 'url': hit['url'],
                           'verified_at': '2026-10-20', 'capability': 'web_access' if fmt == 'HTML' else 'download',
                           'source_slug': 'gradivo', 'source_label': 'Obrazci in gradivo',
-                          'format': fmt, 'preview': hit.get('snippet', ''),
+                          'format': fmt, 'preview': preview,
                           'chunk_kind': hit.get('chunk_kind'), 'chunk_index': hit.get('chunk_index')})
     it = locale == 'it'
     if resources:

@@ -41,9 +41,13 @@ def overview(bundle):
    if (not isinstance(construction,list)or not construction
        or not all(isinstance(x,str)and x for x in construction)
        or set(alternatives.get('required_construction_passage_ids',[]))!=set(construction)):return False
+   current=short.get('required_current_reference_passage_ids',[])
+   if (not isinstance(current,list)or not all(isinstance(x,str)and x for x in current)
+       or set(alternatives.get('required_current_reference_passage_ids',[]))!=set(current)):return False
    introduced=[f for f in short.get('families',[])if f.get('introduced')is True]
    if not any(f.get('complete')is False for f in introduced):return False
    required.update(construction)
+   required.update(current)
    for family in introduced:
     identity=tuple(family.get(key)for key in ('source_slug','target','query'))
     ids=family.get('passage_ids',[])

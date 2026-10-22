@@ -140,3 +140,15 @@ def test_construction_widening_preserves_already_complete_other_family_too():
  wide['input_profile']['dictionary_alternatives']['families'].append(family)
  wide['model_evidence'].extend({'passage_id':x}for x in family['passage_ids'])
  assert lexical.overview(bundle)is True
+
+@pytest.mark.parametrize('damage',[None,'missing_current','different_current','unprovided_current'])
+def test_construction_widening_preserves_matching_current_authority(damage):
+ bundle=construction_alternatives_bundle(2);packets=bundle['gateway_bundle']['payload']['packets']
+ short=packets['short']['input_profile']['dictionary_alternatives'];wide=packets['lexical_overview']
+ short['required_current_reference_passage_ids']=['current:entry']
+ wide['input_profile']['dictionary_alternatives']['required_current_reference_passage_ids']=['current:entry']
+ wide['model_evidence'].append({'passage_id':'current:entry'})
+ if damage=='missing_current':wide['input_profile']['dictionary_alternatives'].pop('required_current_reference_passage_ids')
+ if damage=='different_current':wide['input_profile']['dictionary_alternatives']['required_current_reference_passage_ids']=['other:entry']
+ if damage=='unprovided_current':wide['model_evidence'].pop()
+ assert lexical.overview(bundle)is(damage is None)

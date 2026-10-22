@@ -336,11 +336,13 @@ def dictionary_lookups(hit, query, family, candidate=None):
         return []
     grouped = {}
     if candidate is not None:
-        if candidate.get('query') != query or candidate.get('basis') != 'recorded_morphology_identity':
+        bases={'recorded_morphology_identity':'recorded_morphology_lemma',
+               'recorded_phrase_morphology_identity':'recorded_phrase_morphology_lemma'}
+        if candidate.get('query') != query or candidate.get('basis') not in bases:
             return []
         for record in candidate['source_records']:
             grouped.setdefault(record['target'], set()).add(record['source_entry_id'])
-        basis = 'recorded_morphology_lemma'
+        basis = bases[candidate['basis']]
     else:
         plan = family.get('request_plan') or {}
         original = family.get('original_question', family['question'])
@@ -352,6 +354,51 @@ def dictionary_lookups(hit, query, family, candidate=None):
         basis = 'original_surface'
     return [{'version': 'recorded-dictionary-lookup-v1', 'target': target, 'query': query,
              'basis': basis, 'source_entry_ids': sorted(entries)} for target, entries in sorted(grouped.items())]
+
+
+def recorded_phrase_lemmas(unit, interpretation, original, context):
+    """Attested component paradigms, without treating a phrase as one lexeme."""
+    if 'translation' in interpretation.get('requested_facets',[]):return []
+    if (unit.get('kind')!='analysis' or unit.get('match_relation')!='recorded_target'
+            or unit.get('selection',{}).get('state','primary') not in {'primary','alternative'}):return []
+    fields=unit.get('fields',{});target=unit.get('target')
+    if fields.get('submitted_expression')!=target:return []
+    spans=[t for t in interpretation.get('targets',[])if t.get('text')==target
+           and t.get('start')==fields.get('start')and t.get('end')==fields.get('end')]
+    if not spans or target not in literal_targets(spans,original,context):return []
+    source=original+'\n'+context if spans[0].get('span_scope')=='context'else original
+    surfaces=set()
+    for engine in fields.get('engines',{}).values():
+        for token in engine.get('tokens',[]):
+            start,end=token.get('start'),token.get('end')
+            if (type(start)is int and type(end)is int and fields['start']<=start<end<=fields['end']
+                    and source[start:end]==token.get('text')
+                    and token.get('upos')in {'NOUN','PROPN','ADJ','VERB','ADV'}):surfaces.add(token['text'])
+    result=[]
+    for surface,data in fields.get('recorded_forms',{}).items():
+        if surface not in surfaces or data.get('status')!='matched':continue
+        for reading in data.get('recorded_readings',[]):
+            lemma=reading.get('lemma');entry=reading.get('source_entry_id')
+            if (reading.get('exact_surface')is not True or reading.get('selection')not in {'primary','alternative'}
+                    or not isinstance(lemma,str)or not 1<=len(lemma.strip())<=160 or len(lemma.split())>8
+                    or not isinstance(entry,str)or not entry):continue
+            for recorded in data.get('source_slots',[]):
+                slot=recorded.get('slot',{});provenance=recorded.get('provenance',{})
+                if (recorded.get('source_entry_id')!=entry or recorded.get('lemma')!=lemma
+                        or provenance.get('source_entry_id')!=entry or provenance.get('resource_id')!='sloleks'
+                        or not re.fullmatch(r'[0-9a-f]{64}',str(provenance.get('source_archive_sha256','')))
+                        or type(reading.get('slot_locator'))is not int
+                        or slot.get('slot_locator')!=reading['slot_locator']
+                        or slot.get('original_msd')!=reading.get('original_msd')
+                        or slot.get('normalized_features')!=reading.get('features')):continue
+                if not any(v.get('form')==surface and v.get('source_locator')==reading.get('source_locator')
+                           and isinstance(v.get('source_locator'),str)and v['source_locator']
+                           for v in slot.get('variants',[])):continue
+                result.append((lemma,{'target':target,'surface':surface,'resource_id':'sloleks',
+                    'source_entry_id':entry,'captured_unit_id':unit.get('captured_unit_id'),
+                    'match_basis':'recorded_phrase_form','slot_locator':reading['slot_locator'],
+                    'variant_locator':reading['source_locator']}))
+    return result
 
 
 def validated_reference_lemmas(tool_capture, family):
@@ -372,6 +419,10 @@ def validated_reference_lemmas(tool_capture, family):
     targets=literal_targets(interpretation.get('targets',[]),original,context)
     grouped={}
     for unit in profile.get('evidence',[]):
+        for lemma,record in recorded_phrase_lemmas(unit,interpretation,original,context):
+            key=(_lookup_key(lemma),'recorded_phrase_morphology_identity')
+            value=grouped.setdefault(key,{'query':lemma.strip(),'basis':key[1],'source_records':[]})
+            if record not in value['source_records']:value['source_records'].append(record)
         if unit.get('kind')!='morphology' or unit.get('target')not in targets or unit.get('match_relation')!='recorded_target':continue
         fields=unit.get('fields',{});provenance=unit.get('provenance',{})
         lemma=fields.get('lemma');target=unit['target'];match=fields.get('matched_by')
@@ -383,7 +434,7 @@ def validated_reference_lemmas(tool_capture, family):
         elif match in {'exact_headword','folded_headword'}:
             if _lookup_key(lemma)!=_lookup_key(target):continue
         else:continue
-        key=_lookup_key(lemma)
+        key=(_lookup_key(lemma),'recorded_morphology_identity')
         record={'target':target,'resource_id':provenance['resource_id'],'source_entry_id':entry,
                 'captured_unit_id':unit.get('captured_unit_id'),'match_basis':match}
         value=grouped.setdefault(key,{'query':lemma.strip(),'basis':'recorded_morphology_identity','source_records':[]})

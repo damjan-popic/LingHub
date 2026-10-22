@@ -98,6 +98,25 @@ def lexical_object_span(text):
   if start<end and len(list(WORD.finditer(text[start:end])))<=16:return start,end
  return None
 
+_NAME_DESCRIPTOR=re.compile(r'(?:[^\W\d_]+(?:sk[oi]|šk[oi]|čk[oi])|mošk[oi]|žensk[oi]|osebn[oi]|tuj[ei]|lastn[oi]|rojstn[oi]|krstn[oi]|domač[ei])',re.I)
+
+def named_lexical_target(span):
+ """Separate an explicit name label from an unquoted inflection object.
+
+ Descriptors remain literal context, never a grammar verdict or a replacement
+ for the spelling supplied by the user. Quoted expressions and unrestricted
+ noun phrases do not enter this helper.
+ """
+ text=span['text']
+ match=re.fullmatch(r'(?P<descriptors>(?:[^\W\d_]+\s+){1,4})(?:ime|priimek)\s+(?P<name>.+)',text,re.U|re.I)
+ if not match:return span
+ descriptors=match['descriptors'].split()
+ if not all(_NAME_DESCRIPTOR.fullmatch(word)for word in descriptors):return span
+ start,end=match.span('name');name=text[start:end]
+ if not 1<=len(list(WORD.finditer(name)))<=8 or re.search(r'[«»“”"?!;\n]',name):return span
+ return {'text':name,'start':span['start']+start,'end':span['start']+end,
+  'basis':'named lexical object; descriptor context retained','context_span':copy.deepcopy(span)}
+
 def is_referential_request(text):
  """Only an explicit demonstrative task can bind its supplied context."""
  return bool(re.fullmatch(r'\s*(?:(?:a|ali)\s+)?(?:se\s+)?(?:to|ta izraz|ta beseda)\s+(?:tudi\s+)?(?:v\s+\w+\s+)?(?:uporablja|rabi|velja)(?:\s+.+)?[?.!]?\s*',text,re.I)
@@ -111,11 +130,15 @@ def bound_context_target(text,context,language='und'):
  interpretation=plan(context,'',language,{'raw_engines':{}})
  targets=interpretation['targets']
  allowed={'single lexical surface','bounded whole phrase before component lookup','quoted original span',
-  'natural lexical object; whole original span','unquoted translation object; whole original span','requested lexical object'}
+  'natural lexical object; whole original span','unquoted translation object; whole original span','requested lexical object',
+  'named lexical object; descriptor context retained'}
  if len(targets)!=1 or targets[0]['basis']not in allowed:return None
  target=copy.deepcopy(targets[0]);offset=len(text)+1
  target.update(start=target['start']+offset,end=target['end']+offset,span_scope='context',
   context_target_basis=target['basis'],basis='explicit_context_target')
+ if target['context_target_basis']=='named lexical object; descriptor context retained':
+  descriptor=target['context_span'];descriptor.update(start=descriptor['start']+offset,
+   end=descriptor['end']+offset,span_scope='context')
  return target
 
 def portable_request_plan(interpretation,language='und'):
@@ -220,6 +243,8 @@ def plan(text,context,language,analysis,request_plan=None):
    if contrasted!=spans:spans=contrasted;kind='comparison'
   if not spans:
    for a,b,why in request_object_spans(text):add(a,b,why)
+   if 'morphology'in requested:
+    spans=[named_lexical_target(span)if span['basis']=='natural lexical object; whole original span'else span for span in spans]
    if len(spans)>1:kind='comparison'
   # Comparative alternatives stay separate and retain spelling, casing and case context.
   if not spans and re.search(r'\bali\b',text,re.I):

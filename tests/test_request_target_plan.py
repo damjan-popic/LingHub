@@ -36,6 +36,45 @@ def test_natural_request_keeps_entire_case_preserving_object(question,target):
     assert enriched['query_kind']==interpretation['query_kind']
 
 
+@pytest.mark.parametrize('description,name',[
+    ('italijansko moško ime','Andrea'),('žensko ime','Andrea'),
+    ('slovensko moško ime','Miha'),('tuje osebno ime','René'),
+    ('francosko osebno ime','Jean Paul'),('poljski priimek','Kowalski'),
+    ('MOŠKO IME','Aljoša'),('rojstno ime','Neznan'),
+])
+def test_named_object_preserves_descriptors_as_literal_context(description,name):
+    question=f'Kako sklanjamo {description} {name}?'
+    p=plan(question,'','sl',{});target,=p['targets']
+    assert target['text']==name
+    assert question[target['start']:target['end']]==name
+    context=target['context_span']
+    assert question[context['start']:context['end']]==f'{description} {name}'
+    # The already-running analyzer takes these exact portable spans, even when
+    # its local planner has not acquired the descriptor extraction change.
+    assert plan(question,'','sl',{},request_plan=p['request_plan'])['targets']==p['targets']
+
+
+@pytest.mark.parametrize('question,target',[
+    ('Kako sklanjamo »italijansko moško ime Andrea«?','italijansko moško ime Andrea'),
+    ('Kako prevedemo italijansko moško ime Andrea v slovenščino?','italijansko moško ime Andrea'),
+    ('Kako sklanjamo dobro ime podjetja?','dobro ime podjetja'),
+    ('Kako sklanjamo modri zvezek?','modri zvezek'),
+    ('Kako sklanjamo novi direktor?','novi direktor'),
+])
+def test_name_descriptors_do_not_rewrite_literal_or_other_phrase_tasks(question,target):
+    assert [t['text']for t in plan(question,'','sl',{})['targets']]==[target]
+
+
+def test_name_descriptor_context_offsets_survive_explicit_followup():
+    q='Kako se to sklanja?';context='Kako sklanjamo italijansko moško ime Andrea?'
+    p=plan(q,context,'sl',{});target,=p['targets'];combined=q+'\n'+context
+    assert target['text']=='Andrea'and target['span_scope']=='context'
+    assert combined[target['start']:target['end']]=='Andrea'
+    wrapper=target['context_span']
+    assert combined[wrapper['start']:wrapper['end']]=='italijansko moško ime Andrea'
+    assert plan(q,context,'sl',{},request_plan=p['request_plan'])['targets']==p['targets']
+
+
 def test_explicit_domain_and_direction_are_separate_from_the_target():
     question='Kako prevedemo modro mapo v bančnem kontekstu?'
     shared=plan(question,'','sl',{})['request_plan']

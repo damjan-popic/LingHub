@@ -64,6 +64,77 @@ def test_distinct_attested_identities_and_case_are_preserved():
     assert len(result[2]['source_records']) == 2
 
 
+def phrase_profile(surface='vodjo',lemma='vodja',preposition='z',selection='alternative'):
+    phrase=f'{preposition} {surface}';question=f'Pojasnite »{phrase}«.'
+    start=question.index(phrase);end=start+len(phrase);token_start=question.index(surface,start)
+    target={'text':phrase,'start':start,'end':end,'basis':'quoted original span'}
+    provenance={'resource_id':'sloleks','source_entry_id':'entry-phrase','source_archive_sha256':'a'*64}
+    recorded={'status':'matched','recorded_readings':[{'lemma':lemma,'source_entry_id':'entry-phrase',
+        'exact_surface':True,'selection':selection,'slot_locator':5,'source_locator':'slot5/form1',
+        'original_msd':'fixture-msd','features':{'case':'instrumental'}}],
+        'source_slots':[{'lemma':lemma,'source_entry_id':'entry-phrase','provenance':provenance,
+            'slot':{'slot_locator':5,'original_msd':'fixture-msd','normalized_features':{'case':'instrumental'},
+                    'variants':[{'form':surface,'source_locator':'slot5/form1','evidence':provenance}]}}]}
+    unit={'kind':'analysis','target':phrase,'match_relation':'recorded_target','captured_unit_id':'unit-phrase',
+        'fields':{'submitted_expression':phrase,'start':start,'end':end,
+            'engines':{'classla':{'tokens':[{'text':surface,'lemma':'not-a-source','upos':'NOUN',
+                'start':token_start,'end':token_start+len(surface)}]}},'recorded_forms':{surface:recorded}}}
+    plan={'original':question,'context':'','target_spans':[target]}
+    family={'question':question,'original_question':question,'context':'','locale':'sl','request_plan':plan}
+    profile={'query':{'text':question,'context':''},'interpretation':{'targets':[target],
+        'requested_facets':['morphology'],'request_plan':plan},'evidence':[unit]}
+    return family,{'captures':[{'operation':'lexical_profile','response':profile}]}
+
+
+@pytest.mark.parametrize('surface,lemma,prep',[
+    ('vodjo','vodja','z'),('vojvodo','vojvoda','z'),('Miho','Miha','z'),
+    ('materjo','mati','z'),('ljudmi','človek','z'),('psu','pes','pri'),
+])
+@pytest.mark.parametrize('selection',['primary','alternative'])
+def test_recorded_phrase_components_expand_complete_identities_without_rewriting_target(surface,lemma,prep,selection):
+    family,capture=phrase_profile(surface,lemma,prep,selection)
+    candidate,=unified.validated_reference_lemmas(capture,family)
+    assert candidate['query']==lemma and candidate['basis']=='recorded_phrase_morphology_identity'
+    record,=candidate['source_records'];assert record['target']==f'{prep} {surface}'and record['surface']==surface
+    assert record['slot_locator']==5 and record['variant_locator']=='slot5/form1'
+    hit={'semantic_unit':'dictionary_entry','score_method':'official_reference_exact_headword','published_headword':lemma}
+    assert unified.dictionary_lookups(hit,lemma,family,candidate)==[{'version':'recorded-dictionary-lookup-v1',
+        'target':f'{prep} {surface}','query':lemma,'basis':'recorded_phrase_morphology_lemma',
+        'source_entry_ids':['entry-phrase']}]
+
+
+@pytest.mark.parametrize('damage',['translation','unknown','surface','offset','phrase_offset','excluded','lemma',
+                                  'entry','archive','slot','features','msd','variant','locator','analyzer_only'])
+def test_phrase_component_discovery_requires_exact_retained_source_proof(damage):
+    family,capture=phrase_profile();p=capture['captures'][0]['response'];fields=p['evidence'][0]['fields']
+    data=fields['recorded_forms']['vodjo'];reading=data['recorded_readings'][0];source=data['source_slots'][0]
+    if damage=='translation':p['interpretation']['requested_facets']=['translation','morphology']
+    if damage=='unknown':data['status']='no_hit'
+    if damage=='surface':reading['exact_surface']=False
+    if damage=='offset':fields['engines']['classla']['tokens'][0]['start']+=1
+    if damage=='phrase_offset':fields['start']+=1
+    if damage=='excluded':reading['selection']='excluded'
+    if damage=='lemma':reading['lemma']='wrong'
+    if damage=='entry':source['provenance']['source_entry_id']='wrong'
+    if damage=='archive':source['provenance']['source_archive_sha256']='missing'
+    if damage=='slot':reading['slot_locator']=6
+    if damage=='features':reading['features']={'case':'dative'}
+    if damage=='msd':reading['original_msd']='wrong'
+    if damage=='variant':source['slot']['variants'][0]['form']='vodja'
+    if damage=='locator':reading.pop('source_locator');source['slot']['variants'][0].pop('source_locator')
+    if damage=='analyzer_only':data['source_slots']=[]
+    assert unified.validated_reference_lemmas(capture,family)==[]
+
+
+def test_phrase_homographs_and_analyzer_alternatives_are_all_retained():
+    family,capture=phrase_profile();data=capture['captures'][0]['response']['evidence'][0]['fields']['recorded_forms']['vodjo']
+    other=deepcopy(data['recorded_readings'][0]);other.update(source_entry_id='entry-second',selection='primary')
+    source=deepcopy(data['source_slots'][0]);source['source_entry_id']='entry-second'
+    source['provenance']['source_entry_id']='entry-second';data['recorded_readings'].append(other);data['source_slots'].append(source)
+    candidate,=unified.validated_reference_lemmas(capture,family)
+    assert {r['source_entry_id']for r in candidate['source_records']}=={'entry-phrase','entry-second'}
+
+
 class ReferenceGateway:
     klikai_url = 'synthetic-api'
     editorial_full_records = False

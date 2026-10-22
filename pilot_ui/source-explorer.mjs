@@ -53,6 +53,7 @@ export function createSourceExplorer({api, family, pending, t, label, icon, onCh
       button.addEventListener('click',()=>openOriginal(record));item.append(button);
       if(used===true)item.append(node('span',t('match_used'),{class:'entry-used'}));
       if(record.edition && /^\d{4}$/.test(String(record.edition)))item.append(node('span',t('edition')+' '+record.edition,{class:'entry-edition'}));
+      if(typeof record.status==='string'&&/predlog|proposal|proposta/i.test(record.status))item.append(node('span',t('source_proposal_label'),{class:'entry-edition'}));
       // Source prose is opened in the existing original drawer, never flattened
       // into every entry of a long result list.
       list.append(item);

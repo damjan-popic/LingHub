@@ -235,4 +235,9 @@ def source_view(source, locale='sl'):
     if 'epravopis' in identity:
         rows = [{k: unicodedata.normalize('NFC', ''.join(ZRCOLA_UNICODE.get(c,c) for c in v))
                  for k,v in row.items()} for row in rows]
-    return dict(source, reader_blocks=rows)
+    if source.get('original_projection') is not None:
+        from .original_projection import reader_blocks
+        rows.extend(reader_blocks(source['original_projection'], locale))
+    # The display contract is projected into bounded, text-only reader blocks;
+    # raw captures and internal checksum/binding fields are not browser content.
+    return dict({k: v for k, v in source.items() if k != 'original_projection'}, reader_blocks=rows)

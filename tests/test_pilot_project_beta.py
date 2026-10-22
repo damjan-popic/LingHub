@@ -237,7 +237,7 @@ def test_packaged_legend_includes_connected_answer_bank_not_internal_ontology(be
     with TestClient(app,base_url=ORIGIN)as client:
         login(client,beta_rig[4])
         sources=client.get('/api/pilot/capabilities').json()['documentary_sources']
-    assert sources==['jezikovna_svetovalnica','epravopis','sp2001','pravopis8','zvezek','crossterm','solska',
+    assert sources==['jezikovna_svetovalnica','epravopis','epravopis-slovar','sp2001','pravopis8','zvezek','crossterm','solska',
         'tretji_sektor','zkb','jezikovna_posta','jezikovna_urgenca','zadrege','gradivo']
     assert not set(sources)&{'ontology','viri-master','sloleks','morph_it','loris','synonyms','collocations'}
 

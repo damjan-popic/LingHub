@@ -42,7 +42,7 @@ SAFE = frozenset({
     'anchor', 'target', 'kind', 'quote', 'start', 'end', 'prefix', 'suffix',
     'sources', 'items', 'record_id', 'preview', 'offset', 'limit', 'returned_count',
     'next_offset', 'corpus_total', 'count_scope', 'usage_final', 'used_in_answer', 'answer_status',
-    'reader_blocks', 'heading', 'revision', 'correction', 'group', 'events',
+    'reader_blocks', 'heading', 'rows', 'rowspan', 'colspan', 'scope', 'revision', 'correction', 'group', 'events',
     'started', 'finished', 'elapsed_seconds', 'followup',
 })
 

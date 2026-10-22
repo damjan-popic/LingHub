@@ -1,7 +1,7 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {publicRelease} from './public-release.mjs';
 import {noAnswerFeedback,canOpenCurrentOriginal} from './core.mjs';
-import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel} from './interface-details.mjs';
+import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks} from './interface-details.mjs';
 import {createSourceExplorer,recordUsed,citedEvidenceIds} from './source-explorer.mjs';
 import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
@@ -125,7 +125,7 @@ function renderSourceLegend(){
   const rows=legendSources(registry,state.capabilities.documentary_sources,state.locale);
   $('source-legend-open').hidden=!state.user||!rows.length;
   clear($('source-legend-list'));
-  for(const source of rows){const row=el('li',null,{'data-source':source.key});row.append(el('span',source.initials,{class:'source-symbol','aria-hidden':'true'}),el('span',source.label));$('source-legend-list').append(row);}
+  for(const source of rows){const row=el('li',null,{'data-source':source.key}),description=el('span',source.label);if(source.coverageNote)description.append(el('small',source.coverageNote,{class:'source-coverage'}));row.append(el('span',source.initials,{class:'source-symbol','aria-hidden':'true'}),description);$('source-legend-list').append(row);}
 }
 function renderWaitMessage(){
   if(!state.job)return;
@@ -360,7 +360,7 @@ async function openSource(tier,id,kind,reference={}) {
     if(data.edition&&(!beta()||/^\d{4}$/.test(String(data.edition))))$('source-content').append(el('p',t('edition')+' '+String(data.edition),{class:'source-locator'}));
     for(const note of sourceStatusNotes(data))$('source-content').append(el('p',t(note.key,note.values),{class:'source-qualifier'}));
     const excerpt=sourceExcerptPresentation(data);
-    if(beta()&&data.reader_blocks?.length){for(const block of data.reader_blocks){if(block.heading)$('source-content').append(el('h4',block.heading));$('source-content').append(el('blockquote',block.text));}}else $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
+    if(data.reader_blocks?.length)appendSourceReaderBlocks($('source-content'),data.reader_blocks,el);else $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
     if(tier.run_id&&!reference.comparisonId&&(beta()?citedEvidenceIds(tier).has(id)&&state.delivered.has(tier.run_id+':'+(kind==='long')):!reference.unusedMatch))$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));
     const link=safeSourceLink(data.url||data.original_url);if(link){const landing=new URL(link).pathname==='/'||/\/(?:loris|zvezek|jezikovna-posta|zkb|glosar)\/?$/.test(new URL(link).pathname);$('source-content').append(el('a',t(landing?'open_collection':'open_original'),{href:link,target:'_blank',rel:'noopener noreferrer',class:'source-external-link'}));$('source-content').append(el('p',t('frozen_source_note'),{class:'small muted'}));}else $('source-content').append(el('p',t('no_public_entry'),{class:'small muted'}));
     const selectedEvidence=evidenceFor(tier).find(item=>evidenceId(item)===id),related=evidenceFor(tier).filter(item=>sourceKey(item)===sourceKey(selectedEvidence));

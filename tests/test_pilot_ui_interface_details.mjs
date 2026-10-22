@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel} from '../pilot_ui/interface-details.mjs';
+import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks} from '../pilot_ui/interface-details.mjs';
 import {publicRelease} from '../pilot_ui/public-release.mjs';
+import {sourceStatusNotes} from '../pilot_ui/core.mjs';
 
 const registry={sources:[
   {suggested_key:'collection',labels:{sl:'Polno ime',it:'Nome completo'},initials_fallback:'PI'},
@@ -18,8 +19,44 @@ test('packaged documentary legend distinguishes current reference, proposal, and
   assert.equal(rows.find(row=>row.key==='sp2001').label,'Slovenski pravopis 2001');
   assert.match(rows.find(row=>row.key==='pravopis8').label,/predlog/);
   assert.match(rows.find(row=>row.key==='epravopis').label,/letni dodatki 2025/);
+  const captured=rows.find(row=>row.key==='epravopis-slovar');
+  assert.match(captured.label,/spletni slovar \(predlog\)/);
+  for(const count of ['11.709','11.746','37'])assert(captured.coverageNote.includes(count));
+  assert.match(captured.coverageNote,/Ni potrjeno, da seznam zajema celoten slovar/);
   assert.match(legendSources(presentation,configured,'it').find(row=>row.key==='pravopis8').label,/proposta/);
   assert(!rows.some(row=>row.key==='loris'),'LORIS remains a tool, not a documentary collection');
+});
+
+const textElement=(tag,text,attrs={})=>({tag,text,attrs,children:[],append(...items){this.children.push(...items);},
+  set innerHTML(value){throw Error('HTML must never execute');}});
+test('original table renderer preserves full ordered headers, spans, cells and literal markup as text',()=>{
+  const root=textElement('div'),cells=[
+    [{kind:'th',text:'Sklon',rowspan:0,colspan:1,scope:'col'},{kind:'th',text:'Ednina',rowspan:1,colspan:2,scope:'colgroup'}],
+    [{kind:'td',text:'rodilnik',rowspan:1,colspan:1},{kind:'td',text:'a\nali b <script>steal()</script>',rowspan:1,colspan:1}]];
+  appendSourceReaderBlocks(root,[{heading:'Celoten izvirnik',text:'Vse izvirno besedilo.'},{kind:'table',heading:'Izvirna preglednica 1',rows:cells}],textElement);
+  const table=root.children[2].children[0];
+  assert.equal(table.tag,'table');assert.equal(table.children[0].tag,'caption');
+  const rows=table.children[1].children;
+  assert.equal(rows.length,2);assert.equal(rows[0].children[0].tag,'th');
+  assert.deepEqual(rows[0].children[0].attrs,{rowspan:0,colspan:1,scope:'col'});
+  assert.equal(rows[1].children[1].tag,'td');assert.equal(rows[1].children[1].text,cells[1][1].text);
+  assert.equal(root.children[2].attrs.tabindex,'0');
+});
+test('original renderer rejects arbitrary tags and attributes are never copied from captured data',()=>{
+  const malicious={kind:'script',text:'steal()',rowspan:1,colspan:1};
+  assert.throws(()=>appendSourceReaderBlocks(textElement('div'),[{kind:'table',rows:[[malicious]]}],textElement));
+  const root=textElement('div');appendSourceReaderBlocks(root,[{kind:'table',rows:[[
+    {kind:'td',text:'<img src=x onerror=steal()>',rowspan:1,colspan:1,onclick:'steal()',scope:'onload'}]]}],textElement);
+  const cell=root.children[0].children[0].children[0].children[0].children[0];
+  assert.deepEqual(cell.attrs,{rowspan:1,colspan:1});assert.equal(cell.tag,'td');assert.match(cell.text,/onerror/);
+});
+test('structured original coverage appears once while the proposal warning remains visible',()=>{
+  const source={status:'Predlog',bibliography:{coverage_note:'Older capture wording'},
+    reader_blocks:[{kind:'collection_coverage',heading:'Obseg zbirke',text:'Exact captured coverage.'}]};
+  const notes=sourceStatusNotes(source);
+  assert.equal(notes.length,1);assert.equal(notes[0].category,'proposal_status');
+  delete source.reader_blocks;
+  assert(sourceStatusNotes(source).some(note=>note.key==='source_coverage_note'),'historical source notes remain available');
 });
 
 test('configured legend shares presentation and deduplicates collections independently of hits',()=>{

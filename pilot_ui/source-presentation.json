@@ -33,6 +33,21 @@
       "official_asset": null
     },
     {
+      "suggested_key": "epravopis-slovar",
+      "badge_default": "ePravopis slovar",
+      "initials_fallback": "eP",
+      "labels": {
+        "sl": "ePravopis — spletni slovar (predlog)",
+        "it": "ePravopis — dizionario online (proposta)"
+      },
+      "kind": "orthographic",
+      "official_asset": null,
+      "coverage_note": {
+        "sl": "Ohranjenih je 11.709 od 11.746 sestavkov s seznama izdajatelja. Pri 37 sestavkih izvirnika ni bilo mogoče pridobiti. Ni potrjeno, da seznam zajema celoten slovar.",
+        "it": "Sono conservate 11.709 delle 11.746 voci dell’elenco dell’editore. Per 37 voci non è stato possibile acquisire l’originale. Non è accertato che l’elenco comprenda l’intero dizionario."
+      }
+    },
+    {
       "suggested_key": "sp2001",
       "badge_default": "SP 2001",
       "initials_fallback": "SP",

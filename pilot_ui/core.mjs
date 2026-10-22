@@ -118,7 +118,7 @@ export function sourceStatusNotes(source) {
   }
   else if(typeof status==='string' && ['current_reference','status_notice'].includes(bib?.normative_status))notes.push({category:'source_status',key:'source_status_note',values:{status:status.trim()}});
   if(source?.annual_scope || source?.publication_scope==='annual_additions'){const year=String(source?.edition||bib?.edition||'').match(/(?:19|20)\d{2}/)?.[0],name=source?.source_label?.replace(/\s*20\d{2}.*$/,'')||'ePravopis';notes.push({category:'source_scope',key:year?'source_annual_note':'source_annual_unknown',values:{source:name,year}});}
-  if(typeof bib?.coverage_note==='string' && bib.coverage_note.trim())notes.push({category:'source_scope',key:'source_coverage_note',values:{scope:bib.coverage_note.trim()}});
+  if(typeof bib?.coverage_note==='string' && bib.coverage_note.trim()&&!source?.reader_blocks?.some(block=>block.kind==='collection_coverage'))notes.push({category:'source_scope',key:'source_coverage_note',values:{scope:bib.coverage_note.trim()}});
   if(source?.publication_scope==='individual_advisory_answer' && Array.isArray(bib?.signed_date_text)) {
     const dates=[...new Set(bib.signed_date_text.filter(value=>typeof value==='string' && value.trim()).map(value=>value.trim()))];
     if(dates.length)notes.push({category:'source_date',key:'source_signed_date_note',values:{date:dates.join('; ')}});

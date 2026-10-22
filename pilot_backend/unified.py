@@ -248,6 +248,10 @@ def collect_source(gateway, family, definition, detail_pool=None, *, query_overr
                           'url': hit.get('url'), 'locator': {k: hit[k] for k in ('section', 'subsection', 'page_start', 'page_end') if hit.get(k) is not None},
                           'bibliography': {'record_id': hit['resource_id'], 'rights_mode': hit['rights_mode'],
                               **{key:hit[key]for key in ('source_revision','source_status','source_date','release_id','coverage_note','normative_status')if hit.get(key)is not None}}}
+                if hit.get('original_projection') is not None:
+                    from .original_projection import checked as checked_original
+                    source['original_projection'] = checked_original(hit['original_projection'],
+                        source_slug=slug, record_id=hit['resource_id'])
                 lookups = dictionary_lookups(hit, query, family, lemma_candidate) if adapter == 'official_reference_jsonl' else []
                 for lookup in lookups or [None]:
                     capture = dict(hit, dictionary_lookup=lookup) if lookup is not None else hit
@@ -501,6 +505,15 @@ def freeze(gateway, family, policy):
                 raise Failure('invalid_answer',502)
             item['snippet']=item.get('snippet','')[:1000]
             original=by_capture.get(item.get('capture_sha256'))
+            projection = view.get('original_projection')
+            captured_projection = (original or {}).get('source', {}).get('original_projection')
+            if projection is not None or captured_projection is not None:
+                from .original_projection import checked as checked_original
+                require_projection = checked_original(projection, source_slug=item['source_slug'],
+                    record_id=item.get('external_id'))
+                if captured_projection is not None and require_projection != captured_projection:
+                    raise Failure('invalid_answer', 502)
+                item['source']['original_projection'] = require_projection
             if original:
                 item['source']['bibliography'].update({key:deepcopy(value)
                     for key,value in original.get('bibliography',{}).items()
@@ -787,9 +800,10 @@ def record_groups(bundle, used, usage_final=True):
                 'title': item.get('title') or source.get('title') or item.get('source_label') or source.get('source_label') or 'Vir',
                 'preview': (item.get('snippet') or '')[:220],
                 'evidence_id': evidence_id(item), 'evidence_ids': [],
-                'edition': edition, 'status': source.get('status') or item.get('source_status'),
+                'edition': edition, 'status': source.get('status') or item.get('source_status') or bibliography.get('source_status'),
                 'bibliography': {k: deepcopy(bibliography[k]) for k in
-                    ('authors', 'date', 'signed_date_text', 'publisher', 'publication_date', 'title')
+                    ('authors', 'date', 'signed_date_text', 'publisher', 'publication_date', 'title',
+                     'source_date', 'source_status', 'normative_status', 'coverage_note')
                     if k in bibliography}, 'used_in_answer': None if not usage_final else False}
         row = grouped[key]
         target = evidence_id(item)

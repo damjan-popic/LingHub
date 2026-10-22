@@ -410,5 +410,6 @@
   "guide_followup": "Nadaljujte z vprašanjem poveže novo vprašanje z izbranim odgovorom. Za drugo temo izberite Novo vprašanje. KLIKai za nadaljevanje ponovno izbere vire; prejšnji odgovor ni samostojen dokaz.",
   "guide_limits": "KLIKai je še v preizkušanju. Preverite razlago in vire; citat sam po sebi ne jamči pravilnosti. Predlog pravil, letni dodatek in veljavni priročnik imajo različen obseg. Trenutno niso povezani vsi načrtovani viri.",
   "guide_contact": "Če se ne morete prijaviti, je vprašanje obtičalo ali se mnenje ne shrani, obvestite Damjana po obstoječem projektnem kanalu. Navedite skupino, približen čas in povezavo do odgovora; po potrebi tudi brskalnik. Posebej neprimeren odgovor označite v aplikaciji in sporočite Damjanu.",
-  "beta_open_original": "Odprite izvirnik na spletu"
+  "beta_open_original": "Odprite izvirnik na spletu",
+  "source_proposal_label": "Predlog"
 }

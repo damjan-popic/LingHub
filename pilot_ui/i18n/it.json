@@ -410,5 +410,6 @@
   "guide_followup": "Continua con una domanda collega la nuova domanda alla risposta scelta. Per cambiare argomento scegli Nuova domanda. KLIKai seleziona nuovamente le fonti; la risposta precedente non è una prova indipendente.",
   "guide_limits": "KLIKai è ancora in fase di test. Controlla la spiegazione e le fonti; una citazione non garantisce la correttezza. Proposte di regole, integrazioni annuali e manuali vigenti hanno ambiti diversi. Non tutte le fonti previste sono collegate.",
   "guide_contact": "Se non riesci ad accedere, una domanda rimane bloccata o un commento non viene salvato, contatta Damjan tramite il canale di progetto esistente. Indica gruppo, ora approssimativa e collegamento alla risposta; se utile, anche il browser. Segnala in app una risposta particolarmente inappropriata e avvisa Damjan.",
-  "beta_open_original": "Apri l’originale sul web"
+  "beta_open_original": "Apri l’originale sul web",
+  "source_proposal_label": "Proposta"
 }

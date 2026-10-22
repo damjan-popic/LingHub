@@ -59,5 +59,6 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 .project-beta .answer-actions{flex-wrap:wrap}
 .source-external-link{display:inline-block;padding:.65rem 0;text-decoration:underline;font-weight:600}
 #source-content blockquote{white-space:pre-wrap;overflow-wrap:anywhere}
+.source-table-scroll{overflow-x:auto;margin:20px 0;max-width:100%;border:1px solid var(--line);border-radius:8px}.source-table{border-collapse:collapse;width:100%;font-size:.84rem}.source-table caption{text-align:left;font-weight:600;padding:12px;color:var(--green-dark)}.source-table th,.source-table td{border:1px solid var(--line);padding:8px 10px;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}.source-table th{background:var(--green-tint);font-weight:600}.source-coverage{display:block;line-height:1.6;margin-top:5px;color:var(--muted);font-size:.76rem}
 #testing-guide p{line-height:1.65}
 #followup-context{overflow-wrap:anywhere}

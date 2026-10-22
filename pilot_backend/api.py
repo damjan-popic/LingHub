@@ -259,9 +259,9 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             evidence=next((e for e in result['evidence']if e.get('citation_id',e.get('evidence_id'))==eid),None)
             if not evidence:raise Failure('not_found',404)
             labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis 2025'}
-            result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope')}
+            result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope'),**({'original_projection':evidence['original_projection']}if evidence.get('original_projection')is not None else{})}
         from .source_reader import source_view
-        result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view')if k in result}
+        result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view','original_projection')if k in result}
         return source_view(result,f['locale'])
     @app.get(api+'/families/{fid}/sources/{eid:path}/current-original')
     async def family_current_original(fid:str,eid:str,request:Request,tier:str='short'):

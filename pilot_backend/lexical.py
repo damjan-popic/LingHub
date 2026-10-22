@@ -22,6 +22,21 @@ def overview(bundle):
    'analyzer content span','degraded lexical candidate; source match required'}
    for t in p['interpretation']['targets']):
   return False
+ # The gateway may need more than the short packet's two source groups to
+ # preserve current authority and every attested homograph. Use its already
+ # prepared wider packet only when that same complete identity set fits.
+ packets=bundle.get('gateway_bundle',{}).get('payload',{}).get('packets',{})
+ short=packets.get('short',{}).get('input_profile',{}).get('dictionary_alternatives')
+ if short and short.get('complete')is False:
+  wide=packets.get('lexical_overview',{})
+  alternatives=wide.get('input_profile',{}).get('dictionary_alternatives',{})
+  expected=short.get('expected_passage_ids',[])
+  if not isinstance(expected,list)or not expected or not all(isinstance(x,str)and x for x in expected):return False
+  supplied={row.get('passage_id')for row in wide.get('model_evidence',[])}
+  return bool(p and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])
+   and alternatives.get('complete')is True and alternatives.get('missing_passage_ids')==[]
+   and set(alternatives.get('expected_passage_ids',[]))==set(expected)
+   and set(expected)<=supplied and not wide.get('source_view_reason'))
  return bool(p and p['interpretation']['query_kind']in {'word','phrase','comparison'}and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])and len({u['kind']for u in p['evidence']if u['kind']!='analysis'and u.get('selection',{}).get('state','primary')=='primary'and u['match_relation']not in {'component_only','alternative_lexical_identity'}})>=2)
 
 def reader(bundle):

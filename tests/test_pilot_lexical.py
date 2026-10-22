@@ -51,3 +51,35 @@ def test_component_nominations_do_not_turn_a_broad_question_into_a_lexical_overv
  bundle={'analysis':{'version':'klikai.lexical-collation.v1','captures':[{'response':p}]}}
  before=copy.deepcopy(bundle)
  assert lexical.overview(bundle)is expected and bundle==before
+
+def dictionary_alternatives_bundle():
+ p={'interpretation':{'query_kind':'question','requested_facets':['morphology'],
+     'targets':[{'text':'Example','basis':'named lexical object; descriptor context retained'}]},
+    'evidence':[{'kind':'morphology','match_relation':'recorded_target'}]}
+ expected=['current:entry','proposal:homograph-a','proposal:homograph-b']
+ return {'analysis':{'version':'klikai.lexical-collation.v1','captures':[{'response':p}]},
+  'gateway_bundle':{'payload':{'packets':{
+   'short':{'input_profile':{'dictionary_alternatives':{'expected_passage_ids':expected,
+       'missing_passage_ids':['proposal:homograph-b'],'complete':False}}},
+   'lexical_overview':{'input_profile':{'dictionary_alternatives':{'expected_passage_ids':list(expected),
+       'missing_passage_ids':[],'complete':True}},'model_evidence':[{'passage_id':x}for x in expected]}}}}}
+
+def test_practical_question_uses_existing_wider_tier_for_complete_source_alternatives():
+ bundle=dictionary_alternatives_bundle();before=copy.deepcopy(bundle)
+ assert lexical.overview(bundle)is True and bundle==before
+
+@pytest.mark.parametrize('damage',['different_set','incomplete','missing','unprovided','translation',
+                                  'orthography','broad_analyzer_target','source_view','empty_expected'])
+def test_dictionary_overview_never_replaces_incomplete_or_unrelated_evidence(damage):
+ bundle=dictionary_alternatives_bundle();packets=bundle['gateway_bundle']['payload']['packets']
+ wide=packets['lexical_overview'];proof=wide['input_profile']['dictionary_alternatives']
+ interpretation=bundle['analysis']['captures'][0]['response']['interpretation']
+ if damage=='different_set':proof['expected_passage_ids']=['unrelated']
+ if damage=='incomplete':proof['complete']=False
+ if damage=='missing':proof['missing_passage_ids']=['proposal:homograph-b']
+ if damage=='unprovided':wide['model_evidence'].pop()
+ if damage in {'translation','orthography'}:interpretation['requested_facets'].append(damage)
+ if damage=='broad_analyzer_target':interpretation['targets'][0]['basis']='analyzer content span'
+ if damage=='source_view':wide['source_view_reason']='complete_dictionary_alternatives_exceed_selected_input'
+ if damage=='empty_expected':packets['short']['input_profile']['dictionary_alternatives']['expected_passage_ids']=[]
+ assert lexical.overview(bundle)is False

@@ -31,12 +31,35 @@ def overview(bundle):
   wide=packets.get('lexical_overview',{})
   alternatives=wide.get('input_profile',{}).get('dictionary_alternatives',{})
   expected=short.get('expected_passage_ids',[])
-  if not isinstance(expected,list)or not expected or not all(isinstance(x,str)and x for x in expected):return False
+  if not isinstance(expected,list)or not all(isinstance(x,str)and x for x in expected):return False
+  required=set(expected)
+  if not required:
+   # A construction rule can legitimately precede optional dictionary entries.
+   # If short introduced only part of a family, widening must carry that whole
+   # same family AND the construction evidence; it must never replace the rule.
+   construction=short.get('required_construction_passage_ids',[])
+   if (not isinstance(construction,list)or not construction
+       or not all(isinstance(x,str)and x for x in construction)
+       or set(alternatives.get('required_construction_passage_ids',[]))!=set(construction)):return False
+   introduced=[f for f in short.get('families',[])if f.get('introduced')is True]
+   if not any(f.get('complete')is False for f in introduced):return False
+   required.update(construction)
+   for family in introduced:
+    identity=tuple(family.get(key)for key in ('source_slug','target','query'))
+    ids=family.get('passage_ids',[])
+    if (not all(isinstance(x,str)and x for x in identity)or not isinstance(ids,list)
+        or len(set(ids))<2 or not all(isinstance(x,str)and x for x in ids)):return False
+    matching=[f for f in alternatives.get('families',[])
+      if tuple(f.get(key)for key in ('source_slug','target','query'))==identity]
+    if (len(matching)!=1 or matching[0].get('complete')is not True
+        or matching[0].get('missing_passage_ids')!=[]
+        or set(matching[0].get('passage_ids',[]))!=set(ids)):return False
+    required.update(ids)
   supplied={row.get('passage_id')for row in wide.get('model_evidence',[])}
   return bool(p and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])
    and alternatives.get('complete')is True and alternatives.get('missing_passage_ids')==[]
    and set(alternatives.get('expected_passage_ids',[]))==set(expected)
-   and set(expected)<=supplied and not wide.get('source_view_reason'))
+   and required<=supplied and not wide.get('source_view_reason'))
  return bool(p and p['interpretation']['query_kind']in {'word','phrase','comparison'}and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])and len({u['kind']for u in p['evidence']if u['kind']!='analysis'and u.get('selection',{}).get('state','primary')=='primary'and u['match_relation']not in {'component_only','alternative_lexical_identity'}})>=2)
 
 def reader(bundle):

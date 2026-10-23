@@ -1,5 +1,8 @@
 """Frozen reader facets, independent of today's analyzers and writer availability."""
 from copy import deepcopy
+import re
+
+EXPLICIT_BRIEF=re.compile(r'\b(?:na kratko|kratko prosim|brevemente|in breve|briefly|in short)\b',re.I)
 
 GRAMMAR={
  'sl':{'nominative':'imenovalnik','genitive':'rodilnik','dative':'dajalnik','accusative':'tožilnik','locative':'mestnik','instrumental':'orodnik','singular':'ednina','dual':'dvojina','plural':'množina','proper':'lastno ime','common':'občno ime','masculine':'moški spol','feminine':'ženski spol','neuter':'srednji spol'},
@@ -16,8 +19,41 @@ def profile(bundle):
  if capture.get('version')!='klikai.lexical-collation.v1':return None
  return capture['captures'][0]['response']
 
+def comparison_overview(packets):
+ """Use the existing wider browser profile for a supported comparison.
+
+ This changes the output allowance, not source authority or direct API tiers.
+ Every short input row and introduced relevant group must survive unchanged;
+ a single complete authored answer can justify the whole discussion.
+ """
+ short=packets.get('short',{});wide=packets.get('lexical_overview',{})
+ task=short.get('input_profile',{}).get('selection_task')
+ if (not isinstance(task,dict)or task.get('comparison')is not True
+     or wide.get('input_profile',{}).get('selection_task')!=task):return False
+ targets=task.get('targets')
+ if not isinstance(targets,list)or not all(isinstance(t,str)and t for t in targets)or len(set(targets))<2:return False
+ if wide.get('source_view_reason')or wide.get('token_budget',{}).get('status')!='verified':return False
+ alternatives=wide.get('input_profile',{}).get('dictionary_alternatives',{})
+ if alternatives.get('complete')is False:return False
+ previous=short.get('model_evidence');supplied=wide.get('model_evidence')
+ if not isinstance(previous,list)or not previous or not isinstance(supplied,list)or not supplied:return False
+ by_id={row.get('passage_id'):row for row in supplied if isinstance(row,dict)}
+ if len(by_id)!=len(supplied)or not all(isinstance(pid,str)and pid for pid in by_id):return False
+ if any(not isinstance(row,dict)or by_id.get(row.get('passage_id'))!=row for row in previous):return False
+ relevant=0
+ for group in wide.get('input_profile',{}).get('packing_order',[]):
+  if group.get('role')not in {'core','qualification'}:continue
+  ids=group.get('passage_ids')
+  if not isinstance(ids,list)or not ids or not all(isinstance(pid,str)and pid for pid in ids):return False
+  if set(ids)&by_id.keys():
+   if not set(ids)<=by_id.keys():return False
+   relevant+=1
+ return relevant>0
+
 def overview(bundle):
  p=profile(bundle)
+ payload=bundle.get('gateway_bundle',{}).get('payload',{})
+ if EXPLICIT_BRIEF.search(payload.get('question')or bundle.get('query')or''):return False
  if p and p['interpretation'].get('targets')and all(t.get('basis')in {
    'analyzer content span','degraded lexical candidate; source match required'}
    for t in p['interpretation']['targets']):
@@ -25,7 +61,8 @@ def overview(bundle):
  # The gateway may need more than the short packet's two source groups to
  # preserve current authority and every attested homograph. Use its already
  # prepared wider packet only when that same complete identity set fits.
- packets=bundle.get('gateway_bundle',{}).get('payload',{}).get('packets',{})
+ packets=payload.get('packets',{})
+ if comparison_overview(packets):return True
  short=packets.get('short',{}).get('input_profile',{}).get('dictionary_alternatives')
  if short and short.get('complete')is False:
   wide=packets.get('lexical_overview',{})

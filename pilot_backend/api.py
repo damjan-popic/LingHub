@@ -36,6 +36,7 @@ def config_checked(config):
         if p.scheme!='https'and(c['secure_cookies']or p.hostname not in {'127.0.0.1','localhost','::1'}):raise ValueError('HTTP is allowed only in explicit loopback development')
     c.setdefault('human_testing_mode',False);c.setdefault('comparisons_enabled',not c['human_testing_mode']);c.setdefault('editorial_full_records',False)
     c.setdefault('unified_answers',False)
+    c.setdefault('single_answers',c['unified_answers'])
     c.setdefault('project_beta',False)
     if type(c['project_beta'])is not bool:raise ValueError('Project beta capability must be boolean')
     c['documentary_sources']=documentary_sources(c['documentary_sources'])if'documentary_sources'in c else packaged_documentary_sources()
@@ -43,6 +44,7 @@ def config_checked(config):
         if key in c and(not isinstance(c[key],str)or not 1<=len(c[key])<=120):raise ValueError('Invalid beta release label')
     if c.get('release_id')is not None and(not isinstance(c['release_id'],str)or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}',c['release_id'])):raise ValueError('Invalid release label')
     if type(c['unified_answers'])is not bool:raise ValueError('Unified answers capability must be boolean')
+    if type(c['single_answers'])is not bool or c['single_answers']and not c['unified_answers']:raise ValueError('Single answers require unified answers')
     if c['unified_answers']and not c.get('klikai_url'):raise ValueError('Unified answers require a configured KLIKai API')
     if not isinstance(c['models'],(list,tuple))or not c['models']or any(not isinstance(model,str)or model not in {'auto','qwen','gemma'}for model in c['models'])or len(set(c['models']))!=len(c['models']):raise ValueError('Configure explicit supported model choices')
     if c['project_beta']and(not c['unified_answers']or'auto'not in c['models']):raise ValueError('Project beta requires unified automatic routing')
@@ -57,7 +59,7 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers']);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
@@ -131,8 +133,8 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if beta(s):raise Failure('forbidden',403)
         return s
     def capability_result(s):
-        if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
-        return {'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
+        if beta(s):return {'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':config['single_answers'],'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
+        return {'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'single_answers':config['single_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
     def set_session(token,s,result=None):
         if result is None:result=JSONResponse(session_result(s))
@@ -237,13 +239,18 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             p={'display_sha256':display,'expanded':p.get('expanded',False)}
         return domain.delivered(u['id'],rid,p)
     async def source_for(owner,fid,eid,tier,aid=None,side=None,current_original=False):
-        if tier not in {'short','long'}:raise Failure('invalid_request')
+        if tier not in {'answer','short','long'}:raise Failure('invalid_request')
+        from . import answer_mode
         with store.connect()as db:
             f=domain.owned(db,'families',fid,owner)
+            single=answer_mode.single(db,fid) and aid is None
+            if tier=='answer' and not single:raise Failure('invalid_request')
+            stored_tier='short'if tier=='answer'else tier
             if aid:
                 domain.owned(db,'assignments',aid,owner)
                 r=db.execute('SELECT r.* FROM assignment_runs ar JOIN runs r ON r.id=ar.run_id WHERE ar.assignment_id=?AND ar.side=?AND ar.tier=?',(aid,side,tier)).fetchone()
-            else:r=db.execute('SELECT *FROM runs WHERE family_id=?AND tier=?AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1',(fid,tier)).fetchone()
+            else:r=db.execute('SELECT *FROM runs WHERE family_id=?AND tier=?AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1',(fid,stored_tier)).fetchone()
+            if r:tier=answer_mode.source_tier(db,r)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             is_unified=bundle.get('contract')==unified.CONTRACT and aid is None
             if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)

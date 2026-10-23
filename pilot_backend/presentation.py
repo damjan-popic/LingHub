@@ -29,6 +29,7 @@ def packaged_documentary_sources():
 SAFE = frozenset({
     'family', 'families', 'job', 'answer_family_id', 'family_id', 'run_id', 'job_id',
     'question', 'context', 'locale', 'input_language', 'task', 'created', 'short', 'long',
+    'answer', 'answer_format', 'source_tier', 'single_answers',
     'state', 'status', 'parent_run_id', 'parent_relation', 'matches_available', 'unified_answers', 'focus',
     'short_answer', 'answer_md', 'blocks', 'block_id', 'text', 'paragraph_id', 'evidence_ids',
     'decision_sources', 'evidence', 'evidence_id', 'citation_id', 'citations', 'claim_id', 'local_number',

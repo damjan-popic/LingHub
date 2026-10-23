@@ -1,6 +1,6 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {publicRelease} from './public-release.mjs';
-import {noAnswerFeedback,canOpenCurrentOriginal} from './core.mjs';
+import {noAnswerFeedback,canOpenCurrentOriginal,ordinaryFamilyView} from './core.mjs';
 import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks} from './interface-details.mjs';
 import {createSourceExplorer,recordUsed,citedEvidenceIds} from './source-explorer.mjs';
 import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
@@ -139,7 +139,7 @@ function sourceButtons(tier,kind,node,reference={}) {
   badges.slice(0,4).forEach(add);if(badges.length>4){const more=el('button','+'+(badges.length-4),{type:'button',class:'plain','aria-label':t('more_sources')});more.addEventListener('click',()=>{more.remove();badges.slice(4).forEach(add);});node.append(more);}
 }
 function renderText(tier,kind,node,reference={}) {
-  clear(node);node.lang=state.family?.locale||state.locale;if(kind==='long'&&tier?.correction?.required)node.append(el('p',t('long_correction_notice'),{class:'qualified-note','data-i18n':'long_correction_notice',role:'status'}));const blocks=tierBlocks(tier,kind);
+  clear(node);node.lang=state.family?.locale||state.locale;if((tier?.source_tier||kind)==='long'&&tier?.correction?.required)node.append(el('p',t('long_correction_notice'),{class:'qualified-note','data-i18n':'long_correction_notice',role:'status'}));const blocks=tierBlocks(tier,kind);
   if(!blocks.length){node.append(el('p',t(['no_hit','no_answer'].includes(jobState(tier))?'no_hit':jobState(tier)==='rejected'?'answer_guard_failed':jobState(tier)==='cancelled'?'cancelled':jobState(tier)==='failed'?'request_failed':'source_unavailable')));return;}
   const citationButton=part=>{const button=el('button',part.text,{type:'button',class:'citation','aria-label':t('source_number',{number:part.number})});button.addEventListener('click',()=>openSource(tier,evidenceId(part.evidence),kind,reference));return button;};
   for(const group of paragraphGroups(blocks)){
@@ -177,11 +177,11 @@ async function recordDelivered(tier,expanded) {
 function acknowledgeDelivery(tier,kind) {
   const boot=state.boot,id=familyId(),run=tier?.run_id;
   const current=()=>boot===state.boot&&id===familyId()&&run===state.family?.[kind]?.run_id;
-  return recordDelivered(tier,kind==='long').then(()=>{if(current())renderFeedback(tier,kind,$(kind+'-feedback'));}).catch(()=>{if(current())textStatus('answer-status','feedback_pending');});
+  return recordDelivered(tier,(tier?.source_tier||kind)==='long').then(()=>{if(current())renderFeedback(tier,kind,$(kind+'-feedback'));}).catch(()=>{if(current())textStatus('answer-status','feedback_pending');});
 }
 function renderFeedback(tier,kind,node) {
   clear(node);if(!tier?.run_id||!(['complete','failed','cancelled'].includes(tier.state)||acceptedStates.has(jobState(tier))))return;
-  const delivered=state.delivered.has(tier.run_id+':'+(kind==='long'));
+  const delivered=state.delivered.has(tier.run_id+':'+((tier?.source_tier||kind)==='long'));
   if(beta()){renderSavedFeedback(tier,kind,node);const missing=noAnswerFeedback(tier);if(missing)node.append(el('p',t('no_answer_feedback'),{class:'quality-hint'}));const mark=localButton(state.feedback.has(tier.run_id)?'feedback_addendum':missing?'no_answer_feedback_action':'mark_error',()=>openFeedback(tier,kind),'feedback-mark');mark.disabled=!delivered;node.append(mark);return;}
   const old=state.feedback.get(tier.run_id),draft=state.feedbackDrafts.get(tier.run_id)||{quality_score:old?.quality_score??null,comment:old?.comment||''};
   const form=el('form',null,{class:'quality-form'}),scale=el('fieldset',null,{class:'quality-scale'});scale.append(el('legend',t('quality_question')));
@@ -249,6 +249,7 @@ function renderLexical(family) {
   for(const section of p.sections){const box=el('details');box.append(el('summary',section.title));for(const row of section.items){const item=el('article',null,{class:'lexical-entry'});item.append(el('h4',row.title),el('p',row.text),el('small',row.label));for(const special of row.items||[])item.append(el('p',special.title+': '+special.text,{class:'lexical-alternative'}));if(row.details?.length){const detail=el('details');detail.append(el('summary',state.locale==='it'?'Dettagli della fonte':'Podrobnosti vira'));for(const field of row.details)detail.append(el('p',field.title+': '+field.text));item.append(detail);}if(row.forms?.length){const forms=el('details');forms.append(el('summary',state.locale==='it'?'Paradigma completo':'Celotno pregibanje'));for(const form of row.forms)forms.append(el('p',form.title+': '+form.text));item.append(forms);}if(row.patterns?.length){const patterns=el('details');patterns.append(el('summary',state.locale==='it'?'Schemi registrati nella fonte':'Vzorci, zapisani v viru'));for(const pat of row.patterns){const group=el('details');group.append(el('summary',pat.title));for(const form of pat.items)group.append(el('p',form.title+': '+form.text));patterns.append(group);}item.append(patterns);}box.append(item);}node.append(box);}
 }
 function renderFamily(family) {
+  family=ordinaryFamilyView(family);state.longOpen=false;
   if(family.answer_family_id!==familyId()||family.short?.run_id!==state.family?.short?.run_id||family.long?.run_id!==state.family?.long?.run_id)clearFeedbackContext();
   if(['clarification','clarification_required'].includes(family.short?.answer_kind)){const language=family.short?.clarification_code==='input_language_required';showClarification({code:language?'input_language_required':'focus_required',fields:[language?'input_language':'focus']});return;}
   clearClarification();
@@ -256,7 +257,7 @@ function renderFamily(family) {
   renderGenerationNotice();syncMatches(family);renderLexical(family);$('copy-answer').hidden=!acceptedStates.has(jobState(family.short))||!tierBlocks(family.short).length;
   if(acceptedStates.has(jobState(family.short))||['rejected','failed','cancelled'].includes(jobState(family.short))){renderText(family.short,'short',$('short-answer'));sourceButtons(family.short,'short',$('short-sources'));renderFeedback(family.short,'short',$('short-feedback'));acknowledgeDelivery(family.short,'short');}else{clear($('short-answer'));clear($('short-sources'));clear($('short-feedback'));}
   $('expand-button').disabled=!acceptedStates.has(jobState(family.short))||isCpuTask(family.task)||jobState(family.short)==='no_hit'||(family.short?.historical_evidence&&!family.long);$('compare-button').disabled=$('expand-button').disabled||Boolean(family.short?.historical_evidence)||state.capabilities.comparisons===false;$('compare-button').hidden=state.capabilities.comparisons===false;
-  $('long-section').hidden=!state.longOpen;$('expand-button').setAttribute('aria-expanded',String(state.longOpen));$('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
+  $('long-section').hidden=true;$('expand-button').hidden=true;$('expand-button').setAttribute('aria-expanded','false');$('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
   if(state.longOpen&&acceptedStates.has(jobState(family.long))){textStatus('long-status','');renderText(family.long,'long',$('long-answer'));sourceButtons(family.long,'long',$('long-sources'));renderFeedback(family.long,'long',$('long-feedback'));acknowledgeDelivery(family.long,'long');}else if(state.longOpen){clear($('long-answer'));clear($('long-sources'));clear($('long-feedback'));textStatus('long-status',pendingStates.has(jobState(family.long))?'generating_long':jobState(family.long)==='not_requested'?'':'answer_guard_failed');}
   if(beta()){$('long-section').hidden=true;$('locale-note').hidden=true;$('compare-button').hidden=true;$('matches-panel').hidden=true;
     $('expand-button').disabled=!family.matches_available;$('expand-button').hidden=!family.matches_available;sourceExplorer.render();
@@ -266,7 +267,7 @@ function renderFamily(family) {
   $('retry-answer').hidden=!beta()||!['failed','cancelled'].includes(jobState(family.short));
   setURL();
 }
-async function loadFamily(id) {if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=!beta()&&(state.longOpen||acceptedStates.has(jobState(data.long)));renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
+async function loadFamily(id) {if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=false;renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
 async function loadFeedback(){const boot=state.boot;const data=await api('/feedback');if(boot!==state.boot)return;for(const f of data.feedback||data.items||data||[])if(f.run_id)state.feedback.set(f.run_id,f);state.feedbackEvents.clear();}
 function setJob(job,tier) {
   const waitStarted=state.job?.job_id===job.job_id?state.job.waitStarted:performance.now();state.job={...job,tier,waitStarted};
@@ -329,12 +330,11 @@ async function submitQuestion(button,overrides={}) {
     }
   });}finally{state.submitting=false;if(state.family&&pendingStates.has(jobState(state.family.short)))$('ask-button').disabled=true;}
 }
-async function expand(button) {
-  if(beta()){sourceExplorer.toggle();return;}
-  if(!state.family)return;if(state.longOpen){state.longOpen=false;renderFamily(state.family);return;}state.longOpen=true;renderFamily(state.family);
-  if(acceptedStates.has(jobState(state.family.long)))return;
-  await action(button,async()=>{const result=await api('/families/'+encodeURIComponent(familyId())+'/expand',{method:'POST',body:{idempotency_key:keyFor('expand:'+familyId())}});if(result.family)renderFamily(result.family);else if(result.answer_family_id)renderFamily(result);const id=result.job?.job_id||result.job?.id||state.family.long?.job_id;if(id)pollJob(id,familyId(),'long');});
+function expand() {
+  // Source browsing never creates another answer or generation request.
+  if(beta()&&state.family?.matches_available)sourceExplorer.toggle();
 }
+
 function appendCurrentOriginalAction(data,targetFamily,id,kind,current) {
   if(!canOpenCurrentOriginal(data))return;
   const section=el('section',null,{class:'source-current-original'}),output=el('div');
@@ -354,6 +354,7 @@ function appendCurrentOriginalAction(data,targetFamily,id,kind,current) {
   section.append(el('p',t('current_original_offer'),{class:'source-qualifier'}),button,output);$('source-content').append(section);
 }
 async function openSource(tier,id,kind,reference={}) {
+  if(!reference.comparisonId)kind=tier?.source_tier || kind;
   const request=++sourceRequest,boot=state.boot,targetFamily=familyId();
   const current=()=>request===sourceRequest&&boot===state.boot&&targetFamily===familyId()&&$('source-dialog').open;
   clear($('source-content'));$('source-title').textContent=t('source_detail');$('source-content').append(el('p',t('loading')));showDialog('source-dialog');
@@ -365,7 +366,7 @@ async function openSource(tier,id,kind,reference={}) {
     for(const note of sourceStatusNotes(data))$('source-content').append(el('p',t(note.key,note.values),{class:'source-qualifier'}));
     const excerpt=sourceExcerptPresentation(data);
     if(data.reader_blocks?.length)appendSourceReaderBlocks($('source-content'),data.reader_blocks,el);else $('source-content').append(el('blockquote',excerpt.text||t('source_unavailable')));
-    if(tier.run_id&&!reference.comparisonId&&(beta()?citedEvidenceIds(tier).has(id)&&state.delivered.has(tier.run_id+':'+(kind==='long')):!reference.unusedMatch))$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,kind,{kind:'source',evidence_id:id});},'plain'));
+    if(tier.run_id&&!reference.comparisonId&&(beta()?citedEvidenceIds(tier).has(id)&&state.delivered.has(tier.run_id+':'+(kind==='long')):!reference.unusedMatch))$('source-content').append(localButton('mark_error',()=>{$('source-dialog').close();openFeedback(tier,'short',{kind:'source',evidence_id:id});},'plain'));
     const link=safeSourceLink(data.url||data.original_url);if(link){const landing=new URL(link).pathname==='/'||/\/(?:loris|zvezek|jezikovna-posta|zkb|glosar)\/?$/.test(new URL(link).pathname);$('source-content').append(el('a',t(landing?'open_collection':'open_original'),{href:link,target:'_blank',rel:'noopener noreferrer',class:'source-external-link'}));$('source-content').append(el('p',t('frozen_source_note'),{class:'small muted'}));}else $('source-content').append(el('p',t('no_public_entry'),{class:'small muted'}));
     const selectedEvidence=evidenceFor(tier).find(item=>evidenceId(item)===id),related=evidenceFor(tier).filter(item=>sourceKey(item)===sourceKey(selectedEvidence));
     if(selectedEvidence&&related.length>1){const more=el('details'),summary=el('summary',t('other_used_passages'));more.append(summary);for(const [index,item]of related.entries()){const choice=el('button',t('source_number',{number:item.local_number||item.number||index+1}),{type:'button',class:'plain'});choice.addEventListener('click',()=>openSource(tier,evidenceId(item),kind,reference));choice.disabled=evidenceId(item)===id;more.append(choice);}$('source-content').append(more);}

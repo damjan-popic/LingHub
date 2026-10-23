@@ -25,9 +25,22 @@ export function anchorForText(blockId, text, startUtf16, endUtf16) {
   const start = Array.from(text.slice(0, startUtf16)).length, end = Array.from(text.slice(0, endUtf16)).length;
   return {block_id:blockId,start,end,quote:codePointSlice(text,start,end),prefix:codePointSlice(text,Math.max(0,start-32),start),suffix:codePointSlice(text,end,end+32)};
 }
+// The primary UI slot is an implementation detail. Historical runs keep their
+// actual source tier and identity; this projection never modifies saved records.
+export function ordinaryFamilyView(family) {
+  if (!family || family.ordinary_view === true) return family;
+  const chosen = family.answer_format === 'single' ? family.answer || family.short
+    : family.long?.state === 'complete' ? family.long : family.short;
+  const sourceTier = family.answer_format === 'single' ? 'answer'
+    : chosen === family.long ? 'long' : 'short';
+  return {...family, ordinary_view:true,
+    short:chosen ? {...chosen,source_tier:chosen.source_tier || sourceTier} : null,
+    long:null};
+}
 export function tierBlocks(tier, kind = 'short') {
   if (Array.isArray(tier?.blocks) && tier.blocks.length) return tier.blocks.filter(b => typeof b.block_id === 'string' && typeof b.text === 'string');
-  const value = kind === 'short' ? tier?.short_answer : tier?.answer_md;
+  const actualKind = tier?.source_tier || kind;
+  const value = actualKind === 'short' ? tier?.short_answer : tier?.answer_md || tier?.short_answer;
   // Legacy text can be displayed, but does not acquire invented feedback block identities.
   return typeof value === 'string' && value ? [{block_id:null,text:value}] : [];
 }

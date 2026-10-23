@@ -5,7 +5,7 @@ from .store import canonical,digest,stamp,uid
 from .security import Failure
 from . import collation, editorial, unified, request_tasks
 from .classification import method
-from . import human_feedback
+from . import human_feedback, answer_mode
 from .adoption import historical_record
 
 RATINGS={None,'useful','partly_useful','not_useful','cannot_judge'}
@@ -26,10 +26,11 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None):
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None,single_answers=None):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
         self.release=release
         self.unified_answers=unified_answers
+        self.single_answers=unified_answers if single_answers is None else single_answers
         self.default_model='auto'if'auto'in self.models else'qwen'if'qwen'in self.models else self.models[0]
         self.comparison_models=tuple(model for model in self.models if model in {'qwen','gemma'})
     def require_generation(self,models):
@@ -135,6 +136,7 @@ class Domain:
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
+                if self.single_answers and task=='reference':db.execute("INSERT INTO family_answer_modes VALUES(?,'single')",(fid,))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')
                 if relation:db.execute('INSERT INTO run_relations VALUES(?,?)',(r['run_id'],relation))
@@ -144,6 +146,7 @@ class Domain:
     def expand(self,owner,fid,payload):
         with self.store.tx()as db:
             f=self.owned(db,'families',fid,owner)
+            if answer_mode.single(db,fid):raise Failure('expansion_unavailable',409)
             def action():
                 old=db.execute("SELECT * FROM runs WHERE family_id=?AND tier='long'AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1",(fid,)).fetchone()
                 if old:return {'job_id':db.execute('SELECT id FROM jobs WHERE run_id=?',(old['id'],)).fetchone()[0]}
@@ -156,6 +159,7 @@ class Domain:
     def tier(self,db,run,blind=False):
         historical=historical_record(db,run['family_id'],run_id=run['id'])
         r=dict(run);out={k:r[k]for k in ('state','revision','parent_run_id')};out['run_id']=r['id']
+        if not blind:out['source_tier']=answer_mode.source_tier(db,r)
         relation=db.execute('SELECT kind FROM run_relations WHERE run_id=?',(r['id'],)).fetchone()
         out['parent_relation']=relation[0]if relation else None
         job=db.execute('SELECT id,error_code FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
@@ -192,6 +196,8 @@ class Domain:
             original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(fid,)).fetchone()
             if original:out['question']=original[0]
             for r in db.execute('SELECT * FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision',(fid,)):out[r['tier']]=self.tier(db,r)
+            if answer_mode.single(db,fid):
+                out['answer_format']='single';out['answer']=out['short']
             return out
     def families(self,owner):
         with self.store.connect()as db:ids=[r[0]for r in db.execute('SELECT id FROM families WHERE owner=?ORDER BY created DESC LIMIT 100',(owner,))]
@@ -227,7 +233,7 @@ class Domain:
                 if a['blind']and not a['revealed']and terminal<2:return {'job_id':jid,'state':'queued','family_id':r['family_id'],'tier':r['tier'],'position':None,'error_code':None,'pair_state':'preparing'}
             result=json.loads(r['result'])if r['result']else{}
             cancellation_mode='queued_removed'if j['state']=='cancelled'and j['started']is None else'stop_before_generation'if result.get('progress',{}).get('stage')=='retrieval'else'finish_current_operation'
-            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':r['tier'],'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress'),'cancel_requested':bool(j['cancel_requested']),'cancellation_mode':cancellation_mode if j['cancel_requested']else None,'provider_interruption_supported':False,'created':j['created'],'started':j['started'],'finished':j['finished'],'elapsed_seconds':max(0,(j['finished'] or stamp())-j['created'])}
+            return {'job_id':jid,'state':j['state'],'family_id':r['family_id'],'tier':answer_mode.source_tier(db,r),'model':r['model'],'position':db.execute("SELECT count(*)FROM jobs WHERE state='queued'AND created<?",(j['created'],)).fetchone()[0]+1 if j['state']=='queued'else None,'error_code':j['error_code'],'progress':result.get('progress'),'cancel_requested':bool(j['cancel_requested']),'cancellation_mode':cancellation_mode if j['cancel_requested']else None,'provider_interruption_supported':False,'created':j['created'],'started':j['started'],'finished':j['finished'],'elapsed_seconds':max(0,(j['finished'] or stamp())-j['created'])}
     def cancel(self,owner,jid):
         with self.store.tx()as db:
             j=self.owned(db,'jobs',jid,owner)

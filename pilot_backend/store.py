@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS login_attempts(key TEXT NOT NULL,at REAL NOT NULL,suc
 CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,account_id TEXT,detail TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS policies(id TEXT PRIMARY KEY,config TEXT NOT NULL,parent_id TEXT REFERENCES policies(id),created REAL NOT NULL,status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS families(id TEXT PRIMARY KEY,owner TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,question TEXT NOT NULL,context TEXT NOT NULL,task TEXT NOT NULL,locale TEXT NOT NULL,interface_locale TEXT NOT NULL,input_language TEXT NOT NULL,model TEXT NOT NULL,policy_id TEXT NOT NULL REFERENCES policies(id),bundle TEXT,identity TEXT,created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS family_answer_modes(family_id TEXT PRIMARY KEY REFERENCES families(id) ON DELETE CASCADE,mode TEXT NOT NULL CHECK(mode='single'));
+CREATE TRIGGER IF NOT EXISTS family_answer_mode_immutable BEFORE UPDATE ON family_answer_modes BEGIN SELECT RAISE(ABORT,'Family answer mode is immutable');END;
 CREATE TABLE IF NOT EXISTS family_focus(family_id TEXT PRIMARY KEY REFERENCES families(id) ON DELETE CASCADE,focus TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS family_focus_immutable BEFORE UPDATE ON family_focus BEGIN SELECT RAISE(ABORT,'Family focus is immutable');END;
 CREATE TABLE IF NOT EXISTS family_inputs(family_id TEXT PRIMARY KEY REFERENCES families(id) ON DELETE CASCADE,original_question TEXT NOT NULL);

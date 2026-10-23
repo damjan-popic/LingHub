@@ -81,7 +81,7 @@ def evidence(bundle):
 
 def answer(bundle, tier):
     checked(bundle)
-    if tier != 'short': raise Failure('expansion_unavailable',409)
+    if tier not in {'short','answer'}: raise Failure('expansion_unavailable',409)
     text = bundle['decision']['text']; refs = evidence(bundle)
     return {'status':'source_only','short_answer':text,'answer_md':text,'display_blocks':[{'block_id':'guidance','text':text,'evidence_ids':[r['evidence_id'] for r in refs]}],
             'evidence':refs,'source_badges':list({r['source_slug']:{'source_slug':r['source_slug'],'label':r['source_label']} for r in refs}.values()),
@@ -90,7 +90,7 @@ def answer(bundle, tier):
             'deterministic_result':deepcopy(bundle['decision']), 'limitations':[], 'synthesis_mode':'deterministic_guidance'}
 
 def source(bundle, eid, tier):
-    if tier != 'short': raise Failure('not_found',404)
+    if tier not in {'short','answer'}: raise Failure('not_found',404)
     for r, e in zip(bundle['decision']['resources'], evidence(bundle)):
         if e['evidence_id'] == eid:
             return {**e,'excerpt':r['title']+'\n'+r.get('preview',r['url']),'bibliography':{'title':r['title'],'publisher':r.get('source_label','Jezik na klik'),'date':r['verified_at']},'edition':r['verified_at']}

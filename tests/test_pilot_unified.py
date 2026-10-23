@@ -452,7 +452,7 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
                 return frozen
             if path=='/internal/pilot/generate':
                 self.calls.append((path,deepcopy(payload),base))
-                packet=payload['bundle']['payload']['packets']['short']['evidence']
+                packet=payload['bundle']['payload']['packets'][payload['tier']]['evidence']
                 ids=[]
                 for slug in ('jezikovna_posta','jezikovna_svetovalnica'):
                     entry=next(row for row in packet if row['source_slug']==slug)

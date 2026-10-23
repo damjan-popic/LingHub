@@ -6,6 +6,7 @@ import io
 import re
 from pathlib import Path
 from .store import canonical,digest
+from . import answer_mode
 
 SCALE='answer-quality-1-5-v1'
 DISPLAY_VERSION='pilot-paragraph-display-v1'
@@ -194,7 +195,7 @@ def observation(db,owner,run,result,created,display_locale):
     family=dict(db.execute('SELECT * FROM families WHERE id=?',(run['family_id'],)).fetchone())
     account=dict(db.execute('SELECT id,username,origin,cohort FROM accounts WHERE id=?',(owner,)).fetchone())
     original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(run['family_id'],)).fetchone()
-    paragraphs=display_paragraphs(result,run['tier'],display_locale)
+    paragraphs=display_paragraphs(result,answer_mode.source_tier(db,run),display_locale)
     # Frozen identity is assigned by our adapter, never by a browser. It contains
     # source/model/resource identities, never the signed packet or credentials.
     versions={k:result[k]for k in VERSION_FIELDS if k in result}
@@ -217,7 +218,7 @@ def observation(db,owner,run,result,created,display_locale):
             'actual_model':result.get('model_identity'),
             'execution':result['execution']if isinstance(result.get('execution'),dict)else{'device':'cpu'if family['task']!='reference'else'unknown'},
             'answer_language':family['locale'],'input_language':family['input_language'],
-            'tier':run['tier'],'task':family['task'],'answer_method':result.get('answer_method'),'versions':versions,
+            'tier':answer_mode.source_tier(db,run),'storage_tier':run['tier'],'task':family['task'],'answer_method':result.get('answer_method'),'versions':versions,
             'human_eligible':account['origin']=='human' and account['username']!='tehno' and (submission or {}).get('participant',{}).get('origin')!='automated_test',
             'submission_observation':{k:submission[k] for k in ('participant','versions')} if submission else None}
 
@@ -269,9 +270,10 @@ def participant_at_submission(db, owner, automated=False):
 
 def accepted(db, run_id, owner, *, automated=False, release=None):
     row=db.execute('SELECT parent_run_id FROM runs WHERE id=?',(run_id,)).fetchone()
+    run=db.execute('SELECT * FROM runs WHERE id=?',(run_id,)).fetchone()
     parent=db.execute('SELECT snapshot FROM run_observations WHERE run_id=?',(row[0],)).fetchone() if row[0] else None
     value={'schema':'klikai.pilot.run-observation.v1', 'participant':participant_at_submission(db,owner,automated),
-        'versions':{'application_release':release},'stages':{},'trace_incomplete':False,'missing_fields':[]}
+        'versions':{'application_release':release},'generation_tier':answer_mode.source_tier(db,run),'storage_tier':run['tier'],'stages':{},'trace_incomplete':False,'missing_fields':[]}
     if parent and json.loads(parent[0])['participant']['origin']=='automated_test':value['participant']['origin']='automated_test'
     db.execute('INSERT INTO run_observations VALUES(?,?)',(run_id,canonical(value)))
 
@@ -429,12 +431,12 @@ def attempt_case(db, run_id):
         'actual_model':result.get('model_identity'),'provider':result.get('execution',{}).get('provider_scope'),
         'outcome':outcome,'degraded':degraded,'rating':rating,'feedback_revisions':len(feedback),
         'review_status':reviews[-1]['status'] if reviews else 'unreviewed','trace_incomplete':bool(missing or observation.get('trace_incomplete')),
-        'display_sha256':run['display_hash'] or digest(result.get('blocks',[])),'tier':run['tier']}
+        'display_sha256':run['display_hash'] or digest(result.get('blocks',[])),'tier':answer_mode.source_tier(db,run),'storage_tier':run['tier']}
     return {'summary':summary,'observation':data_only(observation),'missing_fields':missing,
         'derived_analysis':derived_attempt_analysis(observation,result,delivered=run['delivered']),
         'context':family['context'],'languages':{'input':family['input_language'],'input_basis':'explicit_input' if family['input_language']!='und' else 'not_supplied','answer':family['locale'],'answer_basis':'submitted_answer_locale'},
         'job':job,'frozen_sources':data_only(bundle),'family_identity':json.loads(family['identity'] or '{}'),
-        'display':data_only(result),'display_paragraphs':display_paragraphs(result,run['tier'],family['locale']),
+        'display':data_only(result),'display_paragraphs':display_paragraphs(result,answer_mode.source_tier(db,run),family['locale']),
         'feedback_revisions':feedback,'human_reviews':reviews,
         'timing':{'accepted':run['created'],'started':job.get('started'),'server_ready':run['finished'],'browser_delivery':run['delivered']},
         'teaching_approval':'not_established_by_rating_or_group'}

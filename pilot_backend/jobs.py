@@ -1,5 +1,6 @@
 """Persisted bounded work with short-job priority and starvation prevention."""
 from __future__ import annotations
+from . import answer_mode
 import fcntl,json,math,re,threading,time
 from .store import canonical,digest,stamp
 from .security import Failure
@@ -114,6 +115,7 @@ class Jobs:
                 if focus:f['focus']=focus[0]
                 original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(f['id'],)).fetchone()
                 if original:f['original_question']=original[0]
+                generation_tier=answer_mode.source_tier(db,r)
             is_unified=f['task']=='reference'and getattr(self.adapter,'unified_answers',False)
             if is_unified:
                 if not self.continue_stage(job,{'progress':{'stage':'retrieval'if not f['bundle']else'generation'}}):return
@@ -138,12 +140,16 @@ class Jobs:
                 if not self.continue_stage(job,{'progress':{'stage':'generation','matches_ready':True},'retrieval':bundle.get('retrieval',{})}):return
             elif not self.continue_stage(job):return
             stage='writer'
-            generated=self.adapter.generate(bundle,r['tier'],r['model'],json.loads(parent[0])if parent and parent[0]else None)
+            generated=self.adapter.generate(bundle,generation_tier,r['model'],json.loads(parent[0])if parent and parent[0]else None)
+            if generation_tier=='answer':
+                if generated.get('tier','answer')!='answer':raise Failure('invalid_answer',502)
+                generated={**generated,'tier':'answer','answer_format':'single'}
             record_stage(self.store,rid,'generation',generated.get('diagnostics',{'writer':{'status':'not_invoked','reason':generated.get('generation',{}).get('status')}}) if generated.get('generation',{}).get('status') in {'no_support','unavailable'} else generated.get('diagnostics',{'writer':{'status':'not_captured','missing_fields':['writer_request_and_raw_output'],'trace_incomplete':True}}))
             stage='display_validation'
             if not self.continue_stage(job,{'progress':{'stage':'validation','matches_ready':True},'retrieval':bundle.get('retrieval',{})}if is_unified else None):return
             validation_started=time.monotonic()
             result,display=render_result(generated)
+            if generation_tier=='answer':result['answer_format']='single';result['tier']='answer'
             if self.release:result['application_release']=self.release
             result['capability']=f['task'];result['answer_method']=method(result)
             if is_unified:result['progress']={'stage':'complete'}

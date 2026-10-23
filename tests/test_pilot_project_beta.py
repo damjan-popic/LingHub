@@ -154,7 +154,7 @@ def test_tester_uses_automatic_routing_and_retains_actual_private_provenance(bet
     with TestClient(app,base_url=ORIGIN)as client:
         headers=login(client,credentials)
         session=client.get('/api/pilot/session').json()
-        assert session['capabilities']=={'project_beta':True,'tasks':['reference'],'unified_answers':True,
+        assert session['capabilities']=={'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':True,
             'comparisons':False,'beta_updated':'19. september 2026',
             'documentary_sources':['epravopis','jezikovna_posta','gradivo']}
         assert session['user']['shared_group']and not session['user']['can_change_password']

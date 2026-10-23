@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {ordinaryFamilyView} from '../pilot_ui/core.mjs';
 
 const source=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');
-const between=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
+const between=(start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert(a>=0&&b>a,'Known source function boundaries');return source.slice(a,b);};
 const line=start=>source.split('\n').find(row=>row.trim().startsWith(start));
 class Node {
   constructor(){this.textContent='';this.value='';this.children=[];this.events={};this.hidden=false;this.disabled=false;this.open=false;this.dataset={};this.classList={toggle(){}};}
@@ -30,7 +31,7 @@ function harness(handler){
     beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,
     textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:()=>new Node(),clear:n=>n.replaceChildren(),
     resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
-    modelText:()=>'',renderGenerationNotice(){},syncMatches(){},renderLexical(){},renderText(){},sourceButtons(){},
+    ordinaryFamilyView,modelText:()=>'',renderGenerationNotice(){},syncMatches(){},renderLexical(){},renderText(){},sourceButtons(){},
     jobState:t=>t?.state,tierBlocks:()=>[],acceptedStates:new Set(['complete']),pendingStates:new Set(['pending']),isCpuTask:()=>false,
     sourceExplorer:{render(){}},unwrapFamily:x=>x.family||x,keyFor:()=> 'synthetic-key',pollJob(){},taskControls(){},showClarification(){},
   };
@@ -40,7 +41,7 @@ function harness(handler){
     between('function clearFeedbackContext()','function authenticated('),
     between('async function recordDelivered(','function renderFeedback('),
     between('function renderFamily(','async function loadFeedback('),
-    between('async function submitQuestion(','async function expand('),
+    between('async function submitQuestion(','function expand('),
     between('async function saveFeedback(','async function historyList('),
     line("document.addEventListener('selectionchange'"),
     line("$('new-question').addEventListener('click'"),

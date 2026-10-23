@@ -667,6 +667,33 @@ def _generate(gateway, bundle, tier, model, parent=None):
                        if row.get(key) is not None and row[key] != '']
             if any(not isinstance(value, str) or value != evidence_id(row) for value in aliases):
                 raise Failure('unknown_citation', 502)
+        # These links offer relevant originals when synthesis is incomplete;
+        # they are not citations and may not invent a source or its title.
+        decision_sources = result.get('decision_sources', [])
+        comparison_codes = {'comparison_coverage_incomplete', 'comparison_explanation_incomplete'}
+        scoped_partial = result.get('status') == 'partial' and any(
+            isinstance(row, dict) and row.get('code') in comparison_codes
+            for row in (result.get('limitations', []) if isinstance(result.get('limitations'), list) else []))
+        if (not isinstance(decision_sources, list) or len(decision_sources) > 64
+                or (decision_sources and not scoped_partial)):
+            raise Failure('unknown_citation', 502)
+        matched = {evidence_id(row): row for row in bundle['matches']}
+        checked_sources, seen_sources = [], set()
+        cited_ids = {evidence_id(row) for row in evidence + citations}
+        for row in decision_sources:
+            if (not isinstance(row, dict) or set(row) != {'evidence_id', 'title'}
+                    or not isinstance(row.get('evidence_id'), str) or row['evidence_id'] not in known
+                    or not isinstance(row.get('title'), str) or len(row['title']) > 2000):
+                raise Failure('unknown_citation', 502)
+            eid = row['evidence_id']
+            match = matched[eid]
+            title = match.get('title') or (match.get('source') or {}).get('title')
+            if not isinstance(title, str) or not title.strip() or len(title) > 2000:
+                raise Failure('unknown_citation', 502)
+            if eid not in seen_sources and eid not in cited_ids:
+                checked_sources.append({'evidence_id': eid, 'title': title})
+                seen_sources.add(eid)
+        if 'decision_sources' in result:result['decision_sources'] = checked_sources
         # A successful transport or an excerpt with badges is not generation.
         generated = result.get('answer_kind') in {'generated', 'mixed'} and result.get('status') in {'validated', 'partial'}
         excerpt = (result.get('answer_kind') == 'source_only' and result.get('status') in {'validated', 'partial'}

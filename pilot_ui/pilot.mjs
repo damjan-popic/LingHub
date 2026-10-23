@@ -162,7 +162,11 @@ function renderText(tier,kind,node,reference={}) {
     aside.append(el('p',t('answer_notes'),{class:'answer-notes-heading'}));
     for(const note of notes){const p=el('p',note.text||t(note.key,note.values),{'data-note-kind':note.category});
       for(const evidence of note.evidence){const number=evidence.local_number||evidence.number;if(Number.isInteger(number)&&number>0)p.append(citationButton({text:'['+number+']',number,evidence}));}
-      aside.append(p);}
+      aside.append(p);
+      if(note.decisionSources?.length){const links=el('p',t('comparison_originals_intro'),{class:'comparison-originals'});
+        for(const source of note.decisionSources){const button=el('button',t('comparison_original_link',{title:source.title}),{type:'button',class:'plain decision-source','data-decision-source':source.evidence_id});
+          button.addEventListener('click',()=>openSource(tier,source.evidence_id,kind,{...reference,unusedMatch:true}));links.append(document.createTextNode(' '),button);}
+        aside.append(links);}}
     node.append(aside);
   }
 }

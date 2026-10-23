@@ -133,7 +133,8 @@ export function answerNotes(tier) {
   const eid=item=>item?.evidence_id || item?.citation_id || item?.passage_id;
   const limitationKeys={partial_evidence:'limitation_partial_evidence',no_answer_evidence:'limitation_no_answer_evidence',
     conflicting_evidence:'limitation_conflicting_evidence',source_scope:'limitation_source_scope',proposal_status:'source_proposal_note',
-    uncertain_entry_boundary:'limitation_uncertain_entry_boundary',unsupported_inference:'limitation_unsupported_inference'};
+    uncertain_entry_boundary:'limitation_uncertain_entry_boundary',unsupported_inference:'limitation_unsupported_inference',
+    comparison_coverage_incomplete:'limitation_comparison_coverage_incomplete',comparison_explanation_incomplete:'limitation_comparison_explanation_incomplete'};
   const add=note=>{const same=notes.find(old=>old.text===note.text && old.key===note.key && JSON.stringify(old.values)===JSON.stringify(note.values));
     if(same){for(const item of note.evidence)if(!same.evidence.some(old=>eid(old)===eid(item)))same.evidence.push(item);}
     else notes.push(note);};
@@ -143,7 +144,13 @@ export function answerNotes(tier) {
     if(typeof value==='object' && value?.scope==='claim' && (!Array.isArray(value.claim_ids) || !value.claim_ids.some(id=>blocks.some(block=>block.block_id===id))))continue;
     if(!text && !limitationKeys[value?.code])continue;
     const ids=new Set(blocks.filter(block=>value?.scope!=='claim' || value.claim_ids.includes(block.block_id)).flatMap(block=>block.evidence_ids || []));
-    add({category:value?.code || 'limitation',...(text?{text}:{key:limitationKeys[value.code],values:{}}),evidence:evidence.filter(item=>ids.has(eid(item)))});
+    const comparison=['comparison_coverage_incomplete','comparison_explanation_incomplete'].includes(value?.code);
+    const seen=new Set(evidence.map(eid)),decisionSources=[];
+    if(comparison)for(const item of Array.isArray(tier?.decision_sources)?tier.decision_sources:[]){
+      if(typeof item?.evidence_id!=='string'||!item.evidence_id||typeof item.title!=='string'||!item.title.trim()||seen.has(item.evidence_id))continue;
+      seen.add(item.evidence_id);decisionSources.push({evidence_id:item.evidence_id,title:item.title});
+    }
+    add({category:value?.code || 'limitation',...(text?{text}:{key:limitationKeys[value.code],values:{}}),evidence:evidence.filter(item=>ids.has(eid(item))),...(decisionSources.length?{decisionSources}:{})});
   }
   if(hasSupportedAnswer(tier)) {
     const seen=new Set();

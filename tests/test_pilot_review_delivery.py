@@ -6,9 +6,9 @@ from pilot_backend import unified
 from pilot_backend.store import digest
 
 
-def deliver(result, locale='sl'):
+def deliver(result, locale='sl', matches=None):
     body = {'contract': unified.CONTRACT, 'locale': locale,
-            'matches': [{'evidence_id': 'known'}], 'gateway_bundle': {'synthetic': True},
+            'matches': matches or [{'evidence_id': 'known'}], 'gateway_bundle': {'synthetic': True},
             'retrieval': {'status': 'complete'}}
     return unified.generate(SimpleNamespace(request=lambda *args: deepcopy(result)),
                             dict(body, snapshot_sha256=digest(body)), 'short', 'auto')
@@ -95,3 +95,34 @@ def test_freeze_producer_uses_the_durable_nested_json_order(monkeypatch):
     assert transmitted==original and capture==original
     assert [x['term'] for x in transmitted['term_entries']]==['B','A']
     assert digest(transmitted)==digest(original)
+
+
+def test_comparison_original_links_are_bound_to_frozen_matches_and_not_citations():
+    value=partial();value.update(status='partial',limitations=[{'code':'comparison_explanation_incomplete','scope':'answer','claim_ids':[]}],
+        decision_sources=[{'evidence_id':'explanation','title':'Untrusted replacement title'},
+                          {'evidence_id':'known','title':'Already cited'},
+                          {'evidence_id':'explanation','title':'Duplicate'}])
+    matches=[{'evidence_id':'known','title':'Cited original'},
+             {'evidence_id':'explanation','title':'Complete original explanation'}]
+    result=deliver(value,matches=matches)
+    assert result['decision_sources']==[{'evidence_id':'explanation','title':'Complete original explanation'}]
+    assert [row['evidence_id']for row in result['evidence']]==['known']
+    assert [row['evidence_id']for row in result['citations']]==['known']
+
+
+@pytest.mark.parametrize('sources',[
+    [{'evidence_id':'unknown','title':'Forged'}],
+    [{'evidence_id':'known','title':'Original','url':'https://example.org/'}],
+    [{'evidence_id':None,'title':'Original'}],
+    {'evidence_id':'known','title':'Original'},
+])
+def test_comparison_original_links_reject_unknown_or_unbounded_records(sources):
+    value=partial();value.update(status='partial',limitations=[{'code':'comparison_coverage_incomplete','scope':'answer','claim_ids':[]}],decision_sources=sources)
+    result=deliver(value,matches=[{'evidence_id':'known','title':'Original'}])
+    assert result['generation']['error_code']=='unknown_citation'
+    assert 'decision_sources'not in result
+
+
+def test_comparison_links_are_not_accepted_as_unscoped_extra_sources():
+    value=partial();value['decision_sources']=[{'evidence_id':'known','title':'Original'}]
+    assert deliver(value)['generation']['error_code']=='unknown_citation'

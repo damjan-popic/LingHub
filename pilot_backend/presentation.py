@@ -31,7 +31,7 @@ SAFE = frozenset({
     'question', 'context', 'locale', 'input_language', 'task', 'created', 'short', 'long',
     'state', 'status', 'parent_run_id', 'parent_relation', 'matches_available', 'unified_answers', 'focus',
     'short_answer', 'answer_md', 'blocks', 'block_id', 'text', 'paragraph_id', 'evidence_ids',
-    'evidence', 'evidence_id', 'citation_id', 'citations', 'claim_id', 'local_number',
+    'decision_sources', 'evidence', 'evidence_id', 'citation_id', 'citations', 'claim_id', 'local_number',
     'source_badges', 'source_slug', 'source_label', 'source_key', 'label', 'display_name',
     'title', 'snippet', 'excerpt', 'url', 'edition', 'source_status', 'bibliography',
     'current_original_lookup', 'original_view',
@@ -47,7 +47,8 @@ SAFE = frozenset({
 })
 
 LIMITATION_CODES = frozenset({'partial_evidence', 'no_answer_evidence', 'conflicting_evidence',
-    'source_scope', 'proposal_status', 'uncertain_entry_boundary', 'unsupported_inference'})
+    'source_scope', 'proposal_status', 'uncertain_entry_boundary', 'unsupported_inference',
+    'comparison_coverage_incomplete', 'comparison_explanation_incomplete'})
 
 
 def reader_limitations(value):

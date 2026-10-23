@@ -23,7 +23,7 @@ def render_result(value):
     if not isinstance(value,dict):raise Failure('invalid_answer',502)
     status=value.get('status')
     if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
-    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress'}
+    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress','decision_sources'}
     out={k:v for k,v in value.items()if k in allowed}
     from .human_feedback import provider_diagnostics
     out.update(provider_diagnostics(value))
@@ -33,6 +33,14 @@ def render_result(value):
     for field in ('source_badges','evidence'):
         if not isinstance(out.get(field,[]),list):raise Failure('invalid_answer',502)
         out.setdefault(field,[])
+    if 'decision_sources' in out:
+        rows=out['decision_sources']
+        if (not isinstance(rows,list) or len(rows)>64 or any(not isinstance(row,dict)
+                or set(row)!={'evidence_id','title'} or not isinstance(row.get('evidence_id'),str)
+                or not row['evidence_id'] or len(row['evidence_id'])>2000
+                or not isinstance(row.get('title'),str) or not row['title'].strip()
+                or len(row['title'])>2000 for row in rows)):
+            raise Failure('invalid_answer',502)
     # The UI renders these canonical blocks as text. Anchors address Unicode code points.
     blocks=out.get('display_blocks')or out.get('blocks')
     if blocks:

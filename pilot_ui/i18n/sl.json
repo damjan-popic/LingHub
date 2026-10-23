@@ -410,5 +410,9 @@
   "guide_limits": "KLIKai je še v preizkušanju. Preverite razlago in vire; citat sam po sebi ne jamči pravilnosti. Predlog pravil, letni dodatek in veljavni priročnik imajo različen obseg. Trenutno niso povezani vsi načrtovani viri.",
   "guide_contact": "Če se ne morete prijaviti, je vprašanje obtičalo ali se mnenje ne shrani, obvestite Damjana po obstoječem projektnem kanalu. Navedite skupino, približen čas in povezavo do odgovora; po potrebi tudi brskalnik. Posebej neprimeren odgovor označite v aplikaciji in sporočite Damjanu.",
   "beta_open_original": "Odprite izvirnik na spletu",
-  "source_proposal_label": "Predlog"
+  "source_proposal_label": "Predlog",
+  "limitation_comparison_coverage_incomplete": "Odgovor ne obravnava dovolj zanesljivo vseh primerjanih možnosti. Iz tega ni mogoče sklepati, da posamezna možnost v virih ne obstaja.",
+  "limitation_comparison_explanation_incomplete": "V odgovoru manjka del podprtih razlogov ali pogojev, ki so pomembni za izbiro. Preverite razlago v navedenih virih.",
+  "comparison_originals_intro": "Za podrobnejšo razlago odprite izvirni vir:",
+  "comparison_original_link": "Odpri izvirnik: {title}"
 }

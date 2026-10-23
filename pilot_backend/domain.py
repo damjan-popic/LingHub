@@ -165,7 +165,7 @@ class Domain:
         if r['result'] or r['state'] in {'failed','cancelled'}:
             locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
             result=human_feedback.visible_result(r,locale)
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress','decision_sources'):
                 if blind and k in {'retrieval','generation','progress'}:continue
                 if k in result:out[k]=result[k]
             if not blind:

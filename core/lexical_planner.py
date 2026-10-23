@@ -76,6 +76,46 @@ def translation_object_span(text):
    return start,end
  return None
 
+_TRANSLATION_QUOTES=re.compile(r'''«[^»\n]+»|»[^«\n]+«|“[^”\n]+”|„[^“”\n]+[“”]|"[^"\n]+"|(?<!\w)'[^'\n]+'(?!\w)''')
+
+def translation_choice_spans(text):
+ """Separate a translation source from two explicitly offered translations.
+
+ A colon outside quotations is the source/choice boundary. Each side remains
+ an exact whole expression, including function words; this creates no lexical
+ equivalence or claim about which translation is correct.
+ """
+ span=translation_object_span(text)
+ if not span:return []
+ start,end=span
+ quoted=[m.span()for m in _TRANSLATION_QUOTES.finditer(text,start,end)]
+ def outside(a,b):return not any(left<b and a<right for left,right in quoted)
+ colons=[m for m in re.finditer(':',text[start:end])if outside(start+m.start(),start+m.end())]
+ if len(colons)!=1:return []
+ colon=start+colons[0].start()
+ boundaries=[m for m in re.finditer(r'\b(?:ali|oppure|or|o)\b',text[colon+1:end],re.I)
+             if outside(colon+1+m.start(),colon+1+m.end())]
+ if len(boundaries)!=1:return []
+ split=boundaries[0];a=colon+1+split.start();b=colon+1+split.end()
+ parts=[(start,colon),(colon+1,a),(b,end)];result=[]
+ pairs={'«':'»','»':'«','“':'”','„':'“','"':'"',"'":"'"}
+ for i,(left,right)in enumerate(parts):
+  while left<right and text[left].isspace():left+=1
+  while right>left and text[right-1].isspace():right-=1
+  if i==0:
+   before=re.match(rf'{_TRANSLATION_LANGUAGE}\s+',text[left:right],re.I)
+   if before:left+=before.end()
+   after=re.search(rf'\s+{_TRANSLATION_LANGUAGE}$',text[left:right],re.I)
+   if after:right=left+after.start()
+  if left<right and text[left]in pairs and text[right-1]==pairs[text[left]]:left+=1;right-=1
+  candidate=text[left:right]
+  if (not candidate or len(candidate)>240 or len(list(WORD.finditer(candidate)))>16
+      or re.search(r'[?;\n:«»“”„"]',candidate)):
+   return []
+  result.append({'start':left,'end':right,'text':candidate,
+   'basis':'translation source expression; original surface'if i==0 else'proposed translation alternative; original surface'})
+ return result if result[1]['text']!=result[2]['text']else []
+
 _LEXICAL_FRAMES=(
  r'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:sklanjamo|sklanjati|pregibamo|pregibati|se\s+(?:sklanja|sklanjajo|pregiba|pregibajo))\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:kaj\s+(?:je(?!\s+(?:prav|pravil\w*|ustrez\w*)\b)|pomeni)|pomen\s+besede)\s+(?P<target>.+?)\s*[.?!]*\s*',
@@ -236,8 +276,11 @@ def plan(text,context,language,analysis,request_plan=None):
  elif len(words)<=8 and not requested and words and (words[0].group().casefold()not in SCAFFOLD or words[0].group().casefold()in {'v','na','pri','ob','po','k','h','z','s','od','do','iz'}) and '?'not in text and not re.search(r'[«»“”"]|\bali\b',text,re.I):
   add(0,len(text),'bounded whole phrase before component lookup');kind='phrase'
  else:
-  for m in re.finditer(r'«([^»]+)»|»([^«]+)«|“([^”]+)”|"([^"]+)"',text):
-   gi=next(i for i,v in enumerate(m.groups(),1)if v is not None);add(*m.span(gi),'quoted original span')
+  if 'translation'in requested:spans=translation_choice_spans(text)
+  if spans:kind='comparison'
+  else:
+   for m in re.finditer(r'«([^»]+)»|»([^«]+)«|“([^”]+)”|"([^"]+)"',text):
+    gi=next(i for i,v in enumerate(m.groups(),1)if v is not None);add(*m.span(gi),'quoted original span')
   if len(spans)>1 and 'translation'not in requested:
    contrasted=comparison_lexical_spans(text,spans)
    if contrasted!=spans:spans=contrasted;kind='comparison'

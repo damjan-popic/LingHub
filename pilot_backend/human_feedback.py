@@ -51,6 +51,60 @@ VALIDATION_ACTIONS={'accepted','withhold','omit','source_supported_partial','mix
 VALIDATION_LIMITATION_REASONS={'model_found_insufficient_evidence','no_supported_generated_claims',
     'invalid_or_inconsistently_scoped_composition','native_tokenizer_unavailable','empty_indexed_evidence',
     'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested'}
+RECOMPOSITION_TRIGGERS={
+    'comparison_practical_choice_missing','comparison_practical_option_unresolved',
+    'comparison_decision_missing','comparison_decision_source_not_cited',
+    'comparison_documentary_basis_missing','comparison_preference_missing',
+    'comparison_condition_missing','comparison_proposal_missing','comparison_target_not_addressed',
+    'comparison_decision_removed_by_processing','comparison_basis_removed_by_processing',
+    'comparison_qualification_removed_by_processing'}
+RECOMPOSITION_OUTCOMES={
+    ('skipped','primary',0):{'correction_not_dispatched','corrective_prompt_exceeds_existing_bound',
+        'corrective_provider_not_admitted','corrective_preparation_unavailable'},
+    ('accepted','corrective',1):{'required_content_restored'},
+    ('retained_primary','primary',1):{'corrective_answer_still_inadequate','corrective_completion_failed'}}
+
+
+def recomposition_diagnostics(value):
+    """Closed operational summary; neither prompts nor rejected prose are public."""
+    if not isinstance(value,dict):return {}
+    status=value.get('status');phase=value.get('selected_phase');calls=value.get('corrective_generation_calls')
+    if not isinstance(status,str)or not isinstance(phase,str)or type(calls)is not int:return {}
+    reasons=RECOMPOSITION_OUTCOMES.get((status,phase,calls),set())
+    reason=value.get('reason');triggers=value.get('trigger_codes');maximum=value.get('max_corrective_generation_calls')
+    origin=value.get('primary_origin')
+    if origin is not None and origin not in ('live','retained'):return {}
+    minimum=0 if origin=='retained'and status=='skipped'and reason=='correction_not_dispatched'else 1
+    if (type(maximum)is not int or maximum!=1 or not isinstance(reason,str)or reason not in reasons
+            or not isinstance(triggers,list)or not minimum<=len(triggers)<=len(RECOMPOSITION_TRIGGERS)
+            or any(not isinstance(code,str)or code not in RECOMPOSITION_TRIGGERS for code in triggers)
+            or len(set(triggers))!=len(triggers)):
+        return {}
+    return dict(status=status,selected_phase=phase,corrective_generation_calls=calls,
+        max_corrective_generation_calls=1,trigger_codes=list(triggers),reason=reason,
+        **({'primary_origin':origin}if origin is not None else{}))
+
+
+def generation_accounting(value, summary, attempts):
+    """Check explicit dispatch observations; do not infer a call from a plan."""
+    bounds={'primary_provider_dispatches':2,'corrective_provider_dispatches':1,
+        'completed_primary_calls':2,'completed_corrective_calls':1,'unknown_provider_outcomes':3}
+    if not summary or not isinstance(value,dict)or any(
+            type(value.get(key))is not int or not 0<=value[key]<=limit for key,limit in bounds.items()):return {}
+    safe={key:value[key] for key in bounds}
+    if (safe['corrective_provider_dispatches']!=summary['corrective_generation_calls']
+            or safe['completed_primary_calls']>safe['primary_provider_dispatches']
+            or safe['completed_corrective_calls']>safe['corrective_provider_dispatches']
+            or safe['unknown_provider_outcomes']>safe['primary_provider_dispatches']+safe['corrective_provider_dispatches']):return {}
+    if attempts is not None:
+        observed={
+            'primary_provider_dispatches':sum(a.get('stage')=='generation'for a in attempts),
+            'corrective_provider_dispatches':sum(a.get('stage')=='corrective_generation'for a in attempts),
+            'completed_primary_calls':sum(a.get('stage')=='generation'and a.get('status')=='completed'for a in attempts),
+            'completed_corrective_calls':sum(a.get('stage')=='corrective_generation'and a.get('status')=='completed'for a in attempts),
+            'unknown_provider_outcomes':sum(a.get('status')=='unknown'for a in attempts)}
+        if observed!=safe:return {}
+    return safe
 
 
 def generation_validation_diagnostics(result):
@@ -149,7 +203,17 @@ def public_routing(execution):
 def provider_diagnostics(result):
     """Bounded attempt accounting; response bodies and credentials are excluded."""
     out={};attempts=result.get('provider_attempts')
-    if isinstance(attempts,list)and len(attempts)<=2:
+    summary=recomposition_diagnostics(result.get('recomposition'))
+    if summary:out['recomposition']=summary
+    corrections=[i for i,row in enumerate(attempts)if isinstance(row,dict)and row.get('stage')=='corrective_generation']if isinstance(attempts,list)else []
+    bounded=(isinstance(attempts,list)and len(attempts)<=2 and not corrections)
+    if corrections:
+        minimum=1 if summary.get('primary_origin')=='retained'else 2
+        bounded=(summary.get('corrective_generation_calls')==1 and len(attempts)<=3
+            and corrections==[len(attempts)-1] and len(attempts)>=minimum
+            and all(isinstance(row,dict)and row.get('stage')=='generation'for row in attempts[:-1]))
+        if summary.get('primary_origin')=='retained':bounded=bounded and len(attempts)==1
+    if bounded:
         safe=[]
         for attempt in attempts:
             if not isinstance(attempt,dict):continue
@@ -157,10 +221,13 @@ def provider_diagnostics(result):
                  (key=='route'and isinstance(value,str)and value in {'shared','own_cpu','own_gpu'})or
                  (key=='status'and isinstance(value,str)and value in {'started','completed','rejected','unknown'})or
                  (key=='http_code'and type(value)is int and 100<=value<=599)or
-                 (key=='stage'and isinstance(value,str)and value in {'generation'})or
+                 (key=='stage'and isinstance(value,str)and value in {'generation','corrective_generation'})or
                  (key=='model'and isinstance(value,str)and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_. /-]{0,299}',value))}
             if row:safe.append(row)
         out['provider_attempts']=safe
+    accounting=(generation_accounting(result.get('generation_accounting'),summary,out.get('provider_attempts'))
+        if attempts is None or bounded else {})
+    if accounting:out['generation_accounting']=accounting
     failure=result.get('provider_failure')
     if isinstance(failure,dict)and isinstance(failure.get('code'),str)and failure.get('code')in PROVIDER_FAILURE_CODES:
         out['provider_failure']={'code':failure['code']}
@@ -344,11 +411,24 @@ def derived_attempt_analysis(observation, result, *, delivered=None):
     writer.status or provider-failure labels. Unknown delivery remains unknown.
     """
     stages=observation.get('stages',{});generation=stages.get('generation',{})
-    writer=generation.get('writer',{});raw=writer.get('raw_final_content')
+    writer=generation.get('writer',{});selected=writer.get('selected_phase')
+    phase_recorded='selected_phase'in writer;phase_trace_complete=False
+    if phase_recorded:
+        phases=writer.get('phases')
+        valid_size=(isinstance(phases,list)and (len(phases)==2 or (len(phases)==1
+            and isinstance(phases[0],dict)and phases[0].get('phase')=='primary'
+            and phases[0].get('origin')=='retained'and selected=='primary')))
+        if (isinstance(selected,str)and selected in {'primary','corrective'} and valid_size
+                and all(isinstance(phase,dict)for phase in phases)
+                and [phase.get('phase')for phase in phases]==['primary','corrective'][:len(phases)]):
+            writer=phases[0 if selected=='primary'else 1];phase_trace_complete=True
+        else:writer={}
+    raw=writer.get('raw_final_content')
     returned=isinstance(raw,str) and bool(raw.strip())
     invocation=('returned_completion' if returned else 'not_invoked' if writer.get('status')=='not_invoked'
         else 'attempted_without_retained_completion' if writer.get('requests') or writer.get('status') in {'attempted','failed'} else 'unknown')
-    checks=generation.get('result_checks') or result.get('generation_validation') or result
+    checks=(writer.get('result_checks')or {})if phase_recorded else (
+        generation.get('result_checks') or result.get('generation_validation') or result)
     validation=checks.get('validation',{})
     content=None
     if returned:
@@ -361,7 +441,8 @@ def derived_attempt_analysis(observation, result, *, delivered=None):
     refused=(isinstance(content,dict) and (content.get('no_sufficient_evidence') is True and claims==[] or
         bool(claims) and all(isinstance(c,dict) and refusal(c.get('text')) for c in claims)))
     reason=validation.get('reason');status=validation.get('status')
-    if status=='invalid_composition_envelope' or reason=='abstention_contradicts_claims':stage='invalid_composition'
+    if phase_recorded and not phase_trace_complete:stage='selected_phase_trace_missing'
+    elif status=='invalid_composition_envelope' or reason=='abstention_contradicts_claims':stage='invalid_composition'
     elif status=='all_claims_withheld':stage='all_claims_withheld'
     elif status=='consistent_abstention' or refused:stage='returned_abstention'
     elif result.get('claims') and (checks.get('omitted_claims') or result.get('answer_support')=='partial'):stage='partial_supported_output'
@@ -374,7 +455,9 @@ def derived_attempt_analysis(observation, result, *, delivered=None):
     return {'schema':'attempt-stage-analysis-v1','writer_execution':invocation,
         'content_kind':'abstention' if refused or status=='consistent_abstention' else 'substantive_candidate' if claims else 'unknown',
         'validation_stage':stage,'delivery_stage':delivery,'semantic_correctness':'not_established',
-        'historical_labels_preserved':True}
+        'historical_labels_preserved':True,
+        **({'selected_phase':selected if isinstance(selected,str)and selected in {'primary','corrective'}else'unknown',
+            'selected_phase_trace_complete':phase_trace_complete}if phase_recorded else{})}
 
 
 def attempt_case(db, run_id):

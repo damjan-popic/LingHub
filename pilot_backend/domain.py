@@ -176,8 +176,9 @@ class Domain:
                 out['display_sha256']=r['display_hash'] or digest(result.get('blocks',[]));out['model']=r['model']
                 from .human_feedback import public_execution,provider_diagnostics
                 out.update(public_execution(result))
-                validation=provider_diagnostics(result).get('generation_validation')
-                if validation:out['generation_validation']=validation
+                diagnostics=provider_diagnostics(result)
+                for key in ('generation_validation','recomposition','generation_accounting'):
+                    if key in diagnostics:out[key]=diagnostics[key]
         if historical is not None:out['historical_evidence']={'status':'exact_retained_record','fresh_origin_assurance':False}
         # Public results are deliberately allowlisted. Signed bundles, profiles, timings and hashes stay server-side.
         return out

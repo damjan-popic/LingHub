@@ -5,7 +5,7 @@ from .store import canonical,digest,stamp,uid
 from .security import Failure
 from . import collation, editorial, unified, request_tasks
 from .classification import method
-from . import human_feedback, answer_mode
+from . import human_feedback, answer_mode, presentation
 from .adoption import historical_record
 
 RATINGS={None,'useful','partly_useful','not_useful','cannot_judge'}
@@ -169,10 +169,27 @@ class Domain:
         if r['result'] or r['state'] in {'failed','cancelled'}:
             locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
             result=human_feedback.visible_result(r,locale)
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress','decision_sources'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress','decision_sources'):
                 if blind and k in {'retrieval','generation','progress'}:continue
                 if k in result:out[k]=result[k]
             if not blind:
+                if isinstance(out.get('evidence'),list)and job and historical is None:
+                    original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',
+                        (r['family_id'],)).fetchone()
+                    question=(original[0]if original else db.execute(
+                        'SELECT question FROM families WHERE id=?',(r['family_id'],)).fetchone()[0])
+                    saved=db.execute('SELECT bundle FROM families WHERE id=?',
+                        (r['family_id'],)).fetchone()[0]
+                    bundle=json.loads(saved or'{}')
+                    source_records={unified.evidence_id(row):row.get('source')
+                        for row in bundle.get('matches',[])if isinstance(row,dict)
+                        and unified.evidence_id(row)and isinstance(row.get('source'),dict)}
+                    out['evidence']=presentation.bind_evidence(out['evidence'],
+                        self.store.meta('audit_salt',db=db),
+                        db.execute('SELECT owner FROM families WHERE id=?',
+                            (r['family_id'],)).fetchone()[0],
+                        r['family_id'],r['id'],job['id'],question,
+                        answer_mode.source_tier(db,r),result,source_records)
                 out['display_sha256']=r['display_hash'] or digest(result.get('blocks',[]));out['model']=r['model']
                 from .human_feedback import public_execution,provider_diagnostics
                 out.update(public_execution(result))
@@ -213,15 +230,28 @@ class Domain:
             for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):
                 latest[row['tier']]=json.loads(row['result'])if row['result']else{}
             usage_final=not bool(db.execute("SELECT 1 FROM runs WHERE family_id=?AND assignment_id IS NULL AND state IN ('queued','running') LIMIT 1",(fid,)).fetchone())
+            from .presentation import reader_evidence_state
+            generated=[];used=set();qualified_status=None
+            for result in latest.values():
+                if result.get('answer_kind')in {'generated','mixed'}:
+                    generated.append(result)
+                    used.update(unified.evidence_id(row)for row in result.get('citations',[])
+                                if isinstance(row,dict)and unified.evidence_id(row))
+                    used.update(eid for block in result.get('blocks',[])if isinstance(block,dict)
+                                for eid in block.get('evidence_ids',[])if isinstance(eid,str)and eid)
+                    continue
+                state=reader_evidence_state(result,
+                    result.get('evidence',[])if isinstance(result.get('evidence'),list)else[])
+                if state and state['status']!='no_selected_evidence':
+                    qualified_status=state['status']
+                    used.update(unified.evidence_id(row)for row in result.get('evidence',[])
+                                if isinstance(row,dict)and unified.evidence_id(row))
             if source is not None or summary:
-                generated=[r for r in latest.values()if r.get('answer_kind')in {'generated','mixed'}]
-                cited={unified.evidence_id(e)for result in generated for e in result.get('citations',[])if isinstance(e,dict)}
-                cited.update(eid for result in generated for b in result.get('blocks',[])for eid in b.get('evidence_ids',[]))
-                page=(unified.source_summary(bundle,cited,usage_final)if summary else
-                      unified.source_records_page(bundle,cited,source,offset,limit,usage_final))
-                page['answer_status']='pending'if not usage_final else'generated'if generated else'no_support'
+                page=(unified.source_summary(bundle,used,usage_final)if summary else
+                      unified.source_records_page(bundle,used,source,offset,limit,usage_final))
+                page['answer_status']=('pending'if not usage_final else'generated'if generated
+                    else qualified_status or'no_support')
                 return page
-            used={unified.evidence_id(e)for result in latest.values()for e in result.get('evidence',[])if isinstance(e,dict)}
             page=unified.matches_page(bundle,used,offset,limit)
             page['usage_final']=usage_final
             return page

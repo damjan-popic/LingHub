@@ -25,6 +25,40 @@ REFERENCE_LEMMA_LIMIT = 8
 REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
+ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
+    'terminology_equivalence','bounded_attestation','exact_source_excerpt'})
+ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
+    'text','claim_id','support_ids'})
+ANSWER_PLAN_CLAIM_FIELDS = frozenset({'claim_id','text','support_ids','fact_ids','section',
+    'paragraph_id','depends_on','unit_id','support_mode'})
+ANSWER_PLAN_CITATION_FIELDS = frozenset({'block_id','claim_id','unit_id','evidence_id',
+    'support_id','source_key','snippet','locator','char_start','char_end'})
+ANSWER_PLAN_CITATION_OPTIONAL_FIELDS = frozenset({'source_id','source_revision'})
+ANSWER_PLAN_COVERAGE_LIMITATION_FIELDS = frozenset({'code','scope','claim_ids','unit_id',
+    'message','coverage_receipt_id','coverage_receipt_sha256'})
+ANSWER_PLAN_PROCESSING_LIMITATION_FIELDS = frozenset({'code','scope','claim_ids','unit_id'})
+ANSWER_PLAN_TASK_LIMITATION_FIELDS = frozenset({'code','scope','claim_ids'})
+ANSWER_PLAN_TASK_LIMITATION_CODES = frozenset({'comparison_coverage_incomplete',
+    'comparison_explanation_incomplete'})
+ANSWER_PLAN_PROCESSING_LIMITATION_CODES = frozenset({
+    'partial_case_only_not_full_inflection','context_only_no_explicit_value',
+    'unresolved_value_role','grammatical_number_mismatch_or_unspecified',
+    'source_status_not_admitted_for_coverage',
+    *{f'requested_{value}_not_in_exact_excerpt'for value in
+      ('explanation','definition','frequency','example','spacing','recommendation','usage')}})
+ANSWER_PLAN_RENDERED_LIMITATIONS = {
+    'partial_case_only_not_full_inflection':(
+        'Odlomek potrjuje le navedeni sklon, ne celotne sklanjatve.',
+        'Questo estratto documenta solo il caso indicato, non l’intera flessione.'),
+    **{f'requested_{facet}_not_in_exact_excerpt':(f'Odlomek {sl}.',f'L’estratto {it}.')
+       for facet,sl,it in (
+        ('explanation','ne pojasni razloga za obliko','non spiega il motivo della forma'),
+        ('definition','ne vsebuje zahtevane definicije','non contiene la definizione richiesta'),
+        ('frequency','ne vsebuje zahtevanih podatkov o pogostnosti','non contiene dati sulla frequenza richiesti'),
+        ('example','ne vsebuje zahtevanega primera','non contiene l’esempio richiesto'),
+        ('spacing','ne razreši zahtevanega zapisa skupaj ali narazen','non risolve la grafia unita o separata richiesta'),
+        ('recommendation','ne vsebuje zahtevanega priporočila','non contiene la raccomandazione richiesta'),
+        ('usage','ne vsebuje zahtevanih podatkov o rabi','non contiene le informazioni d’uso richieste'))}}
 
 
 def evidence_id(row):
@@ -36,6 +70,78 @@ def checked(bundle):
             bundle.get('snapshot_sha256') != digest({k: v for k, v in bundle.items() if k != 'snapshot_sha256'})):
         raise Failure('resource_changed', 409)
     return bundle
+
+
+def validate_coverage_limitations(blocks, limitations):
+    """Bind every deterministic coverage block to one closed CORE receipt."""
+    coverage={row['unit_id']:row for row in blocks
+              if row.get('unit_type')=='coverage_limitation'}
+    rows=limitations if isinstance(limitations,list)else []
+    candidates=[row for row in rows if isinstance(row,dict)and(
+        row.get('code')=='partial_evidence'or row.get('unit_id')in coverage
+        or 'coverage_receipt_id'in row or 'coverage_receipt_sha256'in row)]
+    if (len(coverage)!=sum(row.get('unit_type')=='coverage_limitation'for row in blocks)
+            or len(candidates)!=len(coverage)):
+        raise Failure('unknown_citation',502)
+    seen=set()
+    for row in candidates:
+        if (set(row)!=ANSWER_PLAN_COVERAGE_LIMITATION_FIELDS
+                or row.get('code')!='partial_evidence'or row.get('scope')!='answer'
+                or row.get('claim_ids')!=[]or row.get('unit_id')not in coverage
+                or row.get('message')!=coverage[row['unit_id']]['text']
+                or not isinstance(row.get('coverage_receipt_id'),str)
+                or not row['coverage_receipt_id']
+                or not isinstance(row.get('coverage_receipt_sha256'),str)
+                or not re.fullmatch(r'[0-9a-f]{64}',row['coverage_receipt_sha256'])
+                or row['unit_id']in seen):
+            raise Failure('unknown_citation',502)
+        seen.add(row['unit_id'])
+    if seen!=set(coverage):raise Failure('unknown_citation',502)
+
+
+def deterministic_answer_text(blocks):
+    paragraphs=dict.fromkeys(row['paragraph_id']for row in blocks)
+    return '\n\n'.join(' '.join(row['text']for row in blocks
+        if row['paragraph_id']==paragraph)for paragraph in paragraphs)
+
+
+def validate_processing_limitations(blocks, claims, limitations):
+    """Close processing limitations and bind them to exact-excerpt claims."""
+    coverage_ids={row['unit_id']for row in blocks
+                  if row.get('unit_type')=='coverage_limitation'}
+    processing=[row for row in limitations if not(isinstance(row,dict)and(
+        row.get('code')=='partial_evidence'or row.get('unit_id')in coverage_ids
+        or 'coverage_receipt_id'in row or 'coverage_receipt_sha256'in row))]
+    task_rows=[row for row in processing if isinstance(row,dict)and
+               row.get('code')in ANSWER_PLAN_TASK_LIMITATION_CODES]
+    if (any(set(row)!=ANSWER_PLAN_TASK_LIMITATION_FIELDS or row.get('scope')!='answer'
+            or row.get('claim_ids')!=[] for row in task_rows)
+            or len({row['code']for row in task_rows})!=len(task_rows)):
+        raise Failure('unknown_citation',502)
+    processing=[row for row in processing if row not in task_rows]
+    block_by_claim={row['claim_id']:row for row in blocks if row.get('claim_id')is not None}
+    seen=set()
+    for row in processing:
+        ids=row.get('claim_ids')if isinstance(row,dict)else None
+        claim_id=ids[0]if isinstance(ids,list)and len(ids)==1 else None
+        block=block_by_claim.get(claim_id)
+        key=(row.get('code'),claim_id,row.get('unit_id'))if isinstance(row,dict)else None
+        if (not isinstance(row,dict)or set(row)!=ANSWER_PLAN_PROCESSING_LIMITATION_FIELDS
+                or row.get('code')not in ANSWER_PLAN_PROCESSING_LIMITATION_CODES
+                or row.get('scope')!='processing'or block is None
+                or block.get('unit_type')!='exact_source_excerpt'
+                or row.get('unit_id')!=block.get('unit_id')or key in seen):
+            raise Failure('unknown_citation',502)
+        seen.add(key)
+        phrases=ANSWER_PLAN_RENDERED_LIMITATIONS.get(row['code'])
+        if phrases and not any(phrase in block['text']for phrase in phrases):
+            raise Failure('unknown_citation',502)
+    for claim_id,block in block_by_claim.items():
+        for code,phrases in ANSWER_PLAN_RENDERED_LIMITATIONS.items():
+            if any(phrase in block['text']for phrase in phrases)and(
+                    code,claim_id,block['unit_id'])not in seen:
+                raise Failure('unknown_citation',502)
+    return processing
 
 
 def score(value):
@@ -701,7 +807,20 @@ def _generate(gateway, bundle, tier, model, parent=None):
                    and result.get('synthesis_mode') == 'source_supported_partial'
                    and isinstance(result.get('validation'), dict)
                    and result['validation'].get('status') == 'bounded_checks_completed')
-        deliverable = generated or excerpt
+        # Current writers can return a bounded source-only outcome when the
+        # selected material is visible but cannot safely resolve the requested
+        # interpretation.  Admit only the exact closed tuple used by the public
+        # projection; private unresolved-unit diagnostics remain downstream of
+        # that projection.
+        from .presentation import reader_evidence_state
+        evidence_state = reader_evidence_state(result, evidence)
+        bounded_source_only = evidence_state is not None
+        bounded_answer_plan = (result.get('generation_status') == 'deterministic_bounded_answer_plan'
+            and result.get('synthesis_mode') == 'deterministic_bounded_answer_plan')
+        coverage_answer_plan=(bounded_answer_plan and result.get('answer_kind')=='source_only')
+        if bounded_answer_plan and not generated and not coverage_answer_plan:
+            raise Failure('unknown_citation',502)
+        deliverable = generated or excerpt or bounded_source_only or bounded_answer_plan
         if deliverable:
             stage='provider_identity'
             execution=result.get('execution',{});identity=result.get('model_identity',{})
@@ -713,25 +832,208 @@ def _generate(gateway, bundle, tier, model, parent=None):
             elif selection is not None or scope is not None:
                 if selection!=model or scope!='own':raise Failure('provider_selection_mismatch',502)
             stage='citation_validation'
-        if deliverable and not evidence:raise Failure('unknown_citation', 502)
+        if ((generated or excerpt) or bounded_source_only and
+                evidence_state['status'] != 'no_selected_evidence') and not evidence:
+            raise Failure('unknown_citation', 502)
         if deliverable:
-            numbers={str(row.get('local_number')or row.get('number')or i+1)for i,row in enumerate(evidence)}
-            markers=set(re.findall(r'\[(\d{1,3})\]',result.get('answer_md','')))
-            if not markers<=numbers:raise Failure('unknown_citation',502)
             for i,row in enumerate(evidence):
                 # The producer's source view uses citation_id. Expose the same
                 # validated identity to canonical UI/probe consumers without
                 # removing its aliases or changing signed prose/source metadata.
                 row['evidence_id']=evidence_id(row)
                 row['local_number']=row.get('local_number')or row.get('number')or i+1
+        if coverage_answer_plan:
+            blocks=result.get('display_blocks');claims=result.get('claims')
+            limitations=result.get('limitations');markers=set(re.findall(
+                r'\[(\d{1,3})\]',result.get('answer_md','')))
+            if (result.get('status')!='partial'or result.get('answer_support')!='partial'
+                    or markers or claims!=[]or citations!=[]or evidence!=[]
+                    or result.get('source_badges')!=[]
+                    or not isinstance(blocks,list)or not blocks
+                    or not isinstance(limitations,list)or len(limitations)!=len(blocks)
+                    or result.get('validation')!={'status':'bounded_answer_plan_rendered',
+                        'semantic_entailment_certified':False}):
+                raise Failure('unknown_citation',502)
+            block_ids=[];unit_ids=[]
+            for block in blocks:
+                if (not isinstance(block,dict)or set(block)!=ANSWER_PLAN_BLOCK_FIELDS
+                        or not isinstance(block.get('block_id'),str)
+                        or not re.fullmatch(r'B(?:[1-9]|1[0-4])',block['block_id'])
+                        or not isinstance(block.get('paragraph_id'),str)
+                        or not re.fullmatch(r'P(?:[1-9]|1[0-4])',block['paragraph_id'])
+                        or not isinstance(block.get('unit_id'),str)
+                        or not re.fullmatch(r'U[0-9a-f]{16}',block['unit_id'])
+                        or block.get('unit_type')!='coverage_limitation'
+                        or block.get('claim_id')is not None or block.get('support_ids')!=[]
+                        or not isinstance(block.get('text'),str)or not block['text']):
+                    raise Failure('unknown_citation',502)
+                block_ids.append(block['block_id']);unit_ids.append(block['unit_id'])
+                block['evidence_ids']=[]
+            if len(set(block_ids))!=len(block_ids)or len(set(unit_ids))!=len(unit_ids):
+                raise Failure('unknown_citation',502)
+            validate_coverage_limitations(blocks,limitations)
+            text=deterministic_answer_text(blocks)
+            if (result.get('answer_md')!=text or result.get('short_answer')!=text):
+                raise Failure('unknown_citation',502)
+        if generated or excerpt:
+            numbers={str(row.get('local_number')or row.get('number')or i+1)for i,row in enumerate(evidence)}
+            markers=set(re.findall(r'\[(\d{1,3})\]',result.get('answer_md','')))
+            if not markers<=numbers:raise Failure('unknown_citation',502)
             # The gateway's signed generated prose uses claim-to-source mappings,
             # not necessarily textual [n] markers. Preserve its signed answer;
             # the UI renders the mapped citations separately from source text.
             blocks=result.get('display_blocks',[])
             cited={evidence_id(row)for row in citations}
             visible={evidence_id(row)for row in evidence}
-            if cited and cited!=visible:raise Failure('unknown_citation',502)
-            if not markers:
+            if bounded_answer_plan:
+                # The current CORE producer returns a structured AnswerPlan,
+                # never prose with inline citation markers. Validate its whole
+                # claim/block/citation graph even when the prose is hostile or
+                # malformed enough to contain an otherwise valid marker.
+                claims=result.get('claims')
+                limitations=result.get('limitations')
+                if (result.get('answer_kind')!='generated'
+                        or result.get('status')not in {'validated','partial'}
+                        or result.get('answer_support')not in {'supported','partial'}
+                        or result.get('validation')!={'status':'bounded_answer_plan_rendered',
+                            'semantic_entailment_certified':False}
+                        or not isinstance(limitations,list)
+                        or markers or not isinstance(blocks,list)or not blocks
+                        or not isinstance(claims,list)or not claims or not citations):
+                    raise Failure('unknown_citation',502)
+                if any(not isinstance(row,dict)for row in blocks+claims):
+                    raise Failure('unknown_citation',502)
+                claim_ids=[row.get('claim_id')for row in claims]
+                block_ids=[row.get('block_id')for row in blocks]
+                if (any(not isinstance(value,str)or not re.fullmatch(r'C(?:[1-9]|1[0-4])',value)
+                        for value in claim_ids)
+                        or any(not isinstance(value,str)or not re.fullmatch(r'B(?:[1-9]|1[0-4])',value)
+                               for value in block_ids)
+                        or len(set(claim_ids))!=len(claim_ids)
+                        or len(set(block_ids))!=len(block_ids)
+                        or any(set(row)!=ANSWER_PLAN_CLAIM_FIELDS
+                               or not isinstance(row.get('paragraph_id'),str)
+                               or not re.fullmatch(r'P(?:[1-9]|1[0-4])',row['paragraph_id'])
+                               or not isinstance(row.get('unit_id'),str)
+                               or not re.fullmatch(r'U[0-9a-f]{16}',row['unit_id'])
+                               or not isinstance(row.get('text'),str)or not row['text']
+                               or not isinstance(row.get('support_ids'),list)or not row['support_ids']
+                               or any(not isinstance(value,str)or not value for value in row['support_ids'])
+                               or len(set(row['support_ids']))!=len(row['support_ids'])
+                               or not isinstance(row.get('fact_ids'),list)
+                               or row.get('section')!='answer'or row.get('depends_on')!=[]
+                               or row.get('support_mode')!='deterministic_bounded_answer_plan'
+                               for row in claims)
+                        or any(set(row)!=ANSWER_PLAN_BLOCK_FIELDS
+                               or not isinstance(row.get('paragraph_id'),str)
+                               or not re.fullmatch(r'P(?:[1-9]|1[0-4])',row['paragraph_id'])
+                               or not isinstance(row.get('unit_id'),str)
+                               or not re.fullmatch(r'U[0-9a-f]{16}',row['unit_id'])
+                               or not isinstance(row.get('text'),str)
+                               or not row['text'] for row in blocks)):
+                    raise Failure('unknown_citation',502)
+                claim_by_id={row['claim_id']:row for row in claims}
+                claim_blocks=[]
+                unit_ids=[]
+                for block in blocks:
+                    unit_ids.append(block['unit_id'])
+                    claim_id=block.get('claim_id')
+                    if claim_id is None:
+                        if (block.get('unit_type')!='coverage_limitation'
+                                or block.get('support_ids')!=[]):
+                            raise Failure('unknown_citation',502)
+                        block['evidence_ids']=[]
+                        continue
+                    support_ids=block.get('support_ids')
+                    if (claim_id not in claim_by_id
+                            or block.get('unit_type')not in ANSWER_PLAN_CLAIM_UNIT_TYPES
+                            or not isinstance(support_ids,list)or not support_ids
+                            or any(not isinstance(value,str)or not value for value in support_ids)
+                            or len(set(support_ids))!=len(support_ids)):
+                        raise Failure('unknown_citation',502)
+                    claim_blocks.append(block)
+                if len(set(unit_ids))!=len(unit_ids):
+                    raise Failure('unknown_citation',502)
+                validate_coverage_limitations(blocks,limitations)
+                validate_processing_limitations(blocks,claims,limitations)
+                partial=bool(limitations)
+                if ((result['status']=='partial')!=partial
+                        or result['answer_support']!=('partial'if partial else'supported')
+                        or result.get('answer_md')!=deterministic_answer_text(blocks)
+                        or result.get('short_answer')!=deterministic_answer_text(blocks)):
+                    raise Failure('unknown_citation',502)
+                bound_claim_ids=[row['claim_id']for row in claim_blocks]
+                if (len(set(bound_claim_ids))!=len(bound_claim_ids)
+                        or set(bound_claim_ids)!=set(claim_ids)):
+                    raise Failure('unknown_citation',502)
+                if any(not isinstance(row.get('claim_id'),str)
+                       or row['claim_id'] not in claim_by_id for row in citations):
+                    raise Failure('unknown_citation',502)
+                if any(not ANSWER_PLAN_CITATION_FIELDS<=set(row)
+                       or not set(row)<=ANSWER_PLAN_CITATION_FIELDS|ANSWER_PLAN_CITATION_OPTIONAL_FIELDS
+                       or not isinstance(row.get('block_id'),str)
+                       or not re.fullmatch(r'B(?:[1-9]|1[0-4])',row['block_id'])
+                       or not isinstance(row.get('unit_id'),str)
+                       or not re.fullmatch(r'U[0-9a-f]{16}',row['unit_id'])
+                       or not isinstance(row.get('support_id'),str)or not row['support_id']
+                       or not isinstance(row.get('source_key'),str)or not row['source_key']
+                       or not isinstance(row.get('snippet'),str)or not row['snippet']
+                       or not isinstance(row.get('locator'),dict)or not row['locator']
+                       or type(row.get('char_start'))is not int
+                       or type(row.get('char_end'))is not int
+                       or not 0<=row['char_start']<row['char_end']
+                       or any(not isinstance(row.get(key),str)or not row[key]
+                              for key in ANSWER_PLAN_CITATION_OPTIONAL_FIELDS if key in row)
+                       for row in citations):
+                    raise Failure('unknown_citation',502)
+                if cited!=visible:
+                    raise Failure('unknown_citation',502)
+                support_evidence={}
+                evidence_by_id={evidence_id(row):row for row in evidence}
+                for row in citations:
+                    source=evidence_by_id.get(row['evidence_id'])
+                    source_text=source.get('snippet')if isinstance(source,dict)else None
+                    source_locator=source.get('locator')if isinstance(source,dict)else None
+                    external_id=source.get('external_id')if isinstance(source,dict)else None
+                    source_slug=source.get('source_slug')if isinstance(source,dict)else None
+                    expected_source_id=(external_id if isinstance(external_id,str)and':'in external_id
+                        else source_slug+':'+external_id
+                        if isinstance(source_slug,str)and isinstance(external_id,str)and external_id else None)
+                    source_revision=source.get('source_revision')if isinstance(source,dict)else None
+                    if (not source or row['source_key']!=source_slug
+                            or not isinstance(source_locator,dict)
+                            or source_locator!=row['locator']
+                            or not isinstance(source_text,str)
+                            or row['char_end']>len(source_text)
+                            or source_text[row['char_start']:row['char_end']]!=row['snippet']
+                            or (row.get('source_id')!=expected_source_id
+                                if expected_source_id is not None else'source_id'in row)
+                            or (row.get('source_revision')!=source_revision
+                                if isinstance(source_revision,str)and source_revision
+                                else'source_revision'in row)):
+                        raise Failure('unknown_citation',502)
+                for block in claim_blocks:
+                    claim=claim_by_id[block['claim_id']]
+                    bound=[row for row in citations if row['claim_id']==block['claim_id']]
+                    ids=list(dict.fromkeys(evidence_id(row)for row in bound))
+                    support_ids=[row['support_id']for row in bound]
+                    if (not ids or len(set(support_ids))!=len(support_ids)
+                            or set(support_ids)!=set(block['support_ids'])
+                            or any(row['block_id']!=block['block_id']
+                                   or row['unit_id']!=block['unit_id'] for row in bound)
+                            or claim.get('paragraph_id')!=block['paragraph_id']
+                            or claim.get('text')!=block['text']
+                            or claim.get('unit_id')!=block['unit_id']
+                            or claim.get('support_ids')!=block['support_ids']):
+                        raise Failure('unknown_citation',502)
+                    for row in bound:
+                        prior=support_evidence.setdefault(row['support_id'],row['evidence_id'])
+                        if prior!=row['evidence_id']:
+                            raise Failure('unknown_citation',502)
+                    block['evidence_ids']=ids
+            else:
+                if cited and cited!=visible:raise Failure('unknown_citation',502)
+            if not bounded_answer_plan and not markers:
                 if not isinstance(blocks,list)or not blocks:raise Failure('unknown_citation',502)
                 for block in blocks:
                     ids=block.get('evidence_ids')if isinstance(block,dict)else None
@@ -758,11 +1060,15 @@ def _generate(gateway, bundle, tier, model, parent=None):
             public=public_execution(out)
             out['generation']['provider']={**public.get('model_identity',{}),**public.get('execution',{})}
             return out
-        result['generation_status'] = ('source_supported_partial' if excerpt else
-            'mixed_generated_and_source_partial' if result.get('synthesis_mode') == 'mixed_generated_and_source_partial' else 'generated')
-        if excerpt:result['status'] = 'partial'
+        if not bounded_source_only and not bounded_answer_plan:
+            result['generation_status'] = ('source_supported_partial' if excerpt else
+                'mixed_generated_and_source_partial' if result.get('synthesis_mode') == 'mixed_generated_and_source_partial' else 'generated')
+            if excerpt:result['status'] = 'partial'
         result['retrieval'] = deepcopy(bundle['retrieval'])
-        result['generation'] = {'status': 'partial' if excerpt or result.get('status') == 'partial' else 'generated', 'provider': {}, 'elapsed_ms': elapsed, 'first_content_ms': None}
+        result['generation'] = {'status': (
+            'no_support' if bounded_source_only and evidence_state['status'] == 'no_selected_evidence'
+            else 'partial' if bounded_source_only or excerpt or result.get('status') == 'partial'
+            else 'generated'), 'provider': {}, 'elapsed_ms': elapsed, 'first_content_ms': None}
         from .human_feedback import public_execution
         public = public_execution(result)
         result['generation']['provider'] = {**public.get('model_identity', {}), **public.get('execution', {})}

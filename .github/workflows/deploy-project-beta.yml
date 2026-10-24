@@ -1,0 +1,105 @@
+name: Deliver reviewed KLIKai successor beta
+
+on:
+  push:
+    branches: [beta-release]
+    paths:
+      - release/manifest.json
+      - release/successor-pins.json
+      - release/sealed-evaluation.json
+      - release/review-manifest.json
+      - release/components/linghub/**
+      - release/components/infra/**
+      - .github/workflows/deploy-project-beta.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: klikai-project-beta
+  cancel-in-progress: false
+
+jobs:
+  verify-and-deliver:
+    if: github.repository == 'damjan-popic/KLIKai' && github.ref == 'refs/heads/beta-release'
+    runs-on: [self-hosted, linux, x64, klikai-beta]
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact reviewed package
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify final revisions, evaluation, review, and package bytes
+        run: |
+          /usr/bin/python3 -I release/components/infra/scripts/prepare-successor-release.py \
+            --verify-package "$GITHUB_WORKSPACE"
+      - name: Check the packaged release transaction
+        working-directory: release/components/infra
+        run: |
+          /data/envs/lingstack/pilot/bin/python -m pytest -q \
+            tests/test_prepare_successor_release.py \
+            tests/test_activate_successor_release.py \
+            tests/test_verify_successor_public.py \
+            tests/test_verify_successor_backup.py \
+            tests/test_klikai_beta_deploy.py
+      - name: Check the exported application
+        working-directory: release/components/linghub
+        env:
+          KLIKAI_PINNED_CORE_ROOT: ${{ github.workspace }}/release/components/core
+          KLIKAI_PINNED_INFRA_ROOT: ${{ github.workspace }}/release/components/infra
+          PYTHONPATH: ${{ github.workspace }}/release/components/core:${{ github.workspace }}/release/components/core/tests/zrc:${{ github.workspace }}/release/components/infra
+        run: |
+          /data/envs/lingstack/pilot/bin/python -m pytest -q \
+            tests/test_pilot_project_beta.py \
+            tests/test_pilot_backend.py \
+            tests/test_pilot_login_persistence.py \
+            tests/test_pilot_backend_recovery.py \
+            tests/test_pilot_job_progress.py \
+            tests/test_pilot_human_feedback.py \
+            tests/test_pilot_unified.py \
+            tests/test_pilot_current_original.py \
+            tests/test_request_guidance.py \
+            tests/test_lexical_profiles.py \
+            tests/test_pilot_interpretation_projection.py \
+            tests/test_pilot_validation_diagnostics.py
+          /usr/bin/node --test \
+            tests/test_pilot_ui_project_beta.mjs \
+            tests/test_pilot_ui_unified.mjs \
+            tests/test_pilot_feedback_scope.mjs \
+            tests/test_pilot_submission_recovery.mjs \
+            tests/test_pilot_ui_interpretation.mjs
+      - name: Activate through the fixed reversible host coordinator
+        run: |
+          sudo -n /usr/local/sbin/klikai-successor-activate \
+            --manifest "$GITHUB_WORKSPACE/release/manifest.json"
+
+  verify-public-edge:
+    needs: verify-and-deliver
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read the pushed release identity
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify public TLS, release identity, login, and authentication boundary
+        run: |
+          /usr/bin/curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            https://klikai.jeziknaklik.it/health -o "$RUNNER_TEMP/klikai-health.json"
+          /usr/bin/python3 -c 'from pathlib import Path; import json,os; expected=json.loads(Path("release/manifest.json").read_text()); actual=json.loads(Path(os.environ["RUNNER_TEMP"],"klikai-health.json").read_text()); assert actual.get("status")=="ok" and actual.get("release_id")==expected["release_id"]'
+          /usr/bin/curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            https://klikai.jeziknaklik.it/ -o "$RUNNER_TEMP/klikai-login.html"
+          /usr/bin/python3 -c 'from pathlib import Path; import os; page=Path(os.environ["RUNNER_TEMP"],"klikai-login.html").read_text(); assert "KLIKai" in page or "klikai" in page; assert "login" in page.lower()'
+          status=$(/usr/bin/curl --silent --show-error --connect-timeout 10 --max-time 30 \
+            -o /dev/null -w '%{http_code}' https://klikai.jeziknaklik.it/api/pilot/families)
+          test "$status" = 401
+
+  complete-recovery-checkpoint:
+    needs: verify-public-edge
+    runs-on: [self-hosted, linux, x64, klikai-beta]
+    timeout-minutes: 65
+    steps:
+      - name: Complete and verify the encrypted NAS recovery checkpoint
+        run: sudo -n /usr/local/sbin/klikai-successor-backup

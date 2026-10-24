@@ -340,6 +340,7 @@
   "limitation_source_scope": "La risposta è limitata all’ambito delle fonti citate.",
   "limitation_uncertain_entry_boundary": "Il confine della voce originale non è certo. Verifica l’originale.",
   "limitation_unsupported_inference": "Il sostegno per parte delle deduzioni nella risposta non è confermato. Verifica i passaggi originali citati.",
+  "limitation_unsupported_interpretation": "Le fonti sono disponibili, ma non è possibile interpretarne il contenuto con sufficiente affidabilità per questa risposta. Verifica i passaggi originali citati.",
   "beta_more": "Fonti",
   "beta_less": "Nascondi le fonti",
   "beta_sources_heading": "Fonti trovate",

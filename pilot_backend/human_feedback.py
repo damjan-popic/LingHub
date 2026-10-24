@@ -20,7 +20,7 @@ PROVIDER_FAILURE_REASONS={'writer_request_failed','generation_request_failed','r
 PROVIDER_FAILURE_TYPES={'PilotUnavailable','ValueError','KeyError','TypeError','JSONDecodeError','OSError','TimeoutError','PermissionError','FileNotFoundError','ConnectionError','ConnectionResetError','HTTPError','SharedUnavailable','SharedRejected','SharedNotAdmitted','SharedCompletionInvalid','OtherError'}
 VALIDATION_STATUSES={'invalid_composition_envelope','all_claims_withheld','bounded_checks_completed','bounded_checks_passed','consistent_abstention'}
 VALIDATION_ERROR_FIELDS={'answer_language','claims','claim_id','text','support_ids','section','paragraph_id','depends_on','limitations',
-    'code','scope','claim_ids','no_sufficient_evidence','correction_required'}
+    'code','scope','claim_ids','blocks','block_id','unit_id','no_sufficient_evidence','correction_required'}
 VALIDATION_ERROR_TYPES={'model_type','missing','extra_forbidden','string_type','string_too_short','string_too_long',
     'string_pattern_mismatch','list_type','too_long','too_short','literal_error','bool_type','bool_parsing',
     'value_error','int_type','int_parsing'}
@@ -116,8 +116,8 @@ def generation_validation_diagnostics(result):
     fields={
         'gateway_status':('status',{'validated','partial','failed','no_hit','source_only','rejected','no_answer'}),
         'gateway_answer_kind':('answer_kind',{'generated','mixed','source_only','clarification'}),
-        'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial','returned_abstention'}),
-        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial','abstention','deterministic_supported_application'})}
+        'gateway_generation_status':('generation_status',{'generated','not_generated','source_supported_partial','mixed_generated_and_source_partial','returned_abstention','returned_processing_limitation','deterministic_bounded_answer_plan'}),
+        'synthesis_mode':('synthesis_mode',{'generated','source_supported_partial','mixed_generated_and_source_partial','abstention','deterministic_supported_application','deterministic_bounded_answer_plan'})}
     for key,(original,allowed)in fields.items():
         value=raw.get(key if nested else original)
         if isinstance(value,str)and value in allowed:out[key]=value

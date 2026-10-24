@@ -247,6 +247,381 @@ def test_generated_evidence_rejects_conflicting_aliases_even_when_preferred_id_i
     assert output['evidence']==[]and output['generation_status']=='not_generated'
 
 
+def bounded_answer_plan_citation(*,evidence_id='known',support_id='S1',claim_id='C1',
+        block_id='B1',unit_id='U0000000000000001'):
+    return {'block_id':block_id,'claim_id':claim_id,'unit_id':unit_id,
+        'evidence_id':evidence_id,'support_id':support_id,'source_key':'synthetic',
+        'snippet':'Exact source support.','locator':{'synthetic':True},
+        'char_start':0,'char_end':21,'source_id':'synthetic:record-1',
+        'source_revision':'b'*64}
+
+
+def bounded_answer_plan_evidence(evidence_id='known'):
+    return {'evidence_id':evidence_id,'source_slug':'synthetic',
+        'external_id':'record-1','source_revision':'b'*64,
+        'snippet':'Exact source support.','locator':{'synthetic':True}}
+
+
+def bounded_answer_plan_result():
+    return {'status':'validated','answer_kind':'generated',
+        'generation_status':'deterministic_bounded_answer_plan',
+        'synthesis_mode':'deterministic_bounded_answer_plan',
+        'answer_support':'supported',
+        'answer_md':'Exact server-rendered claim.','short_answer':'Exact server-rendered claim.',
+        'display_blocks':[{'block_id':'B1','paragraph_id':'P1','unit_id':'U0000000000000001',
+            'unit_type':'documentary_fact','claim_id':'C1','text':'Exact server-rendered claim.',
+            'support_ids':['S1']}],
+        'claims':[{'claim_id':'C1','paragraph_id':'P1','unit_id':'U0000000000000001',
+            'text':'Exact server-rendered claim.','support_ids':['S1'],'fact_ids':['F1'],
+            'section':'answer','depends_on':[],
+            'support_mode':'deterministic_bounded_answer_plan'}],
+        'evidence':[bounded_answer_plan_evidence()],
+        'citations':[bounded_answer_plan_citation()],'limitations':[],
+        'validation':{'status':'bounded_answer_plan_rendered',
+            'semantic_entailment_certified':False}}
+
+
+def coverage_answer_plan_result():
+    text='Exact server-rendered coverage limitation.'
+    unit_id='U0000000000000002'
+    return {'status':'partial','answer_kind':'source_only',
+        'generation_status':'deterministic_bounded_answer_plan',
+        'synthesis_mode':'deterministic_bounded_answer_plan','answer_support':'partial',
+        'answer_md':text,'short_answer':text,
+        'display_blocks':[{'block_id':'B1','paragraph_id':'P1','unit_id':unit_id,
+            'unit_type':'coverage_limitation','claim_id':None,'text':text,'support_ids':[]}],
+        'claims':[],'citations':[],'evidence':[],'source_badges':[],
+        'limitations':[{'code':'partial_evidence','scope':'answer','claim_ids':[],
+            'unit_id':unit_id,'message':text,'coverage_receipt_id':'coverage-1',
+            'coverage_receipt_sha256':'a'*64}],
+        'validation':{'status':'bounded_answer_plan_rendered',
+            'semantic_entailment_certified':False}}
+
+
+def mixed_answer_plan_result():
+    result=bounded_answer_plan_result();coverage=coverage_answer_plan_result()
+    block=deepcopy(coverage['display_blocks'][0]);block['block_id']='B2';block['paragraph_id']='P2'
+    result['display_blocks'].append(block);result['limitations']=deepcopy(coverage['limitations'])
+    result.update(status='partial',answer_support='partial')
+    result['answer_md']=result['short_answer']='Exact server-rendered claim.\n\n'+block['text']
+    return result
+
+
+def run_bounded_answer_plan(result):
+    from types import SimpleNamespace
+    known={'known','other-known'}|{unified.evidence_id(row)for row in
+        [*result.get('evidence',[]),*result.get('citations',[])]}
+    body={'contract':unified.CONTRACT,'locale':'sl',
+        'matches':[{'evidence_id':value}for value in sorted(known)if value],
+        'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
+    return unified.generate(SimpleNamespace(request=lambda *args:result),
+        dict(body,snapshot_sha256=digest(body)),'short','qwen')
+
+
+def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structured_graph():
+    output=run_bounded_answer_plan(bounded_answer_plan_result())
+    assert output['generation']['status']=='generated'
+    assert output['display_blocks'][0]['evidence_ids']==['known']
+
+
+@pytest.mark.parametrize('locator',[
+    {},
+    {'section':'A'},
+    {'section':'A','page':2,'range':{'start':1,'tags':['x','y']},'extra':True},
+    {'section':'A','page':'2','range':{'start':1,'tags':['x','y']}},
+    {'section':'A','page':2,'range':{'start':1,'tags':['y','x']}},
+])
+def test_deterministic_citation_requires_nonempty_exact_deep_locator(locator):
+    result=bounded_answer_plan_result()
+    verified={'section':'A','page':2,'range':{'start':1,'tags':['x','y']}}
+    result['evidence'][0]['locator']=verified
+    result['citations'][0]['locator']=locator
+    output=run_bounded_answer_plan(result)
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+
+
+def test_deterministic_citation_locator_object_key_order_is_semantically_equal():
+    result=bounded_answer_plan_result()
+    result['evidence'][0]['locator']={
+        'section':'A','page':2,'range':{'start':1,'tags':['x','y']}}
+    result['citations'][0]['locator']={
+        'range':{'tags':['x','y'],'start':1},'page':2,'section':'A'}
+    output=run_bounded_answer_plan(result)
+    assert output['generation']['status']=='generated'
+
+
+def test_deterministic_coverage_only_plan_is_a_qualified_partial_not_generated_support():
+    output=run_bounded_answer_plan(coverage_answer_plan_result())
+    assert (output['status'],output['answer_kind'],output['generation_status'])==(
+        'partial','source_only','deterministic_bounded_answer_plan')
+    assert output['generation']['status']=='partial'and output['evidence']==[]
+    assert output['display_blocks'][0]['evidence_ids']==[]
+
+
+@pytest.mark.parametrize('damage',[
+    'claim','citation','evidence','support','claim_id','unit_type','extra_block_field',
+    'missing_receipt','wrong_receipt_hash','wrong_limitation_unit','wrong_limitation_text',
+    'extra_limitation_field','answer_text','validated_status','source_badge',
+])
+def test_deterministic_coverage_only_plan_rejects_provenance_or_support_mutations(damage):
+    result=coverage_answer_plan_result();block=result['display_blocks'][0]
+    limitation=result['limitations'][0]
+    if damage=='claim':result['claims']=[deepcopy(bounded_answer_plan_result()['claims'][0])]
+    elif damage=='citation':result['citations']=[bounded_answer_plan_citation()]
+    elif damage=='evidence':result['evidence']=[bounded_answer_plan_evidence()]
+    elif damage=='support':block['support_ids']=['S1']
+    elif damage=='claim_id':block['claim_id']='C1'
+    elif damage=='unit_type':block['unit_type']='documentary_fact'
+    elif damage=='extra_block_field':block['evidence_ids']=[]
+    elif damage=='missing_receipt':limitation.pop('coverage_receipt_id')
+    elif damage=='wrong_receipt_hash':limitation['coverage_receipt_sha256']='not-a-receipt'
+    elif damage=='wrong_limitation_unit':limitation['unit_id']='Uffffffffffffffff'
+    elif damage=='wrong_limitation_text':limitation['message']='Rewritten limitation.'
+    elif damage=='extra_limitation_field':limitation['invented']='not-core'
+    elif damage=='answer_text':result['answer_md']='Rewritten limitation.'
+    elif damage=='validated_status':result['status']='validated'
+    elif damage=='source_badge':result['source_badges']=[{'source_slug':'synthetic'}]
+    output=run_bounded_answer_plan(result)
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+    assert output['generation_status']=='not_generated'and output['evidence']==[]
+
+
+def test_actual_core_coverage_renderer_shape_is_admitted_without_inventing_support(monkeypatch):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_documentary_constraints import evidence as core_evidence
+    from test_pilot_answer_plan import input_profile,signed,PROFILE_KEY,COVERAGE_KEY
+    from tools.zrc_reference.common import value_hash
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry,process_answer_plan
+    from tools.zrc_reference.pilot_documentary_constraints import source_contracts
+    item,_=core_evidence('Oblika glodavec je izpričana v SP 2001.')
+    profile=input_profile([item]);receipt=signed({'receipt_id':'coverage-actual',
+        'target':'žbrontavec','inspected_scope':'priloženem ohranjenem gradivu',
+        'reason_code':'not_confirmed_in_supplied_material',
+        'profile_sha256':value_hash(profile)},COVERAGE_KEY)
+    registry=build_answer_unit_registry(locale='sl',question='q',context='',
+        selected_evidence=[item],fact_catalog=source_contracts([item]),
+        signed_input_profile=profile,profile_signing_key=PROFILE_KEY,
+        coverage_receipts=[receipt],coverage_signing_key=COVERAGE_KEY)
+    unit=next(row for row in registry.units if row['unit_type']=='coverage_limitation')
+    rendered=process_answer_plan({'answer_language':'sl','blocks':[{'block_id':'B1',
+        'unit_id':unit['unit_id'],'paragraph_id':'P1'}],'no_sufficient_evidence':False},
+        registry,locale='sl')
+    original_limitation=rendered['limitations'][0]
+    result={'status':'partial','answer_kind':'source_only','answer_support':'partial',
+        'generation_status':'deterministic_bounded_answer_plan',
+        'synthesis_mode':'deterministic_bounded_answer_plan','answer_md':rendered['answer_md'],
+        'short_answer':rendered['short_answer'],'display_blocks':rendered['display_blocks'],
+        'claims':rendered['claims'],'citations':[],'evidence':[],'source_badges':[],
+        'limitations':[{'code':'partial_evidence','scope':'answer','claim_ids':[],
+            'unit_id':unit['unit_id'],'message':rendered['display_blocks'][0]['text'],
+            'coverage_receipt_id':original_limitation['receipt_id'],
+            'coverage_receipt_sha256':original_limitation['receipt_sha256']}],
+        'validation':rendered['validation']}
+    output=run_bounded_answer_plan(result)
+    assert output['generation']['status']=='partial'and output['answer_md']==rendered['answer_md']
+    assert output['answer_kind']=='source_only'and output['evidence']==[]
+
+
+@pytest.mark.parametrize('damage',[
+    'invented_without_receipt','orphan_receipt','reused_unit','duplicate_receipt',
+    'mismatched_unit','mismatched_text','mismatched_hash','mismatched_code',
+    'answer_md','short_answer','block_order','paragraph_group','duplicate_task_limit',
+    'task_limit_extra','task_limit_unit','unknown_answer_limit',
+])
+def test_mixed_deterministic_graph_rejects_unbound_coverage_and_text_mutations(damage):
+    result=mixed_answer_plan_result();coverage=result['display_blocks'][1]
+    limitation=result['limitations'][0]
+    if damage=='invented_without_receipt':
+        result['display_blocks'].append({'block_id':'B3','paragraph_id':'P3',
+            'unit_id':'U0000000000000003','unit_type':'coverage_limitation',
+            'claim_id':None,'text':'Invented limitation.','support_ids':[]})
+    elif damage=='orphan_receipt':
+        orphan=deepcopy(limitation);orphan['unit_id']='U0000000000000003'
+        result['limitations'].append(orphan)
+    elif damage=='reused_unit':
+        coverage['unit_id']=result['display_blocks'][0]['unit_id']
+        limitation['unit_id']=coverage['unit_id']
+    elif damage=='duplicate_receipt':result['limitations'].append(deepcopy(limitation))
+    elif damage=='mismatched_unit':limitation['unit_id']='Uffffffffffffffff'
+    elif damage=='mismatched_text':limitation['message']='Invented limitation.'
+    elif damage=='mismatched_hash':limitation['coverage_receipt_sha256']='f'*63
+    elif damage=='mismatched_code':limitation['code']='unsupported_inference'
+    elif damage=='answer_md':result['answer_md']='Fabricated answer.'
+    elif damage=='short_answer':result['short_answer']='Fabricated answer.'
+    elif damage=='block_order':result['display_blocks'].reverse()
+    elif damage=='paragraph_group':coverage['paragraph_id']='P1'
+    elif damage=='duplicate_task_limit':
+        row={'code':'comparison_coverage_incomplete','scope':'answer','claim_ids':[]}
+        result['limitations'].extend([row,deepcopy(row)])
+    elif damage=='task_limit_extra':result['limitations'].append({
+        'code':'comparison_coverage_incomplete','scope':'answer','claim_ids':[],
+        'invented':'not-core'})
+    elif damage=='task_limit_unit':result['limitations'].append({
+        'code':'comparison_coverage_incomplete','scope':'answer','claim_ids':[],
+        'unit_id':coverage['unit_id']})
+    elif damage=='unknown_answer_limit':result['limitations'].append({
+        'code':'invented_limitation','scope':'answer','claim_ids':[]})
+    output=run_bounded_answer_plan(result)
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+
+
+def test_actual_core_mixed_claim_and_coverage_graph_is_admitted(monkeypatch):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_fulltext_grounded import passage
+    from tools.zrc_reference.grounded import packet
+    from tools.zrc_reference.pilot_evidence import annotate
+    sources=[passage(text='glodavec — geslo SP 2001.',passage_id='glodavec-entry'),
+             passage(text='Slovar daje prednost zapisu glodavec.',passage_id='preference')]
+    rows=annotate(packet(sources));rows[0].update(role='documentary_capture',
+        normative_status='current_reference',publication_scope='resource_record',title='glodavec')
+    payload=_plan_runtime_payload('Ali je prav "glodavec" ali "žbrontavec"?',rows,sources,
+        coverage={'complete':False,'targets':['glodavec','žbrontavec'],
+                  'missing_targets':['žbrontavec']})
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    units={row['unit_id']:row for row in registry.units}
+    selected=[units[unit_id]for unit_id in registry.required_unit_ids]
+    raw={'answer_language':'sl','blocks':[{'block_id':f'B{index}',
+        'unit_id':unit['unit_id'],'paragraph_id':f'P{index}'}
+        for index,unit in enumerate(selected,1)],'no_sufficient_evidence':False}
+    result=runtime._process_fresh_answer_plan(raw,registry,payload=payload,tier='answer')
+    assert any(row['unit_type']=='coverage_limitation'for row in result['display_blocks'])
+    assert result['claims']and result['citations']and result['status']=='partial'
+    visible={row['citation_id']:row for row in result['evidence']}
+    for citation in result['citations']:
+        source=visible[citation['evidence_id']]
+        expected=(source['external_id']if':'in source['external_id']else
+                  source['source_slug']+':'+source['external_id'])
+        assert citation['source_id']==expected
+        assert citation['source_revision']==source['source_revision']
+        assert citation['locator']and citation['locator']==source['locator']
+    output=run_bounded_answer_plan(result)
+    assert output['generation']['status']=='partial'
+    assert output['answer_kind']=='generated'and output['evidence']
+
+
+@pytest.mark.parametrize('damage',['drop_processing','relabel_supported','validation_status'])
+def test_actual_core_broad_inflection_cannot_drop_or_relabel_processing_limit(monkeypatch,damage):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime
+    from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    item,source=exact_excerpt_item();question='Kako sklanjamo Hugo?'
+    locator={'synthetic':True};item['span']=locator
+    source.update(span=locator,url=None)
+    profile=input_profile([item],question=question)
+    registry=build_answer_unit_registry(locale='sl',question=question,context='',
+        selected_evidence=[item],signed_input_profile=profile,
+        profile_signing_key=PROFILE_KEY,source_passages=[source])
+    unit=next(row for row in registry.units if row['unit_type']=='exact_source_excerpt')
+    payload={'locale':'sl','question':question,'context':'','passages':[source],
+        'packets':{'answer':{'evidence':[item],'input_profile':profile}}}
+    result=_plan_runtime()._process_fresh_answer_plan({'answer_language':'sl',
+        'blocks':[{'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    assert result['limitations']==[{'code':'partial_case_only_not_full_inflection',
+        'scope':'processing','claim_ids':['C1'],'unit_id':unit['unit_id']}]
+    assert run_bounded_answer_plan(deepcopy(result))['generation']['status']=='partial'
+    if damage=='drop_processing':result['limitations']=[]
+    elif damage=='relabel_supported':
+        result['limitations']=[];result.update(status='validated',answer_support='supported')
+    elif damage=='validation_status':result['validation']['status']='bounded_checks_completed'
+    output=run_bounded_answer_plan(result)
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+
+
+@pytest.mark.parametrize('damage',[
+    'inline_marker','missing_claims','empty_claims','empty_citations','duplicate_claim',
+    'unknown_citation_claim','unknown_block_claim','paragraph_mismatch',
+    'extra_cited_evidence','missing_cited_evidence','missing_unit_ids','missing_unit_type',
+    'unknown_unit_type','claim_as_coverage','coverage_claim','coverage_evidence',
+    'coverage_support','coverage_citation','citation_wrong_unit','citation_wrong_block',
+    'citation_bogus_support','fabricated_supports','extra_claim_field',
+    'extra_citation_field','missing_citation_block','missing_citation_unit',
+    'missing_citation_support','citation_wrong_source','citation_wrong_locator',
+    'citation_wrong_snippet','citation_wrong_range','missing_validation',
+    'semantic_certified','missing_answer_support','fabricated_answer_md',
+    'fabricated_short_answer','false_partial_label','missing_source_id',
+    'forged_source_id','missing_source_revision','forged_source_revision',
+    'self_asserted_source_identity',
+])
+def test_deterministic_bounded_answer_plan_rejects_incomplete_or_inconsistent_structure(damage):
+    result=bounded_answer_plan_result()
+    coverage={'block_id':'B2','paragraph_id':'P2','unit_id':'U0000000000000002',
+        'unit_type':'coverage_limitation','claim_id':None,
+        'text':'Exact server-rendered coverage limitation.','support_ids':[]}
+    if damage=='inline_marker':result['answer_md']='Exact server-rendered claim. [1]'
+    elif damage=='missing_claims':result.pop('claims')
+    elif damage=='empty_claims':result['claims']=[]
+    elif damage=='empty_citations':result['citations']=[]
+    elif damage=='duplicate_claim':result['claims'].append(deepcopy(result['claims'][0]))
+    elif damage=='unknown_citation_claim':result['citations'][0]['claim_id']='C2'
+    elif damage=='unknown_block_claim':result['display_blocks'][0]['claim_id']='C2'
+    elif damage=='paragraph_mismatch':result['claims'][0]['paragraph_id']='P2'
+    elif damage=='extra_cited_evidence':
+        result['display_blocks'][0]['support_ids'].append('S2')
+        result['claims'][0]['support_ids'].append('S2')
+        result['citations'].append(bounded_answer_plan_citation(
+            evidence_id='other-known',support_id='S2'))
+    elif damage=='missing_cited_evidence':
+        result['evidence'].append(bounded_answer_plan_evidence('other-known'))
+    elif damage=='missing_unit_ids':
+        result['display_blocks'][0].pop('unit_id');result['claims'][0].pop('unit_id')
+    elif damage=='missing_unit_type':result['display_blocks'][0].pop('unit_type')
+    elif damage=='unknown_unit_type':result['display_blocks'][0]['unit_type']='unknown_unit'
+    elif damage=='claim_as_coverage':result['display_blocks'][0]['unit_type']='coverage_limitation'
+    elif damage=='coverage_claim':
+        coverage['claim_id']='C1';result['display_blocks'].append(coverage)
+    elif damage=='coverage_evidence':
+        coverage['evidence_ids']=['known'];result['display_blocks'].append(coverage)
+    elif damage=='coverage_support':
+        coverage['support_ids']=['S1'];result['display_blocks'].append(coverage)
+    elif damage=='coverage_citation':
+        result['display_blocks'].append(coverage)
+        result['citations'].append(bounded_answer_plan_citation(
+            claim_id=None,block_id='B2',unit_id='U0000000000000002',support_id='S2'))
+    elif damage=='citation_wrong_unit':result['citations'][0]['unit_id']='Uffffffffffffffff'
+    elif damage=='citation_wrong_block':result['citations'][0]['block_id']='B9'
+    elif damage=='citation_bogus_support':result['citations'][0]['support_id']='bogus.S9'
+    elif damage=='fabricated_supports':
+        result['display_blocks'][0]['support_ids']=result['claims'][0]['support_ids']=['bogus.S9']
+    elif damage=='extra_claim_field':result['claims'][0]['invented']='not-core'
+    elif damage=='extra_citation_field':result['citations'][0]['invented']='not-core'
+    elif damage=='missing_citation_block':result['citations'][0].pop('block_id')
+    elif damage=='missing_citation_unit':result['citations'][0].pop('unit_id')
+    elif damage=='missing_citation_support':result['citations'][0].pop('support_id')
+    elif damage=='citation_wrong_source':result['citations'][0]['source_key']='invented'
+    elif damage=='citation_wrong_locator':result['citations'][0]['locator']={'invented':True}
+    elif damage=='citation_wrong_snippet':result['citations'][0]['snippet']='Fabricated support.'
+    elif damage=='citation_wrong_range':result['citations'][0]['char_end']=20
+    elif damage=='missing_validation':result.pop('validation')
+    elif damage=='semantic_certified':result['validation']['semantic_entailment_certified']=True
+    elif damage=='missing_answer_support':result.pop('answer_support')
+    elif damage=='fabricated_answer_md':result['answer_md']='Fabricated answer.'
+    elif damage=='fabricated_short_answer':result['short_answer']='Fabricated answer.'
+    elif damage=='false_partial_label':result.update(status='partial',answer_support='partial')
+    elif damage=='missing_source_id':result['citations'][0].pop('source_id')
+    elif damage=='forged_source_id':result['citations'][0]['source_id']='synthetic:forged'
+    elif damage=='missing_source_revision':result['citations'][0].pop('source_revision')
+    elif damage=='forged_source_revision':result['citations'][0]['source_revision']='f'*64
+    elif damage=='self_asserted_source_identity':
+        result['evidence'][0].pop('external_id');result['evidence'][0].pop('source_revision')
+    output=run_bounded_answer_plan(result)
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+    assert output['evidence']==[]and output['generation_status']=='not_generated'
+
+
 def test_source_timeout_is_partial_and_does_not_suppress_other_sources_or_generation(tmp_path):
     gateway=UnifiedGateway(source_failure='solska');app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as client:
@@ -415,9 +790,384 @@ def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypa
     assert view==source_views([passage])[0][0]
 
 
-@pytest.mark.parametrize('connected',[False,True])
-def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_path,monkeypatch,connected):
-    """Real producer→signed gateway→validated composition→owned pilot consumer.
+@pytest.mark.parametrize('language,question,context,facets,target',[
+    ('sl','Kako se glasi rodilnik imena Hugo?','Popravek: množina.',
+     ['genitive','plural'],'Hugo'),
+    ('sl','Kako se glasi rodilnik imena Hugo?','Popravek: dajalnik, ime Miha.',
+     ['dative'],'Miha'),
+    ('it','Genitivo del nome Hugo?','Correzione: plurale.',
+     ['genitive','plural'],'Hugo'),
+    ('it','Genitivo del nome Hugo?','Correzione: dativo, nome Miha.',
+     ['dative'],'Miha'),
+    ('sl','Kako se glasi rodilnik imena Hugo?','Popravek: ime je »Miha«.',
+     ['genitive'],'Miha'),
+    ('it','Genitivo del nome Hugo?','Correzione: nome “Miha”.',
+     ['genitive'],'Miha'),
+    ('sl','Kako se glasi rodilnik imena Hugo?',
+     'Popravek: namesto Miha uporabi Luka.',['genitive'],'Luka'),
+    ('it','Come si flette il nome Hugo?',
+     'Prima abbiamo discusso il genitivo plurale.',['inflection'],'Hugo'),
+])
+def test_web_signed_correction_and_history_plan_matches_core_slot_authority(
+        monkeypatch,language,question,context,facets,target):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,context,language,{'raw_engines':{}})['request_plan']
+    checked=interpret(question+'\n'+context,request_plan=signed)
+    assert checked['requested_facets']==facets
+    assert [row['text']for row in checked['target_spans']]==[target]
+
+
+def test_web_signed_multi_target_correction_stays_ambiguous_for_core(monkeypatch):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    question='Kako se glasi rodilnik imena Hugo?'
+    context='Popravek: ime je »Miha« ali »Luka«.'
+    signed=plan(question,context,'sl',{'raw_engines':{}})['request_plan']
+    checked=interpret(question+'\n'+context,request_plan=signed)
+    assert [row['text']for row in checked['target_spans']]==['Miha','Luka']
+
+
+@pytest.mark.parametrize('locale,question,context,source_text,form,role_context',[
+    ('sl','Kako se glasi rodilnik imena Hugo?',
+     'Popravek: namesto imena Hugo uporabi ime Miha.',
+     'Rodilnik imena Miha je Mihe.','Mihe','ime Miha'),
+    ('it','Genitivo del nome Hugo?',
+     'Correzione: invece del nome sloveno Hugo usa il nome italiano Miha.',
+     'Il genitivo del nome Miha è Miha.','Miha','il nome italiano Miha'),
+])
+def test_web_signed_replacement_plan_builds_real_core_registry_for_new_target(
+        monkeypatch,locale,question,context,source_text,form,role_context):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    item,source=exact_excerpt_item(source_text,title='Miha')
+    signed=plan(question,context,locale,{'raw_engines':{}})['request_plan']
+    profile=input_profile([item],question=question,context=context,locale=locale,
+                          request_plan=signed)
+    registry=build_answer_unit_registry(locale=locale,question=question,context=context,
+        selected_evidence=[item],signed_input_profile=profile,
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    unit,=[row for row in registry.units if row['unit_type']=='exact_source_excerpt']
+    assert registry.required_unit_ids==[unit['unit_id']]
+    assert unit['payload']['target']=='Miha'and unit['payload']['form']==form
+    assert [row['text']for row in signed['target_spans']]==['Miha']
+    assert signed['target_spans'][0]['context_span']['text']==role_context
+    assert 'Hugo'not in [row['text']for row in signed['target_spans']]
+
+
+@pytest.mark.parametrize('context,targets,ambiguities',[
+    ('Correzione: invece del nome Hugo usa il nome tedesco Miha.',[],[]),
+    ('Correzione: invece del nome Hugo usa il nome Miha e Luca.',
+     ['Miha e Luca'],['coordinated_target_unresolved']),
+    ('Prima abbiamo discusso: invece del nome Hugo usa il nome italiano Miha.',
+     ['Hugo'],[]),
+])
+def test_web_signed_unresolved_or_historical_replacement_cannot_build_core_source_unit(
+        monkeypatch,context,targets,ambiguities):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    question='Genitivo del nome Hugo?'
+    item,source=exact_excerpt_item(
+        'Il genitivo del nome Miha è Miha. Il genitivo del nome Luca è Luca.',
+        title='Miha e Luca')
+    signed=plan(question,context,'it',{'raw_engines':{}})['request_plan']
+    assert [row['text']for row in signed['target_spans']]==targets
+    assert signed['ambiguities']==ambiguities
+    registry=build_answer_unit_registry(locale='it',question=question,context=context,
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,context=context,locale='it',request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    assert registry.required_unit_ids==[]
+    assert not any(row['unit_type']=='exact_source_excerpt'for row in registry.units)
+
+
+def test_web_signed_italian_ui_matrix_request_keeps_exact_names_and_role_context(monkeypatch):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    question=('Come si declina il nome sloveno Hugo e in che cosa differisce '
+              'dal cognome francese Hugo?')
+    signed=plan(question,'','it',{'raw_engines':{}})['request_plan']
+    checked=interpret(question,request_plan=signed)
+    assert checked['requested_facets']==['inflection']
+    assert [row['text']for row in checked['target_spans']]==['Hugo','Hugo']
+    assert [row['context_span']['text']for row in checked['target_spans']]==[
+        'nome sloveno Hugo','cognome francese Hugo']
+    assert all(question[row['start']:row['end']]=='Hugo'
+               for row in checked['target_spans'])
+
+
+@pytest.mark.parametrize('locale,question,slots',[
+    ('sl','Rodilnik ednine in dajalnik množine imena Hugo?',[
+        {'case':'genitive','number':'singular'},
+        {'case':'dative','number':'plural'}]),
+    ('it','Genitivo singolare e dativo plurale del nome Hugo?',[
+        {'case':'genitive','number':'singular'},
+        {'case':'dative','number':'plural'}]),
+    ('sl','Dajalnik množine in rodilnik ednine imena Hugo?',[
+        {'case':'dative','number':'plural'},
+        {'case':'genitive','number':'singular'}]),
+    ('it','Quali sono il dativo plurale e il genitivo singolare del nome Hugo?',[
+        {'case':'dative','number':'plural'},
+        {'case':'genitive','number':'singular'}]),
+    ('sl','Rodilnik ednine ter dajalnik množine imena Hugo?',[
+        {'case':'genitive','number':'singular'},
+        {'case':'dative','number':'plural'}]),
+    ('it','Genitivo singolare ed dativo plurale del nome Hugo?',[
+        {'case':'genitive','number':'singular'},
+        {'case':'dative','number':'plural'}]),
+])
+def test_web_signed_ordered_grammar_slot_contract_matches_core_direct_parse(
+        monkeypatch,locale,question,slots):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    direct=interpret(question)
+    assert signed['requested_grammar_slots']==slots
+    assert direct['requested_grammar_slots']==slots
+    assert [(row['text'],row['start'],row['end'])for row in signed['target_spans']]==[
+        (row['text'],row['start'],row['end'])for row in direct['target_spans']]
+    assert signed['ambiguities']==direct['ambiguities']==[]
+    checked=interpret(question,request_plan=signed)
+    assert checked['requested_grammar_slots']==slots
+
+
+@pytest.mark.parametrize('locale,question,ambiguity',[
+    ('sl','Rodilnik ednine dajalnik množine imena Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Genitivo singolare dativo plurale del nome Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('sl','Rodilnik in dajalnik ednine in množine imena Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Genitivo e dativo singolare e plurale del nome Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('sl','Rodilnik ednine in dajalnik množine imena Hugo in Miha?',
+     'grammar_target_binding_unresolved'),
+    ('it','Genitivo singolare e dativo plurale del nome Hugo e Miha?',
+     'grammar_target_binding_unresolved'),
+    ('sl','Rodilnik ali dajalnik imena Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Genitivo o dativo del nome Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Genitivo singolare oppure plurale del nome Hugo?',
+     'grammar_slot_pairing_unresolved'),
+])
+def test_web_and_core_preserve_same_closed_grammar_slot_ambiguity(
+        monkeypatch,locale,question,ambiguity):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    direct=interpret(question)
+    assert signed['requested_grammar_slots']==direct['requested_grammar_slots']==[]
+    assert [(row['text'],row['start'],row['end'])for row in signed['target_spans']]==[
+        (row['text'],row['start'],row['end'])for row in direct['target_spans']]
+    if ambiguity=='grammar_target_binding_unresolved':
+        assert signed['target_spans']==[]
+    else:
+        assert [row['text']for row in signed['target_spans']]==['Hugo']
+    assert ambiguity in signed['ambiguities']and ambiguity in direct['ambiguities']
+
+
+@pytest.mark.parametrize('locale,question',[
+    ('sl','Kako se glasi rodilnik imena?'),
+    ('it','Qual è il genitivo del nome?'),
+])
+def test_web_and_core_reject_grammar_role_without_lexical_target(
+        monkeypatch,locale,question):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    direct=interpret(question)
+    for request in (signed,direct):
+        assert request['target_spans']==[]
+        assert request['requested_grammar_slots']==[]
+        assert request['ambiguities']==['grammar_target_binding_unresolved']
+
+
+@pytest.mark.parametrize('locale,question,source_text,expected_number,form',[
+    ('sl','Rodilnik imena Hugo?','Rodilnik imena Hugo je Huga.',None,'Huga'),
+    ('it','Genitivo singolare del nome Hugo?',
+     'Genitivo singolare del nome Hugo è Huga.','singular','Huga'),
+])
+def test_web_signed_single_grammar_slot_builds_real_core_answer_unit(
+        monkeypatch,locale,question,source_text,expected_number,form):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    item,source=exact_excerpt_item(source_text,title='Hugo')
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    registry=build_answer_unit_registry(locale=locale,question=question,context='',
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,locale=locale,request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    unit,=[row for row in registry.units if row['unit_type']=='exact_source_excerpt']
+    assert registry.required_unit_ids==[unit['unit_id']]
+    assert (unit['payload']['target'],unit['payload']['requested_facet'],
+            unit['payload']['requested_number'],unit['payload']['form'])==(
+        'Hugo','genitive',expected_number,form)
+    assert not any(row.get('source')=='answer_plan_agreement'for row in registry.unresolved)
+
+
+@pytest.mark.parametrize('locale,question,sources,slots',[
+    ('sl','Rodilnik ednine in dajalnik množine imena Hugo?',(
+        'Rodilnik ednine imena Hugo je Huga.',
+        'Dajalnik množine imena Hugo je Hugom.'),[
+        {'case':'genitive','number':'singular'},
+        {'case':'dative','number':'plural'}]),
+    ('it','Quali sono il dativo plurale e il genitivo singolare del nome Hugo?',(
+        'Dativo plurale del nome Hugo è Hugu.',
+        'Genitivo singolare del nome Hugo è Huga.'),[
+        {'case':'dative','number':'plural'},
+        {'case':'genitive','number':'singular'}]),
+])
+def test_web_signed_multi_slot_reaches_core_without_first_slot_or_cross_product(
+        monkeypatch,locale,question,sources,slots):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    item,source=exact_excerpt_units(*sources)
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    assert signed['requested_grammar_slots']==slots
+    registry=build_answer_unit_registry(locale=locale,question=question,context='',
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,locale=locale,request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    units=[row for row in registry.units
+           if row['unit_type']=='exact_source_excerpt']
+    assert [(row['payload']['requested_facet'],
+             row['payload']['requested_number']) for row in units]==[
+        (slot['case'],slot['number']) for slot in slots]
+    assert registry.required_unit_ids==[row['unit_id'] for row in units]
+    assert len(units)==len(slots)
+    assert len({tuple(row['covers_requirement_ids']) for row in units})==len(slots)
+    assert not registry.unresolved
+    assert not any(row.get('reason')=='signed_request_plan_slot_mismatch'
+                   for row in registry.unresolved)
+
+
+def test_web_signed_multi_slot_rejects_unbound_arbitrary_form(monkeypatch):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    question='Quali sono il dativo plurale e il genitivo singolare del nome Hugo?'
+    item,source=exact_excerpt_units(
+        'Dativo plurale del nome Hugo è Hughi.',
+        'Genitivo singolare del nome Hugo è Huga.')
+    signed=plan(question,'','it',{'raw_engines':{}})['request_plan']
+    registry=build_answer_unit_registry(locale='it',question=question,context='',
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,locale='it',request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    assert not any(row['unit_type']=='exact_source_excerpt'
+                   for row in registry.units)
+    assert not any(row.get('payload',{}).get('form')=='Hughi'
+                   for row in registry.units)
+    assert any(row.get('reason')=='unsupported_multi_slot'and row['blocking']
+               for row in registry.unresolved)
+
+
+@pytest.mark.parametrize('locale,question,reason',[
+    ('sl','Rodilnik ednine dajalnik množine imena Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('sl','Rodilnik in dajalnik ednine in množine imena Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Genitivo e dativo singolare e plurale del nome Hugo?',
+     'grammar_slot_pairing_unresolved'),
+    ('it','Qual è il genitivo del nome?',
+     'grammar_target_binding_unresolved'),
+])
+def test_web_signed_grammar_ambiguity_blocks_real_core_registry_with_source_present(
+        monkeypatch,locale,question,reason):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    source_text=('Rodilnik ednine imena Hugo je Huga.'if locale=='sl'else
+                 'Genitivo del nome Hugo è Huga.')
+    item,source=exact_excerpt_item(source_text,title='Hugo')
+    signed=plan(question,'',locale,{'raw_engines':{}})['request_plan']
+    registry=build_answer_unit_registry(locale=locale,question=question,context='',
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,locale=locale,request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    assert registry.required_unit_ids==[]
+    assert not any(row['unit_type']=='exact_source_excerpt'for row in registry.units)
+    assert any(row.get('reason')==reason and row['blocking']
+               for row in registry.unresolved)
+
+
+@pytest.mark.parametrize('mutation',[
+    lambda plan:plan['requested_grammar_slots'].reverse(),
+    lambda plan:plan.pop('requested_grammar_slots'),
+    lambda plan:plan['requested_grammar_slots'].append(
+        {'case':'genitive','number':'singular'}),
+])
+def test_tampered_web_grammar_slots_block_real_core_registry(monkeypatch,mutation):
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from core.lexical_planner import plan
+    from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry
+    question='Genitivo singolare e dativo plurale del nome Hugo?'
+    item,source=exact_excerpt_units(
+        'Genitivo singolare del nome Hugo è Huga.',
+        'Dativo plurale del nome Hugo è Hughi.')
+    signed=plan(question,'','it',{'raw_engines':{}})['request_plan']
+    mutation(signed)
+    registry=build_answer_unit_registry(locale='it',question=question,context='',
+        selected_evidence=[item],signed_input_profile=input_profile(
+            [item],question=question,locale='it',request_plan=signed),
+        profile_signing_key=PROFILE_KEY,source_passages=[source],request_plan=signed)
+    assert registry.required_unit_ids==[]
+    assert any(row.get('reason')=='signed_request_plan_slot_mismatch'
+               and row['blocking']for row in registry.unresolved)
+
+
+@pytest.mark.parametrize('connected,question,expected_status',[
+    (False,'Kako se glasi rodilnik imena Hugo?','validated'),
+    (True,'Kako se glasi rodilnik imena Hugo?','validated'),
+    (False,'Kako sklanjamo ime Hugo?','partial'),
+])
+def test_application_capture_consumes_real_gateway_contract_and_answer_plan(
+        tmp_path,monkeypatch,connected,question,expected_status):
+    """Real producer→signed gateway→validated answer plan→owned pilot consumer.
 
     Only documentary HTTP responses and the model transport are synthetic. The
     current sibling gateway validates/project/freezes the actual app packet.
@@ -429,11 +1179,11 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_fulltext_grounded import store as zrc_store
-    from test_pilot import KEY,counts,client as model_client,composition
+    from test_pilot import KEY,counts,client as model_client
     from tools.zrc_reference.grounded import ReferenceEngine
     from tools.zrc_reference.pilot_runtime import PilotRuntime
     from tools.zrc_reference.pilot_contracts import FreezeRequest,GenerateRequest,MODEL_PINS
-    monkeypatch.setattr(sys.modules[__name__],'QUERY','Hugo')
+    monkeypatch.setattr(sys.modules[__name__],'QUERY',question)
     directory=tmp_path/'zrc';directory.mkdir()
     store=zrc_store.__wrapped__(directory)
     engine=ReferenceEngine(store,Mock(),{})
@@ -452,17 +1202,14 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
                 return frozen
             if path=='/internal/pilot/generate':
                 self.calls.append((path,deepcopy(payload),base))
-                packet=payload['bundle']['payload']['packets'][payload['tier']]['evidence']
-                ids=[]
-                for slug in ('jezikovna_posta','jezikovna_svetovalnica'):
-                    entry=next(row for row in packet if row['source_slug']==slug)
-                    ids.append(next(s['support_id']for s in entry['supports']if 'Huga' in s['text']))
-                raw=composition()
-                raw['claims'][0]['support_ids']=ids
-                if connected:
-                    raw['claims'][0].update(paragraph_id='P1',support_ids=[ids[0]])
-                    raw['claims'].append({'claim_id':'C2','text':'Izvirna rodilniška oblika je Huga.',
-                        'support_ids':[ids[1]],'paragraph_id':'P1'})
+                producer_payload=payload['bundle']['payload']
+                registry=runtime._answer_registry(producer_payload,payload['tier'])
+                assert registry.required_unit_ids
+                raw={'answer_language':producer_payload['locale'],'blocks':[
+                    {'block_id':f'B{index}','unit_id':unit_id,
+                     'paragraph_id':'P1'if connected else f'P{index}'}
+                    for index,unit_id in enumerate(registry.required_unit_ids,1)],
+                    'no_sufficient_evidence':not bool(registry.required_unit_ids)}
                 clients['qwen'].post.return_value['choices'][0]['message']['content']=json.dumps(raw)
                 result=runtime.generate(GenerateRequest(**payload))
                 self.producer_result=deepcopy(result)
@@ -470,27 +1217,73 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
             return super().request(path,payload,base)
 
     gateway=ActualContractGateway()
-    gateway.record.update(title='Hugo',question_original='Kako sklanjamo ime Hugo?',answer_text='Rodilnik imena Hugo je Huga.')
+    gateway.record.update(title='Hugo',question_original=question,answer_text='Rodilnik imena Hugo je Huga.')
     app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as user:
         fid,family=ask(app,user,login(user));short=family['short']
-        assert short['generation']['status']=='generated',short
-        assert {row['source_slug']for row in short['evidence']}=={'jezikovna_posta','jezikovna_svetovalnica'}
+        assert (short.get('status'),short.get('answer_kind'),short.get('generation_status'))==(
+            expected_status,'generated','deterministic_bounded_answer_plan'),json.dumps(short,indent=2)
+        assert short['evidence']
         assert clients['qwen'].post.call_count==1 and clients['gemma'].post.call_count==0
         assert short['blocks'][0]['evidence_ids']==[row['evidence_id']for row in short['citations'] if row['claim_id']=='C1']
         if connected:
-            assert [b['paragraph_id']for b in short['blocks']]==['P1','P1']
-            assert short['blocks'][0]['evidence_ids']!=short['blocks'][1]['evidence_ids']
+            assert all(b['paragraph_id']=='P1'for b in short['blocks'])
+        else:
+            assert [b['paragraph_id']for b in short['blocks']]==[
+                f'P{index}'for index in range(1,len(short['blocks'])+1)]
         assert '['not in short['answer_md']
         # Exercise the real source_views producer shape, rather than replacing it
         # with the canonical evidence_id shape used by synthetic browser fixtures.
         original=gateway.producer_result
+        claim_units={'documentary_fact','construction_application','terminology_equivalence',
+                     'bounded_attestation','exact_source_excerpt'}
+        claims={row['claim_id']:row for row in original['claims']}
+        assert all(set(row)=={'claim_id','text','support_ids','fact_ids','section',
+                              'paragraph_id','depends_on','unit_id','support_mode'}
+                   for row in claims.values())
+        blocks_by_claim={row['claim_id']:row for row in original['display_blocks']
+                         if row['claim_id'] is not None}
+        for block in original['display_blocks']:
+            assert set(block)=={'block_id','paragraph_id','unit_id','unit_type','text',
+                                'claim_id','support_ids'}
+            if block['claim_id'] is None:
+                assert block['unit_type']=='coverage_limitation'and block['support_ids']==[]
+            else:
+                claim=claims[block['claim_id']]
+                assert block['unit_type']in claim_units
+                assert (claim['unit_id'],claim['paragraph_id'],claim['text'],claim['support_ids'])==(
+                    block['unit_id'],block['paragraph_id'],block['text'],block['support_ids'])
+        citation_required={'block_id','claim_id','unit_id','evidence_id','support_id',
+                           'source_key','snippet','locator','char_start','char_end'}
+        citation_optional={'source_id','source_revision'}
+        evidence_by_id={row['citation_id']:row for row in original['evidence']}
+        for citation in original['citations']:
+            assert citation_required<=set(citation)<=citation_required|citation_optional
+            block=blocks_by_claim[citation['claim_id']]
+            assert (citation['block_id'],citation['unit_id'])==(
+                block['block_id'],block['unit_id'])
+            assert citation['support_id']in block['support_ids']
+            evidence_row=evidence_by_id[citation['evidence_id']]
+            expected_source_id=(evidence_row['external_id']if':'in evidence_row['external_id']
+                else evidence_row['source_slug']+':'+evidence_row['external_id'])
+            assert citation['source_id']==expected_source_id
+            assert citation['source_revision']==evidence_row['source_revision']
+            assert citation['locator']and citation['locator']==evidence_row['locator']
+        if expected_status=='partial':
+            assert any(row.get('code')=='partial_case_only_not_full_inflection'
+                       for row in original['limitations'])
         assert original['evidence']and all('citation_id'in row and'evidence_id'not in row for row in original['evidence'])
         assert short['evidence']==[dict(row,evidence_id=row['citation_id'],local_number=i+1)
                                   for i,row in enumerate(original['evidence'])]
         for field in ('answer_md','short_answer','citations'):
             assert short[field]==original[field]
-        assert short['blocks']==original['display_blocks']
+        expected_blocks=[]
+        for block in original['display_blocks']:
+            ids=list(dict.fromkeys(row['evidence_id']for row in original['citations']
+                                   if row['claim_id']==block['claim_id']))
+            expected_blocks.append({'block_id':block['block_id'],'paragraph_id':block['paragraph_id'],
+                                    'text':block['text'],'evidence_ids':ids})
+        assert short['blocks']==expected_blocks
         helper=Path(__file__).resolve().parents[1]/'pilot_ui/core.mjs'
         rendered=subprocess.run(['node','--input-type=module','-e',
             "import fs from 'node:fs';"
@@ -509,7 +1302,8 @@ def test_application_capture_consumes_real_gateway_contract_and_composition(tmp_
             assert all(citation['evidence_id']==citation['citation_id']and type(citation['number'])is int
                        for citation in row['citations'])
         rows=user.get('/api/pilot/families/'+fid+'/matches').json()['items']
-        assert len(rows)>len(short['evidence'])and sum(row['used_in_answer']for row in rows)==2
+        used={row['evidence_id']for row in short['citations']}
+        assert len(rows)>len(short['evidence'])and sum(row['used_in_answer']for row in rows)==len(used)>0
         assert {row['capture_sha256']for row in gateway.frozen['matches']if row['capture_sha256']}=={
             row['capture_sha256']for row in next(p for path,p,_ in gateway.calls if path=='/internal/pilot/freeze')['unified_evidence']['matches']}
         gateway.blocked=True

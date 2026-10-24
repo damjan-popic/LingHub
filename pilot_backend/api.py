@@ -254,21 +254,50 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             is_unified=bundle.get('contract')==unified.CONTRACT and aid is None
             if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)
+            run_result=json.loads(r['result']or'{}')
+            answer_evidence=next((row for row in run_result.get('evidence',[])
+                if isinstance(row,dict)and unified.evidence_id(row)==eid),None)
+            job=db.execute('SELECT id FROM jobs WHERE run_id=?',(r['id'],)).fetchone()
+            original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',
+                (fid,)).fetchone()
+            binding_question=original[0]if original else f['question']
             evidence=bundle['matches']if is_unified else json.loads(r['result']).get('evidence',[])
-            if not any(unified.evidence_id(e)==eid for e in evidence):raise Failure('not_found',404)
+            selected=next((e for e in evidence if unified.evidence_id(e)==eid),None)
+            if selected is None:raise Failure('not_found',404)
+            frozen_source_record=(selected.get('source')if is_unified
+                and isinstance(selected.get('source'),dict)else None)
             if current_original and not is_unified:raise Failure('not_found',404)
             retained=historical_source(db,fid,r['id'],owner,eid)
         if current_original:
             unified.current_original_discovery(bundle,eid)
             result=await run_in_threadpool(adapter.current_original,bundle,eid)
         else:result=retained if retained is not None else await run_in_threadpool(adapter.source,bundle,eid,tier)
+        returned_record=result
+        returned_evidence=result
         if isinstance(result.get('evidence'),list):
             evidence=next((e for e in result['evidence']if e.get('citation_id',e.get('evidence_id'))==eid),None)
             if not evidence:raise Failure('not_found',404)
+            returned_record=evidence
+            returned_evidence=evidence
             labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis 2025'}
             result={'evidence_id':eid,'source_label':labels.get(evidence.get('source_slug'),evidence.get('title','Vir')),'excerpt':evidence.get('snippet',''),'locator':evidence.get('locator'),'url':evidence.get('url'),'status':evidence.get('source_status'),'edition':evidence.get('edition'),'bibliography':evidence.get('bibliographic'),'title':evidence.get('title'),'publication_scope':evidence.get('publication_scope'),'annual_scope':evidence.get('annual_scope'),**({'original_projection':evidence['original_projection']}if evidence.get('original_projection')is not None else{})}
+        from .presentation import (exact_source_provenance,source_binding,
+            source_citation,source_record_sha256)
+        binding=None
+        expected=exact_source_provenance(answer_evidence)
+        citation=source_citation(run_result,eid)
+        if (not current_original and retained is None and expected is not None
+                and citation is not None and frozen_source_record is not None):
+            if (exact_source_provenance(returned_evidence)!=expected or not job
+                    or source_record_sha256(returned_record)!=source_record_sha256(
+                        frozen_source_record)):
+                raise Failure('source_binding_mismatch',502)
+            binding=source_binding(store.meta('audit_salt'),owner,fid,r['id'],job[0],
+                binding_question,tier,answer_evidence,citation,frozen_source_record)
+            if binding is None:raise Failure('source_binding_mismatch',502)
         from .source_reader import source_view
         result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view','original_projection')if k in result}
+        if binding is not None:result['source_binding']=binding
         return source_view(result,f['locale'])
     @app.get(api+'/families/{fid}/sources/{eid:path}/current-original')
     async def family_current_original(fid:str,eid:str,request:Request,tier:str='short'):

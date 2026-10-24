@@ -49,7 +49,11 @@ SAFE = frozenset({
 
 LIMITATION_CODES = frozenset({'partial_evidence', 'no_answer_evidence', 'conflicting_evidence',
     'source_scope', 'proposal_status', 'uncertain_entry_boundary', 'unsupported_inference',
-    'comparison_coverage_incomplete', 'comparison_explanation_incomplete'})
+    'unsupported_interpretation', 'comparison_coverage_incomplete',
+    'comparison_explanation_incomplete'})
+
+EVIDENCE_STATES = frozenset({'source_present_unresolved_interpretation',
+    'source_present_not_admitted_for_answer', 'no_selected_evidence'})
 
 
 def reader_limitations(value):
@@ -65,9 +69,29 @@ def reader_limitations(value):
         scope=row.get('scope');ids=row.get('claim_ids')
         if not isinstance(scope,str)or scope not in {'answer','claim'}or not isinstance(ids,list)or any(not isinstance(cid,str)for cid in ids):continue
         if (scope=='answer'and ids)or(scope=='claim'and not ids):continue
+        if row['code']=='unsupported_interpretation'and scope!='answer':continue
         item={'code':row['code'],'scope':scope,'claim_ids':list(ids)}
         if item not in rows:rows.append(item)
     return rows
+
+
+def reader_evidence_state(value, visible_evidence):
+    """Expose only a consistent closed distinction, never unit diagnostics."""
+    raw=value.get('evidence_state')if isinstance(value,dict)else None
+    state=raw.get('status')if isinstance(raw,dict)else None
+    if state not in EVIDENCE_STATES:return None
+    has_evidence=any(isinstance(row,dict)and isinstance(
+        row.get('evidence_id')or row.get('citation_id'),str)and bool(
+        row.get('evidence_id')or row.get('citation_id'))for row in visible_evidence)
+    expected={
+        'source_present_unresolved_interpretation':('validated','source_only','returned_processing_limitation',False,True),
+        'source_present_not_admitted_for_answer':('validated','source_only','returned_abstention',False,True),
+        'no_selected_evidence':('no_hit','source_only','returned_abstention',True,False),
+    }[state]
+    no_hit=raw.get('no_hit')if type(raw.get('no_hit'))is bool else None
+    actual=(value.get('status'),value.get('answer_kind'),value.get('generation_status'),
+        no_hit,has_evidence)
+    return {'status':state}if actual==expected else None
 
 
 def delivery_token(secret, owner, run_id, display_hash):
@@ -75,14 +99,120 @@ def delivery_token(secret, owner, run_id, display_hash):
     return base64.urlsafe_b64encode(hmac.new(secret.encode(),value,hashlib.sha256).digest()).decode().rstrip('=')
 
 
+class ServerSourceBinding(str):
+    """Opaque provenance capability created only from authenticated server state."""
+
+
+def exact_source_provenance(value):
+    """Return the closed identity used for answer/source equality, never for display."""
+    if not isinstance(value,dict):return None
+    evidence_id=value.get('evidence_id',value.get('passage_id',value.get('citation_id')))
+    source_id=value.get('source_id');revision=value.get('source_revision')
+    locator=value.get('locator')
+    if (not isinstance(evidence_id,str)or not evidence_id or len(evidence_id)>512
+            or not isinstance(source_id,str)or not source_id or len(source_id)>512
+            or not isinstance(revision,str)or not revision or len(revision)>512
+            or not isinstance(locator,dict)or not locator):return None
+    try:
+        encoded=json.dumps(locator,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+        normalized=json.loads(encoded)
+    except (TypeError,ValueError,UnicodeError):return None
+    if len(encoded)>8192:return None
+    return {'evidence_id':evidence_id,'source_id':source_id,
+        'source_revision':revision,'locator':normalized}
+
+
+def source_record_sha256(value):
+    """Hash the frozen reader record without exposing its private structure."""
+    if not isinstance(value,dict):return None
+    record={key:item for key,item in value.items()if key not in {
+        'evidence_id','citation_id','passage_id','source_binding'}}
+    try:encoded=json.dumps(record,ensure_ascii=False,sort_keys=True,
+        separators=(',',':')).encode()
+    except (TypeError,ValueError,UnicodeError):return None
+    if not encoded or len(encoded)>4*1024*1024:return None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def source_citation(result,evidence_id):
+    """Return the bounded answer locations that actually cite one evidence row."""
+    if not isinstance(result,dict)or not isinstance(evidence_id,str):return None
+    blocks=[]
+    for index,row in enumerate(result.get('blocks',[])if isinstance(result.get('blocks'),list)else[]):
+        if not isinstance(row,dict)or evidence_id not in row.get('evidence_ids',[]):continue
+        item={'index':index}
+        for key in ('block_id','paragraph_id','unit_id'):
+            value=row.get(key)
+            if isinstance(value,str)and 0<len(value)<=512:item[key]=value
+        blocks.append(item)
+    citations=[]
+    for index,row in enumerate(result.get('citations',[])if isinstance(result.get('citations'),list)else[]):
+        if not isinstance(row,dict):continue
+        cited=row.get('evidence_id',row.get('passage_id',row.get('citation_id')))
+        if cited!=evidence_id:continue
+        item={'index':index}
+        for key in ('claim_id','block_id','unit_id'):
+            value=row.get(key)
+            if isinstance(value,str)and 0<len(value)<=512:item[key]=value
+        citations.append(item)
+    return {'blocks':blocks,'citations':citations}if blocks or citations else None
+
+
+def source_binding(secret,owner,family_id,run_id,job_id,question,tier,evidence,
+                   citation,source_record):
+    """Bind exact frozen provenance to its owned answer without exposing it."""
+    provenance=exact_source_provenance(evidence)
+    record_hash=source_record_sha256(source_record)
+    values=(secret,owner,family_id,run_id,job_id,question,tier)
+    if (provenance is None or record_hash is None
+            or not isinstance(citation,dict)or not citation
+            or any(not isinstance(value,str)or not value for value in values)):return None
+    payload={'schema':'klikai.public-source-binding.v1','owner':owner,
+        'family_id':family_id,'run_id':run_id,'job_id':job_id,
+        'question_sha256':hashlib.sha256(question.encode()).hexdigest(),
+        'tier':tier,'citation':citation,'provenance':provenance,
+        'source_record_sha256':record_hash}
+    encoded=json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+    token=base64.urlsafe_b64encode(
+        hmac.new(secret.encode(),encoded,hashlib.sha256).digest()).decode().rstrip('=')
+    return ServerSourceBinding('psb1.'+token)
+
+
+def bind_evidence(rows,secret,owner,family_id,run_id,job_id,question,tier,result,
+                  source_records):
+    """Replace any untrusted binding field with one derived from persisted state."""
+    output=[]
+    for row in rows if isinstance(rows,list)else []:
+        if not isinstance(row,dict):continue
+        item=dict(row);item.pop('source_binding',None)
+        provenance=exact_source_provenance(item)
+        citation=source_citation(result,provenance['evidence_id'])if provenance else None
+        source_record=(source_records.get(provenance['evidence_id'])
+            if provenance and isinstance(source_records,dict)else None)
+        binding=source_binding(secret,owner,family_id,run_id,job_id,question,tier,
+            item,citation,source_record)
+        if binding is not None:item['source_binding']=binding
+        output.append(item)
+    return output
+
+
 def tester_view(value, owner, secret):
     if isinstance(value,list):return [tester_view(v,owner,secret)for v in value]
     if not isinstance(value,dict):return value
     out={k:tester_view(v,owner,secret)for k,v in value.items()if k in SAFE}
+    if isinstance(value.get('source_binding'),ServerSourceBinding):
+        out['source_binding']=str(value['source_binding'])
     if isinstance(value.get('lexical_profile'),dict):
         # Produced by the closed reader projection, never raw analyzer diagnostics.
         out['lexical_profile']=value['lexical_profile']
-    if 'limitations'in value:out['limitations']=reader_limitations(value['limitations'])
+    visible=out.get('evidence')if isinstance(out.get('evidence'),list)else []
+    evidence_state=reader_evidence_state(value,visible)
+    if evidence_state:out['evidence_state']=evidence_state
+    if 'limitations'in value:
+        limitations=reader_limitations(value['limitations'])
+        if evidence_state!={'status':'source_present_unresolved_interpretation'}:
+            limitations=[row for row in limitations if row['code']!='unsupported_interpretation']
+        out['limitations']=limitations
     if value.get('run_id')and value.get('display_sha256'):
         out['delivery_token']=delivery_token(secret,owner,value['run_id'],value['display_sha256'])
     if value.get('error_code'):out['error_code']='answer_unavailable'

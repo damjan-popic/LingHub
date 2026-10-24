@@ -126,7 +126,9 @@ def historical_source(db, family_id, run_id, owner, evidence_id):
     # Return the exact saved excerpt; no regeneration, re-signing or old-key API.
     if 'citation_id' in item:
         return {'evidence': [item], 'historical_record': True}
-    return {k: item[k] for k in ('evidence_id', 'source_label', 'excerpt', 'locator', 'url', 'status', 'edition', 'bibliography', 'title', 'publication_scope', 'annual_scope') if k in item}
+    return {k: item[k] for k in ('evidence_id', 'source_id', 'source_revision',
+        'source_label', 'excerpt', 'locator', 'url', 'status', 'edition',
+        'bibliography', 'title', 'publication_scope', 'annual_scope') if k in item}
 
 
 def migrate_adoption(store_path, *, operator_id=None, operator_password,

@@ -29,10 +29,13 @@ class BetaAdapter:
         self.freezes.append(family['id'])
         matches=[]
         for index in range(25):
-            matches.append({'evidence_id':f'passage-{index}', 'source_slug':'jezikovna_posta',
+            source_id=f'jezikovna_posta:original-{index}'
+            matches.append({'evidence_id':f'passage-{index}', 'source_id':source_id,
+                'source_revision':'PRIVATE_SOURCE_HASH','source_slug':'jezikovna_posta',
                 'source_label':'Jezikovna pošta', 'external_id':f'original-{index}',
                 'title':f'Original {index}', 'snippet':'Short preview.', 'capture_sha256':'source-revision',
-                'source':{'title':f'Original {index}', 'excerpt':f'Complete original {index}. '+'Necessary condition. '*30,
+                'source':{'source_id':source_id,'source_revision':'PRIVATE_SOURCE_HASH',
+                    'title':f'Original {index}', 'excerpt':f'Complete original {index}. '+'Necessary condition. '*30,
                     'source_label':'Jezikovna pošta','edition':'2024','status':'published',
                     'locator':{'capture_sha256':'PRIVATE_SOURCE_HASH','char_start':0},
                     'bibliography':{'authors':['Avtor'],'date':'2024-01-01','private_hash':'PRIVATE_BIB_HASH'}}})
@@ -50,7 +53,8 @@ class BetaAdapter:
         self.calls.append(model)
         if self.on_generate:self.on_generate()
         item=bundle['matches'][0]
-        evidence=[{'evidence_id':item['evidence_id'],'local_number':1,'source_slug':item['source_slug'],
+        evidence=[{'evidence_id':item['evidence_id'],'source_id':item['source_id'],
+                   'local_number':1,'source_slug':item['source_slug'],
                    'title':item['title'],'source_revision':'PRIVATE_SOURCE_HASH','locator':item['source']['locator']}]
         answer='Ni dovolj opore za odgovor.'if self.no_support else'Podprt odgovor [1].'
         return {'status':'no_answer'if self.no_support else'validated','answer_md':answer,'short_answer':answer,
@@ -182,6 +186,115 @@ def test_tester_uses_automatic_routing_and_retains_actual_private_provenance(bet
         assert observation['participant']['username']=='cu'and observation['participant']['cohort']=='project_beta'
         assert observation['selected_model']=='auto'and observation['versions']['application_release']=='EXACT_INTERNAL_RELEASE'
         assert client.get('/health').json()=={'status':'ok','release_id':'project-beta-test'}
+
+
+def test_public_source_binding_is_server_owned_exact_context_scoped_and_logout_closed(beta_rig):
+    app,adapter,_,_,credentials=beta_rig
+    generate=adapter.generate
+    def forged(*args,**kwargs):
+        result=generate(*args,**kwargs)
+        result['evidence'][0]['source_binding']='provider-forged'
+        uncited=deepcopy(result['evidence'][0]);uncited.update(
+            evidence_id='passage-1',source_id='jezikovna_posta:original-1',
+            title='Original 1',source_binding='provider-forged-uncited')
+        result['evidence'].append(uncited)
+        return result
+    adapter.generate=forged
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client,credentials)
+        first=ask(client,headers,'source-binding-first');finish(app)
+        first_id=first['family']['answer_family_id']
+        first_family=client.get('/api/pilot/families/'+first_id).json()
+        first_evidence=first_family['short']['evidence'][0]
+        binding=first_evidence['source_binding']
+        assert binding.startswith('psb1.')and binding!='provider-forged'
+        assert 'source_binding'not in first_family['short']['evidence'][1]
+        assert set(first_evidence).isdisjoint({'source_id','source_revision','locator'})
+        source=client.get(f'/api/pilot/families/{first_id}/sources/passage-0?tier=short')
+        assert source.status_code==200
+        assert source.json()['source_binding']==binding
+        assert set(source.json()).isdisjoint({'source_id','source_revision','locator'})
+        uncited=client.get(f'/api/pilot/families/{first_id}/sources/passage-1?tier=short')
+        assert uncited.status_code==200 and 'source_binding'not in uncited.json()
+
+        second=ask(client,headers,'source-binding-second');finish(app)
+        second_id=second['family']['answer_family_id']
+        second_family=client.get('/api/pilot/families/'+second_id).json()
+        second_binding=second_family['short']['evidence'][0]['source_binding']
+        assert second_binding!=binding
+        # A client-supplied stale token is ignored; only the newly owned run can
+        # determine the returned binding.
+        current=client.get(f'/api/pilot/families/{second_id}/sources/passage-0'
+            f'?tier=short&source_binding={quote(binding,safe="")}')
+        assert current.status_code==200 and current.json()['source_binding']==second_binding
+        assert current.json()['source_binding']!=binding
+
+        assert client.post('/api/pilot/logout',json={},headers=headers).status_code==200
+        assert client.get(f'/api/pilot/families/{second_id}/sources/passage-0?tier=short').status_code==401
+
+
+def test_public_source_binding_fails_closed_on_reader_mismatch_and_missing_answer_identity(beta_rig):
+    app,adapter,_,_,credentials=beta_rig
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client,credentials)
+        started=ask(client,headers,'source-binding-mismatch');finish(app)
+        fid=started['family']['answer_family_id']
+        assert client.get('/api/pilot/families/'+fid).json()['short']['evidence'][0].get('source_binding')
+        source=adapter.source
+        def stale(*args,**kwargs):
+            value=source(*args,**kwargs);value['source_revision']='stale-revision';return value
+        adapter.source=stale
+        mismatch=client.get(f'/api/pilot/families/{fid}/sources/passage-0?tier=short')
+        assert mismatch.status_code==502
+        assert 'PRIVATE_SOURCE_HASH'not in mismatch.text and 'stale-revision'not in mismatch.text
+        def altered(*args,**kwargs):
+            value=source(*args,**kwargs);value['excerpt']='Altered source text.';return value
+        adapter.source=altered
+        changed=client.get(f'/api/pilot/families/{fid}/sources/passage-0?tier=short')
+        assert changed.status_code==502 and 'Altered source text'not in changed.text
+
+    app,adapter,_,_,credentials=beta_rig
+    generate=adapter.generate
+    def missing(*args,**kwargs):
+        result=generate(*args,**kwargs);result['evidence'][0].pop('source_revision');return result
+    adapter.generate=missing
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client,credentials)
+        started=ask(client,headers,'source-binding-missing');finish(app)
+        fid=started['family']['answer_family_id']
+        family=client.get('/api/pilot/families/'+fid).json()
+        assert 'source_binding'not in family['short']['evidence'][0]
+        source=client.get(f'/api/pilot/families/{fid}/sources/passage-0?tier=short')
+        assert source.status_code==200 and 'source_binding'not in source.json()
+
+
+def test_source_binding_covers_context_citation_and_exact_provenance():
+    from pilot_backend.presentation import source_binding,source_citation,tester_view
+    result={'blocks':[{'block_id':'C1','paragraph_id':'P1','unit_id':'U1',
+        'evidence_ids':['e1']}],
+        'citations':[{'claim_id':'C1','evidence_id':'e1','unit_id':'U1'}]}
+    evidence={'evidence_id':'e1','source_id':'s1','source_revision':'r1',
+        'locator':{'record_id':'one'}}
+    source_record={'source_id':'s1','source_revision':'r1',
+        'locator':{'record_id':'one'},'excerpt':'Exact frozen source.'}
+    citation=source_citation(result,'e1')
+    base=['secret','owner','family','run','job','Question?','short',evidence,
+        citation,source_record]
+    bindings={str(source_binding(*base))}
+    for index,value in enumerate(('secret-2','owner-2','family-2','run-2','job-2',
+            'Other question?','long')):
+        changed=list(base);changed[index]=value;bindings.add(str(source_binding(*changed)))
+    for key,value in (('source_id','s2'),('source_revision','r2'),
+            ('locator',{'record_id':'two'})):
+        changed=list(base);changed[7]={**evidence,key:value}
+        bindings.add(str(source_binding(*changed)))
+    changed=list(base);changed[8]={'blocks':[{'index':9}],'citations':[]}
+    bindings.add(str(source_binding(*changed)))
+    changed=list(base);changed[9]={**source_record,'excerpt':'Altered source.'}
+    bindings.add(str(source_binding(*changed)))
+    assert len(bindings)==13
+    assert 'source_binding'not in tester_view(
+        {'source_binding':'provider-forged'},'owner','secret')
 
 
 def test_documentary_legend_is_configured_authenticated_and_lookup_independent(beta_rig):

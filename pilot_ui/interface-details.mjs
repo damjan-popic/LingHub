@@ -42,9 +42,12 @@ export function answerCopyText(visibleText,tier,label,sourcesHeading) {
     const view=blockTextPresentation(tier,block);
     return [...view.parts,view.separateCitation,...(view.separateCitations||[])].filter(part=>part?.evidence);
   });
+  const noteRecords=new Set();
   for(const note of answerNotes(tier))for(const evidence of note.evidence){
-    const number=evidence.local_number||evidence.number;
-    if(Number.isInteger(number)&&number>0)references.push({number,evidence});
+    const number=evidence.local_number||evidence.number||evidence.note_number;
+    const identity=evidence.evidence_id||evidence.citation_id||evidence.passage_id;
+    const record=JSON.stringify([evidence.source_slug,evidence.external_id||identity,evidence.source_revision]);
+    if(Number.isInteger(number)&&number>0&&!noteRecords.has(record)){noteRecords.add(record);references.push({number,evidence});}
   }
   const credits=new Map();
   for(const {number,evidence} of references){

@@ -2,16 +2,32 @@
 from copy import deepcopy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 
 from fastapi.testclient import TestClient
 import pytest
 
-KLIKAI = Path('/data/projects/lingstack-dev/klikai-human-testing-20260911')
-INFRA = Path('/data/projects/lingstack-dev/infra-invocation-repair-20260911')
+def pinned_support_root(variable,marker):
+    """Resolve only an explicitly packaged or PYTHONPATH-selected support tree."""
+    configured=os.environ.get(variable)
+    candidates=([Path(configured)]if configured else[
+        Path(value)for value in os.environ.get('PYTHONPATH','').split(os.pathsep)
+        if value and(Path(value)/marker).is_file()])
+    if len(candidates)!=1:
+        raise RuntimeError(variable+' must identify exactly one commit-pinned support tree')
+    root=candidates[0].absolute()
+    if (configured and(root.is_symlink()or root.resolve()!=root)
+            or not(root/marker).is_file()):
+        raise RuntimeError(variable+' is not a direct commit-pinned support tree')
+    return root
+
+
+KLIKAI=pinned_support_root('KLIKAI_PINNED_CORE_ROOT','tools/zrc_reference/pilot_contracts.py')
+INFRA=pinned_support_root('KLIKAI_PINNED_INFRA_ROOT','scripts/pilot_editorial_probe.py')
 sys.path.insert(0, str(KLIKAI / 'tests/zrc'))
-from test_pilot import runtime, store, composition
+from test_pilot import runtime, store
 from test_pilot_shared_provider import shared
 sys.path.remove(str(KLIKAI / 'tests/zrc'))
 from tools.zrc_reference.pilot_contracts import FreezeRequest, GenerateRequest
@@ -20,18 +36,22 @@ from test_pilot_unified import ORIGIN, UnifiedGateway, login
 from test_pilot_model_choices import app_choices, submit
 
 
-@pytest.mark.parametrize('scope,claim_ids,reason', [
-    ('claim', [], 'claim_limitation_missing_claim_ids'),
-    ('answer', ['C1'], 'answer_limitation_has_claim_ids'),
-    ('claim', ['C2'], 'limitation_names_unknown_claims'),
+@pytest.mark.parametrize('raw,expected', [
+    ({'answer_language':'sl','no_sufficient_evidence':True},
+     {'type':'missing','loc':['blocks']}),
+    ({'answer_language':'sl','blocks':[{'unit_id':'U'+'0'*16,'paragraph_id':'P1'}],
+      'no_sufficient_evidence':False},
+     {'type':'missing','loc':['blocks',0,'block_id']}),
+    ({'answer_language':'sl','blocks':[],'no_sufficient_evidence':True,
+      'limitations':[{'code':'partial_evidence','scope':'answer','claim_ids':[]}]},
+     {'type':'extra_forbidden','loc':['limitations']}),
 ])
-def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_error(
-        runtime, tmp_path, scope, claim_ids, reason):
+def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_plan_error(
+        runtime, tmp_path, raw, expected):
     _, native = shared(runtime, tmp_path)
     runtime.settings['unified_policy'] = {'policy_id': 'synthetic-validation-policy', 'sources': ['zvezek'],
                                           'editorial_operator_policy_id': 'synthetic-editorial-policy'}
-    native.response['choices'][0]['message']['content'] = json.dumps(composition(limitations=[
-        {'code': 'partial_evidence', 'scope': scope, 'claim_ids': claim_ids}]))
+    native.response['choices'][0]['message']['content'] = json.dumps(raw)
     class RealWriterGateway(UnifiedGateway):
         def require_generation(self, models):pass
         def request(self, path, payload, base=None):
@@ -49,12 +69,8 @@ def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_scope_
         assert short['state'] == 'complete' and short['generation_status'] == 'not_generated'
         assert short['generation'].get('error_code') == 'invalid_composition_envelope', (short['generation'], short.get('retrieval'), [row[0] for row in gateway.calls])
         validation=short['generation_validation']['validation']
-        if reason=='limitation_names_unknown_claims':
-            assert validation['reason']==reason and validation['error_type']=='ValueError'
-            assert not validation.get('pydantic_errors')
-        else:
-            expected = {'type': 'value_error', 'loc': ['limitations', 0], 'reason': reason}
-            assert validation['pydantic_errors'] == [expected]
+        assert validation['error_type']=='ValidationError'
+        assert validation['pydantic_errors'] == [expected]
         fid = family['answer_family_id']
         with app.state.store.connect() as db:
             owner = db.execute('SELECT owner FROM families WHERE id=?', (fid,)).fetchone()[0]

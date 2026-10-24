@@ -3,7 +3,289 @@ import copy,re,unicodedata
 VERSION='lexical-target-spans-v4'
 REQUEST_VERSION='klikai.request-plan.v1'
 WORD=re.compile(r"[^\W\d_]+(?:[\u0300-\u036f]*[^\W\d_]*)(?:[-’'][^\W\d_]+)*",re.UNICODE)
-FACETS={'synonyms':r'sopomen|sinonim','morphology':r'sklanj|pregib|rodilnik|imenovalnik|dvojin|množin|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz|(?:pove|povemo|reče|rečemo)\s+(?:po\s+)?(?:slovensko|italijansko)','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
+SL_INFLECTION_ACTION=r'sklanj\w*|pregib\w*'
+IT_INFLECTION_ACTION=r'declin\w*|flett\w*'
+INFLECTION_CUE=SL_INFLECTION_ACTION+'|'+IT_INFLECTION_ACTION+r'|flession\w*|coniug\w*'
+FACETS={'synonyms':r'sopomen|sinonim','morphology':INFLECTION_CUE+r'|rodilnik|imenovalnik|dajalnik|tožilnik|mestnik|orodnik|nominativ|genitiv|dativ|accusativ|locativ|strumental|ednin|dvojin|množin|singolar|plural|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz|(?:pove|povemo|reče|rečemo)\s+(?:po\s+)?(?:slovensko|italijansko)','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
+GRAMMAR_CASES=(
+ ('nominative',r'\b(?:imenovalnik\w*|nominativ\w*)\b'),
+ ('genitive',r'\b(?:rodilnik\w*|genitiv\w*)\b'),
+ ('dative',r'\b(?:dajalnik\w*|dativ\w*)\b'),
+ ('accusative',r'\b(?:tožilnik\w*|accusativ\w*)\b'),
+ ('locative',r'\b(?:mestnik\w*|locativ\w*)\b'),
+ ('instrumental',r'\b(?:orodnik\w*|strumental\w*)\b'),
+)
+GRAMMAR_NUMBERS=(
+ ('singular',r'\b(?:ednin\w*|singolar\w*)\b'),
+ ('dual',r'\bdvojin\w*\b'),
+ ('plural',r'\b(?:množin\w*|plural\w*)\b'),
+)
+GRAMMAR_CASE_NAMES={
+ 'imenovalnik':'nominative','nominativo':'nominative',
+ 'rodilnik':'genitive','genitivo':'genitive',
+ 'dajalnik':'dative','dativo':'dative',
+ 'tožilnik':'accusative','accusativo':'accusative',
+ 'mestnik':'locative','locativo':'locative',
+ 'orodnik':'instrumental','strumentale':'instrumental'}
+GRAMMAR_NUMBER_NAMES={
+ 'ednine':'singular','singolare':'singular',
+ 'dvojine':'dual','množine':'plural','plurale':'plural'}
+_SL_CASE_TOKEN=r'(?:imenovalnik|rodilnik|dajalnik|tožilnik|mestnik|orodnik)'
+_IT_CASE_TOKEN=r'(?:nominativo|genitivo|dativo|accusativo|locativo|strumentale)'
+_SL_NUMBER_TOKEN=r'(?:ednine|dvojine|množine)'
+_IT_NUMBER_TOKEN=r'(?:singolare|plurale)'
+_SL_SLOT=rf'{_SL_CASE_TOKEN}(?:\s+{_SL_NUMBER_TOKEN})?'
+_IT_SLOT=rf'(?:il\s+)?{_IT_CASE_TOKEN}(?:\s+{_IT_NUMBER_TOKEN})?'
+_GRAMMAR_REQUESTS=(
+ ('sl',re.compile(
+  rf'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
+  rf'(?P<grammar>{_SL_SLOT}(?:\s+(?:ali|in|ter)\s+(?:{_SL_SLOT}|{_SL_NUMBER_TOKEN}))*)'
+  rf'\s+(?:(?:imena|priimka|besede|samostalnika|izraza)\s+)?'
+  rf'(?P<target>.+?)\s*[.?!]*\s*$',re.I)),
+ ('it',re.compile(
+  rf'\s*(?:(?:qual\s+[èe]|quali\s+sono)\s+(?:il\s+)?)?'
+  rf'(?P<grammar>{_IT_SLOT}(?:\s+(?:oppure|o|e|ed)\s+(?:{_IT_SLOT}|{_IT_NUMBER_TOKEN}))*)'
+  rf'\s+(?:(?:del|della|dei|degli|delle)\s+'
+  rf'(?:nome|cognome|parola|sostantivo|termine)\s+)?'
+  rf'(?P<target>.+?)\s*[.?!]*\s*$',re.I)),
+)
+
+def _validated_grammar_target(text,language,start,end):
+ while end>start and text[end-1]in' \t\n.?!':end-=1
+ pairs={'«':'»','»':'«','“':'”','„':'“','"':'"',"'":"'"}
+ if start<end and text[start]in pairs and text[end-1]==pairs[text[start]]:
+  start+=1;end-=1
+ target=text[start:end];words=[row.group().casefold()for row in WORD.finditer(target)]
+ grammar_tokens=set(GRAMMAR_CASE_NAMES)|set(GRAMMAR_NUMBER_NAMES)
+ connectors={'ali','in','ter'}if language=='sl'else{'e','ed','o','oppure'}
+ role_only=(r'(?:imena|priimka|besede|samostalnika|izraza)'if language=='sl'
+  else r'(?:(?:del|della|dei|degli|delle)\s+)?'
+       r'(?:nome|cognome|parola|sostantivo|termine)')
+ if words and words[0]in grammar_tokens:
+  return None,'grammar_slot_pairing_unresolved'
+ if (not target or len(words)>8 or set(words)&connectors or re.search(r'[;\n]',target)):
+  return None,'grammar_target_binding_unresolved'
+ if re.fullmatch(role_only,target,re.I):
+  return None,'grammar_target_binding_unresolved'
+ return (start,end),None
+
+def _grammar_object_target(text,language):
+ if language=='sl':
+  match=re.search(r'\b(?:imena|priimka|besede|samostalnika|izraza)\s+'
+                  r'(?P<target>[^?!.;\n]{1,160})\s*[?!.]*\s*$',text,re.I)
+ else:
+  match=re.search(r'\b(?:del|della|dei|degli|delle)\s+'
+                  r'(?:nome|cognome|parola|sostantivo|termine)\s+'
+                  r'(?P<target>[^?!.;\n]{1,160})\s*[?!.]*\s*$',text,re.I)
+ return (_validated_grammar_target(text,language,*match.span('target'))
+         if match else(None,'grammar_target_binding_unresolved'))
+
+def _grammar_pairing_failure(text,language,target_span=None):
+ """Keep an independently bounded target while failing ambiguous slot pairing."""
+ if target_span is None:
+  target,ambiguity=_grammar_object_target(text,language)
+ else:
+  target,ambiguity=_validated_grammar_target(text,language,*target_span)
+  if ambiguity=='grammar_slot_pairing_unresolved':
+   target,ambiguity=_grammar_object_target(text,language)
+ if target is None:
+  return {'matched':True,'slots':[],'target':None,
+   'ambiguity':'grammar_target_binding_unresolved'}
+ return {'matched':True,'slots':[],'target':target,
+  'ambiguity':'grammar_slot_pairing_unresolved'}
+
+def structured_grammar_request(text):
+ """Parse ordered case/number pairs and their one exact lexical target."""
+ wrappers=(
+  re.compile(r'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
+             rf'(?:{_SL_CASE_TOKEN})\b',re.I),
+  re.compile(r'\s*(?:(?:qual\s+[èe]|quali\s+sono)\s+(?:il\s+)?)?'
+             rf'(?:il\s+)?(?:{_IT_CASE_TOKEN})\b',re.I))
+ candidate=any(pattern.match(text)for pattern in wrappers)
+ for language,pattern in _GRAMMAR_REQUESTS:
+  match=pattern.fullmatch(text)
+  if not match:continue
+  grammar=match['grammar'];connector=(r'\b(?:ali|in|ter)\b'if language=='sl'
+   else r'\b(?:oppure|o|e|ed)\b')
+  disjunctive=(r'\bali\b'if language=='sl'else r'\b(?:o|oppure)\b')
+  if re.search(disjunctive,grammar,re.I):
+   return _grammar_pairing_failure(text,language,match.span('target'))
+  parts=[part.strip()for part in re.split(connector,grammar,flags=re.I)]
+  slots=[];shorthand=False
+  for part in parts:
+   cleaned=re.sub(r'^il\s+','',part,flags=re.I)
+   words=[word.group().casefold()for word in WORD.finditer(cleaned)]
+   if words and words[0]in GRAMMAR_CASE_NAMES:
+    if len(words)>2 or(len(words)==2 and words[1]not in GRAMMAR_NUMBER_NAMES):
+     return _grammar_pairing_failure(text,language,match.span('target'))
+    slots.append({'case':GRAMMAR_CASE_NAMES[words[0]],
+     'number':GRAMMAR_NUMBER_NAMES.get(words[1])if len(words)==2 else None})
+   elif len(words)==1 and words[0]in GRAMMAR_NUMBER_NAMES:
+    if not slots or len({row['case']for row in slots})!=1:
+     return _grammar_pairing_failure(text,language,match.span('target'))
+    shorthand=True
+    slots.append({'case':slots[-1]['case'],'number':GRAMMAR_NUMBER_NAMES[words[0]]})
+   else:
+    return _grammar_pairing_failure(text,language,match.span('target'))
+  # Once two distinct cases occur, a number-only conjunct has no unique owner.
+  if shorthand and len({row['case']for row in slots})!=1:
+   return _grammar_pairing_failure(text,language,match.span('target'))
+  if (len(slots)>6
+      or len({(row['case'],row['number'])for row in slots})!=len(slots)):
+   return _grammar_pairing_failure(text,language,match.span('target'))
+  target,ambiguity=_validated_grammar_target(
+   text,language,*match.span('target'))
+  if ambiguity=='grammar_slot_pairing_unresolved':
+   target,_=_grammar_object_target(text,language)
+   return {'matched':True,'slots':[],'target':target,'ambiguity':ambiguity}
+  return {'matched':True,'slots':slots,'target':target,'ambiguity':ambiguity}
+ if candidate:
+  language='it'if re.search(_IT_CASE_TOKEN,text,re.I)else'sl'
+  return _grammar_pairing_failure(text,language)
+ return {'matched':False,'slots':[],'target':None,'ambiguity':None}
+
+def explicit_grammar_slots(text):
+ """Return every current-utterance slot in textual order, without guessing."""
+ def collect(patterns):
+  found=sorted((match.start(),name)for name,pattern in patterns
+               for match in re.finditer(pattern,text,re.I))
+  return list(dict.fromkeys(name for _,name in found))
+ return collect(GRAMMAR_CASES),collect(GRAMMAR_NUMBERS)
+
+CURRENT_CONTEXT_SIGNAL=re.compile(
+ r'\b(?:popravek|popravljam|mislil\w*|namesto|temveč|ampak|nadaljevanje|'
+ r'nadaljuj\w*|zdaj|tokrat|current|continuing|correzione|intendo|invece|'
+ r'ora|adesso|prosegu\w*)\b',re.I)
+HISTORICAL_REPLACEMENT=re.compile(
+ r'(?=.*\b(?:prej|predhodno|prejšnj\w*|prima)\b)(?=.*\b(?:namesto|invece)\b)',
+ re.I|re.S)
+
+_IT_ARTICLE_PREFIX=r"(?:(?:il|lo|la|un|una)\s+|l[’'])"
+_IT_NAME_DESCRIPTOR_ATOM=(
+ r'(?:sloven[oaie]|frances[ei]|italian[oaie]|maschil[ei]|femminil[ei]|'
+ r'personal[ei]|propri[oaie]|stranier[oaie])')
+_IT_NAME_DESCRIPTOR=(
+ rf'(?:(?:di\s+persona)(?:\s+{_IT_NAME_DESCRIPTOR_ATOM}){{0,3}}'
+ rf'|{_IT_NAME_DESCRIPTOR_ATOM}(?:\s+{_IT_NAME_DESCRIPTOR_ATOM}){{0,3}})')
+
+def authoritative_grammar_slots(text,context):
+ """Apply slots from context only when it explicitly marks a current update."""
+ cases,numbers=explicit_grammar_slots(text)
+ if (context and CURRENT_CONTEXT_SIGNAL.search(context)
+     and not HISTORICAL_REPLACEMENT.search(context)):
+  corrected_cases,corrected_numbers=explicit_grammar_slots(context)
+  if corrected_cases:cases=corrected_cases
+  if corrected_numbers:numbers=corrected_numbers
+ return cases,numbers
+
+def authoritative_grammar_sequence(structure,context):
+ """Apply one explicit current correction atomically to ordered slot pairs."""
+ if structure['ambiguity']:
+  return [],structure['ambiguity']
+ slots=copy.deepcopy(structure['slots'])
+ if (not context or not CURRENT_CONTEXT_SIGNAL.search(context)
+     or HISTORICAL_REPLACEMENT.search(context)):
+  return slots,None
+ cases,numbers=explicit_grammar_slots(context)
+ if not cases and not numbers:return slots,None
+ if len(cases)>1 or len(numbers)>1 or len(slots)>1:
+  return [],'grammar_slot_pairing_unresolved'
+ if not slots and not cases:
+  return [],'grammar_slot_pairing_unresolved'
+ previous=slots[0]if slots else{'case':None,'number':None}
+ return [{'case':cases[0]if cases else previous['case'],
+          'number':numbers[0]if numbers else previous['number']}],None
+
+def corrected_context_targets(text,context):
+ """Return every bounded current correction target; ambiguity stays explicit."""
+ if not context or not CURRENT_CONTEXT_SIGNAL.search(context):return None
+ # A statement about an earlier exchange is history, even when it quotes a
+ # syntactically complete replacement. It must not supersede the live question.
+ if HISTORICAL_REPLACEMENT.search(context):
+  return None
+ atom=r"[^\W\d_]+(?:[-’'][^\W\d_]+)*"
+ offset=len(text)+1
+ pairs={'«':'»','»':'«','“':'”','„':'“','"':'"',"'":"'"}
+ def trim(start,end):
+  while start<end and context[start].isspace():start+=1
+  while end>start and context[end-1].isspace():end-=1
+  return start,end
+ def unquote(start,end):
+  start,end=trim(start,end)
+  if start<end and context[start]in pairs and context[end-1]==pairs[context[start]]:
+   return trim(start+1,end-1)
+  return start,end
+ def target_object(start,end,allow_coordinated=False):
+  """Return one exact lexical replacement plus its literal named context."""
+  conjunctions={'ali','in','or','oppure','o','e'}
+  start,end=trim(start,end);context_start,context_end=start,end
+  quoted_start,quoted_end=unquote(start,end)
+  if (quoted_start,quoted_end)!=(start,end):
+   start,end=quoted_start,quoted_end;named_context=None
+  else:
+   prefix=re.match(
+    rf'(?:(?:{_IT_ARTICLE_PREFIX})?'
+    rf'(?:ime|imena|priimek|priimka|nome|cognome)\s+)',context[start:end],re.I)
+   named_context=None
+   if prefix:
+    start+=prefix.end();start,end=trim(start,end)
+    named_context=(context_start,context_end)
+    quoted_start,quoted_end=unquote(start,end)
+    if (quoted_start,quoted_end)!=(start,end):start,end=quoted_start,quoted_end
+    else:
+     descriptor=re.match(rf'(?:{_IT_NAME_DESCRIPTOR})\s+',context[start:end],re.I)
+     if descriptor:start+=descriptor.end();start,end=trim(start,end)
+     else:
+      remainder=[match.group().casefold()for match in WORD.finditer(context[start:end])]
+      if (len(remainder)!=1
+          and not(allow_coordinated and set(remainder)&conjunctions)):return None
+  value=context[start:end]
+  words=[match.group().casefold()for match in WORD.finditer(value)]
+  coordinated=[index for index,word in enumerate(words)if word in conjunctions]
+  if (not value or len(words)>4
+      or not re.fullmatch(rf'{atom}(?:\s+{atom}){{0,3}}',value,re.I)
+      or (coordinated and (not allow_coordinated or len(coordinated)!=1
+          or coordinated[0]in {0,len(words)-1}))):
+   return None
+  row={'text':value,'start':offset+start,'end':offset+end,
+   'basis':('ambiguous correction replacement; original surface'if coordinated else
+            'explicit_context_correction'),'span_scope':'context'}
+  if named_context:
+   left,right=named_context
+   row['context_span']={'text':context[left:right],'start':offset+left,
+    'end':offset+right,'basis':'correction named-object context; original surface',
+    'span_scope':'context','role':'replacement'}
+  return row
+ frames=(
+  r'\s*(?:popravek\s*:\s*)?namesto\s+(?P<old>[^;\n]{1,160}?)\s+'
+  r'(?:uporabi|uporabite|uporabimo)\s+(?P<target>[^;\n]{1,160}?)\s*[.?!]*\s*',
+  r'\s*(?:correzione\s*:\s*)?invece\s+(?:di|del|della)\s+'
+  r'(?P<old>[^;\n]{1,160}?)\s+(?:usa|usate|usiamo|utilizza|utilizzate|utilizziamo)\s+'
+  r'(?P<target>[^;\n]{1,160}?)\s*[.?!]*\s*')
+ replacement=next((match for pattern in frames
+  if(match:=re.fullmatch(pattern,context,re.I))),None)
+ if replacement:
+  old=target_object(*replacement.span('old'))
+  target=target_object(*replacement.span('target'),allow_coordinated=True)
+  if old is None or target is None:return []
+  normalize=lambda value:' '.join(unicodedata.normalize('NFC',word.group()).casefold()
+   for word in WORD.finditer(value))
+  if normalize(old['text'])==normalize(target['text']):return None
+  return [target]
+ # A replacement cue that misses the complete frame is unresolved; quoted old
+ # and new objects must never become two independent correction targets.
+ if re.search(r'\b(?:namesto|invece)\b',context,re.I):return []
+ candidates=[]
+ for match in _TRANSLATION_QUOTES.finditer(context):
+  start,end=match.span();candidates.append(target_object(start+1,end-1))
+ if candidates:return []if any(row is None for row in candidates)else candidates
+ label=re.search(rf'\b(?P<object>(?:(?:{_IT_ARTICLE_PREFIX})?'
+  rf'(?:ime|imena|priimek|priimka|nome|cognome)\s+).+?)(?=\s*[.,;:!?]?\s*$)',context,re.I)
+ if label:
+  row=target_object(*label.span('object'))
+  return [row]if row else[]
+ return None
+
 SCAFFOLD={'kaj','kako','kateri','katera','katere','katero','katerih','kdo','ali','je','so','sta','se','v','za','beseda','besede','besedo','besedi','prav','pravilno','prosim','katerega','pomeni','pomen','oblika','oblike','obliko','primer','napiše','reče','naj','mi','razloži','kakšen','kakšna','katere','danes','ni','brez','rečem','rečemo','rekel','iščem','stavek','stavka','kater','pravilen','poišči','navedi','pokaži','uporabi','preveri','to','ta','tisto','tem','tega','tale','več','povej','poveš','lahko','bolje','uporabiti','uporabljati'}
 def lexical_word(text):
  t=text.strip().strip('"«»“”‘’?!.,;:');return bool(WORD.fullmatch(t))and not any(c.isdigit()for c in t)
@@ -20,7 +302,9 @@ _TRANSLATION_FRAMES=(
  r"\s*(?:qual\s+[èe]\s+la\s+)?traduzione\s+di\s+(?P<target>.+?)\s*[.?!]*\s*",
 )
 
-_TASK_BOUNDARY=re.compile(r'(?:[?!.;]\s*|\s+(?:in|ter)\s+)(?=(?:ali|kaj|kako|zakaj)\b)',re.I)
+_TASK_BOUNDARY=re.compile(
+ r'(?:[?!.;]\s*|\s+(?:in|ter)\s+)(?=(?:ali|kaj|kako|zakaj)\b)'
+ r'|\s+e\s+(?=in\s+che\s+cosa\b)',re.I)
 _ACRONYM_SCOPE=re.compile(r'(?P<target>[^\W\d_]{2,})\s+(?:v|na|pri)\s+(?P<domain>[^,?;.!\n]{1,80})$',re.U)
 
 def _scope_cut(text,start,end):
@@ -116,12 +400,23 @@ def translation_choice_spans(text):
    'basis':'translation source expression; original surface'if i==0 else'proposed translation alternative; original surface'})
  return result if result[1]['text']!=result[2]['text']else []
 
+SL_CASE_WORD=r'(?:imenovalnik|rodilnik|dajalnik|tožilnik|mestnik|orodnik)'
+IT_CASE_WORD=r'(?:nominativo|genitivo|dativo|accusativo|locativo|strumentale)'
+SL_NUMBER_WORD=r'(?:ednine|dvojine|množine)'
+IT_NUMBER_WORD=r'(?:singolare|plurale)'
 _LEXICAL_FRAMES=(
- r'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:sklanjamo|sklanjati|pregibamo|pregibati|se\s+(?:sklanja|sklanjajo|pregiba|pregibajo))\s+(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*(?:kako\s+se\s+glasi\s+)?{SL_CASE_WORD}(?:\s+(?:ali|in)\s+{SL_CASE_WORD})+\s+(?:(?:imena|priimka|besede|samostalnika|izraza)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*(?:(?:qual\s+[èe]\s+|quali\s+sono\s+)(?:il\s+)?)?{IT_CASE_WORD}(?:\s+(?:oppure|o|e)\s+(?:il\s+)?{IT_CASE_WORD})+\s+(?:(?:del\s+)?(?:nome|cognome|parola|sostantivo|termine)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*(?:kako\s+se\s+glasi\s+)?{SL_CASE_WORD}\s+{SL_NUMBER_WORD}(?:\s+(?:ali|in)\s+{SL_NUMBER_WORD})+\s+(?:(?:imena|priimka|besede|samostalnika|izraza)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*(?:(?:qual\s+[èe]\s+|quali\s+sono\s+)(?:il\s+)?)?{IT_CASE_WORD}\s+{IT_NUMBER_WORD}(?:\s+(?:oppure|o|e)\s+{IT_NUMBER_WORD})+\s+(?:(?:del\s+)?(?:nome|cognome|parola|sostantivo|termine)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:se\s+)?(?:{SL_INFLECTION_ACTION})\s+(?P<target>.+?)\s*[.?!]*\s*',
+ rf'\s*come\s+si\s+(?:{IT_INFLECTION_ACTION})\s+(?:(?:il\s+)?(?:nome|cognome|parola|sostantivo|termine)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:in\s+che\s+cosa\s+)?differisce\s+(?:dal|dalla)\s+(?:nome|cognome|parola|sostantivo|termine)\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:kaj\s+(?:je(?!\s+(?:prav|pravil\w*|ustrez\w*)\b)|pomeni)|pomen\s+besede)\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:(?:poišči|iščem|prosim|navedi|katere\s+so)\s+)?(?:sopomenk\w*|sinonim\w*)\s+(?:za\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:v\s+katerem\s+sklonu\s+je|kateri\s+sklon\s+je)\s+(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:rodilnik|dajalnik|tožilnik|orodnik|mestnik)\s+(?:ednine|dvojine|množine)\s+(?:besede\s+)?(?P<target>.+?)\s*[.?!]*\s*',
+ r'\s*(?:(?:qual\s+[èe]\s+il|come\s+si\s+presenta\s+il)\s+)?(?:nominativo|genitivo|dativo|accusativo|locativo|strumentale)\s+(?:(?:singolare|plurale)\s+)?(?:(?:del\s+)?(?:nome|cognome|parola|sostantivo|termine)\s+)?(?P<target>.+?)\s*[.?!]*\s*',
  r'\s*(?:ali|a)\s+se\s+(?P<target>.+?)\s+(?:uporablja|rabi|velja)\b[^?!.]*[?!.]?\s*',
  r'\s*(?:ali\s+)?je\s+(?P<target>.+?)\s+(?:priporočen[ai]?|odsvetovan[ai]?|nezaželen[ai]?|pravilen)\s+(?:izraz|termin|beseda)\s*[?!.]*\s*',
 )
@@ -139,8 +434,7 @@ def lexical_object_span(text):
  return None
 
 _NAME_DESCRIPTOR=re.compile(r'(?:[^\W\d_]+(?:sk[oi]|šk[oi]|čk[oi])|mošk[oi]|žensk[oi]|osebn[oi]|tuj[ei]|lastn[oi]|rojstn[oi]|krstn[oi]|domač[ei])',re.I)
-
-def named_lexical_target(span):
+def named_lexical_target(span,original=None):
  """Separate an explicit name label from an unquoted inflection object.
 
  Descriptors remain literal context, never a grammar verdict or a replacement
@@ -149,13 +443,25 @@ def named_lexical_target(span):
  """
  text=span['text']
  match=re.fullmatch(r'(?P<descriptors>(?:[^\W\d_]+\s+){1,4})(?:ime|priimek)\s+(?P<name>.+)',text,re.U|re.I)
- if not match:return span
- descriptors=match['descriptors'].split()
- if not all(_NAME_DESCRIPTOR.fullmatch(word)for word in descriptors):return span
+ context=copy.deepcopy(span)
+ if match:
+  descriptors=match['descriptors'].split()
+  if not all(_NAME_DESCRIPTOR.fullmatch(word)for word in descriptors):return span
+ elif original is not None:
+  # Italian places the named-object role before its descriptors (``nome
+  # sloveno Hugo``). The lexical frame has already consumed that role, so
+  # recover only the immediately adjacent literal label and retain the whole
+  # named phrase as context while nominating the exact supplied name.
+  role=re.search(r'\b(?:nome|cognome)\s+$',original[:span['start']],re.I)
+  match=re.fullmatch(
+   rf'(?P<descriptors>(?:{_IT_NAME_DESCRIPTOR}\s+){{1,4}})(?P<name>.+)',text,re.I)
+  if not role or not match:return span
+  context.update(text=original[role.start():span['end']],start=role.start(),end=span['end'])
+ else:return span
  start,end=match.span('name');name=text[start:end]
  if not 1<=len(list(WORD.finditer(name)))<=8 or re.search(r'[«»“”"?!;\n]',name):return span
  return {'text':name,'start':span['start']+start,'end':span['start']+end,
-  'basis':'named lexical object; descriptor context retained','context_span':copy.deepcopy(span)}
+  'basis':'named lexical object; descriptor context retained','context_span':context}
 
 def is_referential_request(text):
  """Only an explicit demonstrative task can bind its supplied context."""
@@ -186,6 +492,21 @@ def portable_request_plan(interpretation,language='und'):
  text=interpretation['original'];context=interpretation.get('context','');combined=text+'\n'+context
  destination=[code for code,pattern in [('sl',r'v\s+slovenščin[io]|po\s+slovensko|(?:pove|povemo|reče|rečemo)\s+slovensko|slovenska\s+ustreznica|in\s+sloveno'),('it',r'v\s+italijanščin[io]|po\s+italijansko|(?:pove|povemo|reče|rečemo)\s+italijansko|italijanska\s+ustreznica|in\s+italiano')]if re.search(pattern,combined,re.I)]
  facets=interpretation['requested_facets'];operation=('translation_help'if'translation'in facets else'explanation'if'meaning'in facets else'rule_lookup'if any(x in facets for x in ('morphology','orthography'))else None)
+ # The internal route remains the broad morphology capability, while the
+ # portable signed plan must preserve an explicitly parsed case slot. A broad
+ # request is serialized as ``inflection`` without inventing a narrower slot.
+ grammar_slots=copy.deepcopy(interpretation.get('requested_grammar_slots',[]))
+ if grammar_slots:
+  cases=list(dict.fromkeys(row['case']for row in grammar_slots))
+  numbers=list(dict.fromkeys(row['number']for row in grammar_slots
+                             if row['number']is not None))
+ else:cases,numbers=authoritative_grammar_slots(text,context)
+ broad_inflection=bool(re.search(rf'\b(?:{INFLECTION_CUE})\b',text,re.I))
+ portable_morphology=cases or(['inflection']if broad_inflection else['morphology'])
+ portable_facets=[]
+ for facet in facets:
+  portable_facets.extend(portable_morphology if facet=='morphology'else[facet])
+ portable_facets.extend(numbers)
  domain=re.search(r'\bv\s+([^,?;.]{1,50})\s+kontekstu\b',combined,re.I)
  domain_text=domain.group(1)if domain else None
  if domain_text is None:
@@ -203,9 +524,9 @@ def portable_request_plan(interpretation,language='und'):
   'candidate_lemmas':[{'target':t['text'],'candidates':list(t.get('lemma_candidates',[])),'basis':'analyzer_nomination_requires_resource_match'}for t in interpretation['targets'] if t.get('lemma_candidates')],
   'operation':operation,'source_language':language if language in {'sl','it'}else None,
   'translation_language':destination[0]if len(destination)==1 else None,'response_language':None,
-  'requested_facets':list(dict.fromkeys([*facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen'),('recommendation',r'priporočen|odsvetovan|nezaželen'),('usage',r'uporablja|rabi\b')]if re.search(pattern,combined,re.I)]])),'domain':domain_text,'geography':geography,'jurisdiction':None,
+  'requested_facets':list(dict.fromkeys([*portable_facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen'),('recommendation',r'priporočen|odsvetovan|nezaželen'),('usage',r'uporablja|rabi\b')]if re.search(pattern,text,re.I)]])),'requested_grammar_slots':grammar_slots,'domain':domain_text,'geography':geography,'jurisdiction':None,
   'requested_source':'pravopis8'if proposal else None,'requested_edition':'proposal'if proposal else None,
-  'ambiguities':(['translation_direction_unspecified']if operation=='translation_help'and len(destination)!=1 else[])+(['unresolved_reference']if not targets and is_referential_request(text)else[]),
+  'ambiguities':(['translation_direction_unspecified']if operation=='translation_help'and len(destination)!=1 else[])+(['unresolved_reference']if not targets and is_referential_request(text)else[])+(['coordinated_target_unresolved']if any(target.get('basis')=='ambiguous correction replacement; original surface'for target in targets)else[])+list(interpretation.get('grammar_ambiguities',[])),
   'confidence':'bounded_surface'if targets else'broad_routes'}
 
 _COMPARISON_CONTEXT={'brez','ni','ne','je','so','sta','smo','ste','sem','si','se','v','za','na','pri','od','do','z','s','iz','ob','po','k','h'}
@@ -252,6 +573,7 @@ def negated_existence_frame(text,spans):
 
 def plan(text,context,language,analysis,request_plan=None):
  words=list(WORD.finditer(text));requested=[k for k,p in FACETS.items()if re.search(p,text,re.I)]
+ grammar=structured_grammar_request(text)
  hints=[w for r in analysis.get('raw_engines',{}).values()for w in r.get('analysis',{}).get('words',[])];spans=[];kind='question';basis=[]
  def add(a,b,why):
   if any(m.start()<b and a<m.end() for m in re.finditer(r'https?://\S+|\b\w*[0-9_]\w*\b',text)):return
@@ -265,11 +587,16 @@ def plan(text,context,language,analysis,request_plan=None):
    source=text+'\n'+context if target.get('span_scope')=='context'else text
    if type(a)is not int or type(b)is not int or not 0<=a<b<=len(source) or source[a:b]!=target.get('text') or (target.get('span_scope')=='context'and a<=len(text)):raise ValueError('Request target span differs')
    spans.append(copy.deepcopy(target))
+ elif grammar['matched']:
+  if grammar['target']:
+   add(*grammar['target'],'natural lexical object; whole original span')
+   spans=[named_lexical_target(span,text)for span in spans]
  elif is_referential_request(text):
   target=bound_context_target(text,context,language)
   if target:spans.append(target)
  if spans:
   kind='comparison'if len(spans)>1 else'word'if lexical_word(text)else'phrase'if len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
+ elif grammar['matched']:pass
  elif is_referential_request(text):pass
  elif lexical_word(text):
   m=WORD.search(text);add(m.start(),m.end(),'single lexical surface');kind='word'
@@ -287,7 +614,7 @@ def plan(text,context,language,analysis,request_plan=None):
   if not spans:
    for a,b,why in request_object_spans(text):add(a,b,why)
    if 'morphology'in requested:
-    spans=[named_lexical_target(span)if span['basis']=='natural lexical object; whole original span'else span for span in spans]
+    spans=[named_lexical_target(span,text)if span['basis']=='natural lexical object; whole original span'else span for span in spans]
    if len(spans)>1:kind='comparison'
   # Comparative alternatives stay separate and retain spelling, casing and case context.
   if not spans and re.search(r'\bali\b',text,re.I):
@@ -310,6 +637,9 @@ def plan(text,context,language,analysis,request_plan=None):
   if not spans and len(words)<=8 and words:
    for w in words:
     if w.group().casefold()not in SCAFFOLD and not any(re.search(p,w.group(),re.I)for p in FACETS.values()):add(w.start(),w.end(),'degraded lexical candidate; source match required')
+ corrected=corrected_context_targets(text,context)
+ if corrected is not None:
+  spans=corrected;kind='comparison'if len(corrected)>1 else'question'
  if len(spans)>1 and len({s['text'].casefold()for s in spans})==1 and len({s['text']for s in spans})>1 and 'orthography'not in requested:requested.append('orthography')
  if kind=='question'and len(spans)==1 and len(list(WORD.finditer(spans[0]['text'])))>1:kind='phrase'
  langs=[language]if language in {'sl','it'}else ['sl','it']
@@ -319,8 +649,14 @@ def plan(text,context,language,analysis,request_plan=None):
   s['lemma_candidates']=list(dict.fromkeys(w['lemma']for w in hints if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end']and w['lemma']))[:6]
   s['lemma_sequences']=list(dict.fromkeys(' '.join(w['lemma']for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end'])for r in analysis.get('raw_engines',{}).values()))
   s['context_features']=[{'engine':name,'feats':w['feats'],'upos':w['upos']}for name,r in analysis.get('raw_engines',{}).items()for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end']]
- case='genitive'if re.search(r'\b(?:brez|rodilnik\w*)\b',text,re.I)or negated_existence_frame(text,spans)else'nominative'if re.search(r'\b(?:imenovalnik\w*|kdo je)\b',text,re.I)else None
- result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':'singular'if case and not re.search(r'dvojin|množin',text,re.I)else None,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
+ grammar_slots,grammar_ambiguity=authoritative_grammar_sequence(grammar,context)
+ cases,numbers=authoritative_grammar_slots(text,context)
+ case=grammar_slots[0]['case']if len(grammar_slots)==1 else None
+ if not grammar_slots and not cases:
+  case='genitive'if re.search(r'\bbrez\b',text,re.I)or negated_existence_frame(text,spans)else'nominative'if re.search(r'\bkdo je\b',text,re.I)else None
+ number=(grammar_slots[0]['number']if len(grammar_slots)==1 else
+         numbers[0]if len(numbers)==1 else'singular'if case and not cases else None)
+ result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'requested_grammar_slots':grammar_slots,'grammar_ambiguities':[grammar_ambiguity]if grammar_ambiguity else[],'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':number,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
 
  result['request_plan']=portable_request_plan(result,language)
  return result

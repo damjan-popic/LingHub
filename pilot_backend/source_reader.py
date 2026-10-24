@@ -169,6 +169,18 @@ def structured(record, locale):
                     if str(v) in grammar)}]
         if record['kind'] == 'loris':
             return structured({'payload':record['fields'].get('payload',{})},locale)
+        if record['kind'] == 'terminology':
+            # The lexical card is a summary. An original must retain each
+            # language/sense's notes, definition and status on its own term.
+            # Read the source record once, without tool-selection metadata or
+            # a second summary repeating (and flattening) the same fields.
+            fields = {key: value for key, value in record['fields'].items()
+                      if key in FIELDS or key == 'term_entries'}
+            if fields.get('term_entries'):
+                fields.pop('snippet', None)
+            original_rows = structured(fields, locale)
+            if original_rows:
+                return original_rows
         unit = dict(record)
         unit.setdefault('match_relation', 'recorded_target')
         unit.setdefault('selection', {'state': 'primary'})

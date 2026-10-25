@@ -43,6 +43,7 @@ jobs:
             tests/test_activate_reviewed_core.py \
             tests/test_activate_successor_release.py \
             tests/test_bootstrap_successor_release.py \
+            tests/test_build_reviewed_core_activation_stage.py \
             tests/test_verify_successor_public.py \
             tests/test_verify_successor_backup.py \
             tests/test_klikai_beta_deploy.py

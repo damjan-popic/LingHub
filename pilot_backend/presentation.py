@@ -55,6 +55,33 @@ LIMITATION_CODES = frozenset({'partial_evidence', 'no_answer_evidence', 'conflic
 EVIDENCE_STATES = frozenset({'source_present_unresolved_interpretation',
     'source_present_not_admitted_for_answer', 'no_selected_evidence'})
 
+ACCOUNTING_FIELDS = frozenset({'primary_provider_dispatches',
+    'corrective_provider_dispatches', 'completed_primary_calls',
+    'completed_corrective_calls', 'unknown_provider_outcomes'})
+
+
+def reader_generation_accounting(value):
+    """Expose only bounded dispatch counts, never provider attempt details."""
+    if not isinstance(value,dict)or set(value)!=ACCOUNTING_FIELDS:return None
+    if any(type(value[key])is not int or value[key]<0 for key in ACCOUNTING_FIELDS):return None
+    primary=value['primary_provider_dispatches'];corrective=value['corrective_provider_dispatches']
+    completed_primary=value['completed_primary_calls']
+    completed_corrective=value['completed_corrective_calls'];unknown=value['unknown_provider_outcomes']
+    total=primary+corrective
+    if (primary>2 or corrective>1 or total>3
+            or completed_primary>primary or completed_corrective>corrective
+            or unknown>total or completed_primary+completed_corrective+unknown>total):return None
+    return {key:value[key]for key in ACCOUNTING_FIELDS}|{'provider_dispatches_total':total}
+
+
+def reader_route(value):
+    """Expose fixed release-routing labels only when dispatch accounting is valid."""
+    if not isinstance(value,dict):return None
+    out={}
+    if value.get('selection')in {'auto','qwen','gemma'}:out['selection']=value['selection']
+    if value.get('provider_scope')in {'shared','own'}:out['provider_scope']=value['provider_scope']
+    return out or None
+
 
 def reader_limitations(value):
     """Retain scoped reader qualifications, without private validation details.
@@ -205,6 +232,11 @@ def tester_view(value, owner, secret):
     if isinstance(value.get('lexical_profile'),dict):
         # Produced by the closed reader projection, never raw analyzer diagnostics.
         out['lexical_profile']=value['lexical_profile']
+    accounting=reader_generation_accounting(value.get('generation_accounting'))
+    if accounting:
+        out['generation_accounting']=accounting
+        route=reader_route(value.get('execution'))
+        if route:out['execution']=route
     visible=out.get('evidence')if isinstance(out.get('evidence'),list)else []
     evidence_state=reader_evidence_state(value,visible)
     if evidence_state:out['evidence_state']=evidence_state

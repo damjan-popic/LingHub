@@ -23,9 +23,12 @@ jobs:
   verify-and-deliver:
     if: github.repository == 'damjan-popic/KLIKai' && github.ref == 'refs/heads/beta-release'
     runs-on: [self-hosted, linux, x64, klikai-beta]
-    timeout-minutes: 30
+    # The public acceptance observer has a reviewed 32-minute worst-case
+    # window; leave headroom for package tests, activation and durable cleanup.
+    timeout-minutes: 60
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTEST_ADDOPTS: '-p no:cacheprovider'
     steps:
       - name: Check out the exact reviewed package
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -73,6 +76,10 @@ jobs:
             tests/test_pilot_feedback_scope.mjs \
             tests/test_pilot_submission_recovery.mjs \
             tests/test_pilot_ui_interpretation.mjs
+      - name: Reverify the unchanged release payload after tests
+        run: |
+          /usr/bin/python3 -I release/components/infra/scripts/prepare-successor-release.py \
+            --verify-package "$GITHUB_WORKSPACE"
       - name: Activate through the fixed reversible host coordinator
         run: |
           sudo -n /usr/local/sbin/klikai-successor-activate \

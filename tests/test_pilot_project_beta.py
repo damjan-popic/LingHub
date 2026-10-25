@@ -188,6 +188,41 @@ def test_tester_uses_automatic_routing_and_retains_actual_private_provenance(bet
         assert client.get('/health').json()=={'status':'ok','release_id':'project-beta-test'}
 
 
+def test_tester_sees_only_bounded_route_dispatch_accounting(beta_rig):
+    app,adapter,_,_,credentials=beta_rig
+    generate=adapter.generate
+    def accounted(*args,**kwargs):
+        result=generate(*args,**kwargs)
+        result.update(
+            recomposition={'status':'skipped','selected_phase':'primary',
+                'corrective_generation_calls':0,'max_corrective_generation_calls':1,
+                'trigger_codes':['comparison_decision_removed_by_processing'],
+                'reason':'corrective_provider_not_admitted'},
+            provider_attempts=[{'route':'shared','model':'PRIVATE_MODEL',
+                'stage':'generation','status':'completed','raw_response':'PRIVATE_RESPONSE'}],
+            generation_accounting={'primary_provider_dispatches':1,
+                'corrective_provider_dispatches':0,'completed_primary_calls':1,
+                'completed_corrective_calls':0,'unknown_provider_outcomes':0})
+        result['execution'].update(selection='auto',provider_scope='shared',
+            private_url='PRIVATE_ENDPOINT')
+        return result
+    adapter.generate=accounted
+    with TestClient(app,base_url=ORIGIN)as client:
+        headers=login(client,credentials)
+        started=ask(client,headers,model='auto');finish(app)
+        family=client.get('/api/pilot/families/'+started['family']['answer_family_id']).json()
+        tier=family['short']
+        assert tier['generation_accounting']=={
+            'primary_provider_dispatches':1,'corrective_provider_dispatches':0,
+            'completed_primary_calls':1,'completed_corrective_calls':0,
+            'unknown_provider_outcomes':0,'provider_dispatches_total':1}
+        assert tier['execution']=={'selection':'auto','provider_scope':'shared'}
+        assert 'provider_attempts'not in tier and'recomposition'not in tier
+        encoded=json.dumps(family)
+        assert all(private not in encoded for private in (
+            'PRIVATE_MODEL','PRIVATE_RESPONSE','PRIVATE_ENDPOINT','private_url'))
+
+
 def test_public_source_binding_is_server_owned_exact_context_scoped_and_logout_closed(beta_rig):
     app,adapter,_,_,credentials=beta_rig
     generate=adapter.generate

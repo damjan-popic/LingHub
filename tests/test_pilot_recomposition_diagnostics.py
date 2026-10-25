@@ -58,7 +58,37 @@ def test_three_dispatches_keep_phase_and_explicit_counts_without_private_data():
     assert {key:rendered[key]for key in safe}==safe
     assert PRIVATE not in json.dumps(rendered)
     assert value==original
-    assert not {'recomposition','generation_accounting','provider_attempts'}&reader_view(rendered,'owner','secret').keys()
+    public=reader_view(rendered,'owner','secret')
+    assert not {'recomposition','provider_attempts'}&public.keys()
+    assert public['generation_accounting']=={**accounting(rows),'provider_dispatches_total':3}
+    assert PRIVATE not in json.dumps(public)
+
+
+def test_reader_dispatch_projection_is_closed_bounded_and_route_only():
+    counts=accounting(attempts())
+    value={'generation_accounting':counts,
+        'execution':{'selection':'auto','provider_scope':'shared',
+            'route_reason':'shared_ready','private_url':PRIVATE},
+        'provider_attempts':attempts(),'recomposition':summary(),'private':PRIVATE}
+    public=reader_view(value,'owner','secret')
+    assert public=={'generation_accounting':{**counts,'provider_dispatches_total':3},
+        'execution':{'selection':'auto','provider_scope':'shared'}}
+    assert PRIVATE not in json.dumps(public)
+
+
+@pytest.mark.parametrize('change',[
+    {'primary_provider_dispatches':True},
+    {'primary_provider_dispatches':3},
+    {'corrective_provider_dispatches':2},
+    {'completed_primary_calls':3},
+    {'unknown_provider_outcomes':4},
+    {'private_counter':1},
+])
+def test_reader_dispatch_projection_rejects_malformed_or_expanded_accounting(change):
+    counts={**accounting(attempts()),**change}
+    public=reader_view({'generation_accounting':counts,
+        'execution':{'selection':'auto','provider_scope':'shared'}},'owner','secret')
+    assert 'generation_accounting'not in public and'execution'not in public
 
 
 @pytest.mark.parametrize('mutate',[

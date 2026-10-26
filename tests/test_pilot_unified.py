@@ -983,10 +983,7 @@ def test_web_and_core_preserve_same_closed_grammar_slot_ambiguity(
     assert signed['requested_grammar_slots']==direct['requested_grammar_slots']==[]
     assert [(row['text'],row['start'],row['end'])for row in signed['target_spans']]==[
         (row['text'],row['start'],row['end'])for row in direct['target_spans']]
-    if ambiguity=='grammar_target_binding_unresolved':
-        assert signed['target_spans']==[]
-    else:
-        assert [row['text']for row in signed['target_spans']]==['Hugo']
+    assert signed['target_spans']==[]
     assert ambiguity in signed['ambiguities']and ambiguity in direct['ambiguities']
 
 

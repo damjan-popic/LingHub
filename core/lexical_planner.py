@@ -37,11 +37,17 @@ _SL_NUMBER_TOKEN=r'(?:ednine|dvojine|množine)'
 _IT_NUMBER_TOKEN=r'(?:singolare|plurale)'
 _SL_SLOT=rf'{_SL_CASE_TOKEN}(?:\s+{_SL_NUMBER_TOKEN})?'
 _IT_SLOT=rf'(?:il\s+)?{_IT_CASE_TOKEN}(?:\s+{_IT_NUMBER_TOKEN})?'
+_NAME_DESCRIPTOR=re.compile(
+ r'(?:[^\W\d_]+(?:sk[oi]|šk[oi]|čk[oi])|'
+ r'slovensk\w*|francosk\w*|italijansk\w*|mošk\w*|žensk\w*|'
+ r'osebn\w*|tuj\w*|lastn\w*|rojstn\w*|krstn\w*|domač\w*)',re.I)
+_SL_NAMED_ROLE=rf'(?:(?:{_NAME_DESCRIPTOR.pattern})\s+){{0,4}}(?:ime|priimek|besed[ao]|samostalnik|izraz)'
+_SL_GENITIVE_NAMED_ROLE=rf'(?:(?:{_NAME_DESCRIPTOR.pattern})\s+){{0,4}}(?:imena|priimka|besede|samostalnika|izraza)'
 _GRAMMAR_REQUESTS=(
  ('sl',re.compile(
-  rf'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
+  rf'\s*(?:(?:kako\s+se\s+(?:glasi|glasita|glasijo)|kakšen\s+je)\s+)?'
   rf'(?P<grammar>{_SL_SLOT}(?:\s+(?:ali|in|ter)\s+(?:{_SL_SLOT}|{_SL_NUMBER_TOKEN}))*)'
-  rf'\s+(?:(?:imena|priimka|besede|samostalnika|izraza)\s+)?'
+  rf'\s+(?:{_SL_GENITIVE_NAMED_ROLE}\s+)?'
   rf'(?P<target>.+?)\s*[.?!]*\s*$',re.I)),
  ('it',re.compile(
   rf'\s*(?:(?:qual\s+[èe]|quali\s+sono)\s+(?:il\s+)?)?'
@@ -92,26 +98,31 @@ def _grammar_pairing_failure(text,language,target_span=None):
  if target is None:
   return {'matched':True,'slots':[],'target':None,
    'ambiguity':'grammar_target_binding_unresolved'}
- return {'matched':True,'slots':[],'target':target,
+ return {'matched':True,'slots':[],'target':None,
   'ambiguity':'grammar_slot_pairing_unresolved'}
 
 def structured_grammar_request(text):
  """Parse ordered case/number pairs and their one exact lexical target."""
  postfix=re.fullmatch(
-  rf'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:se\s+)?(?:{SL_INFLECTION_ACTION})\s+'
-  r'(?P<label>ime|priimek|besedo|samostalnik|izraz)\s+'
+  rf'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:se\s+)?'
+  r'(?:(?:v\s+slovenščin\w*)\s+)?(?:pravilno\s+)?'
+  rf'(?:{SL_INFLECTION_ACTION})\s+(?P<label>{_SL_NAMED_ROLE})\s+'
   rf'(?P<target>[^?!.;\n]{{1,160}}?)\s+v\s+'
-  rf'(?P<case>{_SL_CASE_SURFACE})\s*[.?!]*\s*$',text,re.I)
+  rf'(?P<grammar>{_SL_CASE_SURFACE}[^?!.;\n]{{0,120}})\s*[.?!]*\s*$',text,re.I)
  if postfix:
   target,ambiguity=_validated_grammar_target(
    text,'sl',*postfix.span('target'))
   if ambiguity:
    return {'matched':True,'slots':[],'target':None,'ambiguity':ambiguity}
-  case=next((name for name,pattern in GRAMMAR_CASES
-             if re.fullmatch(pattern,postfix['case'],re.I)),None)
-  if case is None:
-   return _grammar_pairing_failure(text,'sl',postfix.span('target'))
-  return {'matched':True,'slots':[{'case':case,'number':None}],
+  words=[row.group()for row in WORD.finditer(postfix['grammar'])]
+  case=(next((name for name,pattern in GRAMMAR_CASES
+              if words and re.fullmatch(pattern,words[0],re.I)),None))
+  number=(next((name for name,pattern in GRAMMAR_NUMBERS
+                if len(words)==2 and re.fullmatch(pattern,words[1],re.I)),None))
+  if case is None or len(words)>2 or len(words)==2 and number is None:
+   return {'matched':True,'slots':[],'target':None,
+           'ambiguity':'grammar_slot_pairing_unresolved'}
+  return {'matched':True,'slots':[{'case':case,'number':number}],
           'target':target,'ambiguity':None}
  wrappers=(
   re.compile(r'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
@@ -153,8 +164,7 @@ def structured_grammar_request(text):
   target,ambiguity=_validated_grammar_target(
    text,language,*match.span('target'))
   if ambiguity=='grammar_slot_pairing_unresolved':
-   target,_=_grammar_object_target(text,language)
-   return {'matched':True,'slots':[],'target':target,'ambiguity':ambiguity}
+   return {'matched':True,'slots':[],'target':None,'ambiguity':ambiguity}
   return {'matched':True,'slots':slots,'target':target,'ambiguity':ambiguity}
  if candidate:
   language='it'if re.search(_IT_CASE_TOKEN,text,re.I)else'sl'
@@ -446,11 +456,13 @@ def lexical_object_span(text):
   start,end=match.span('target')
   label=re.match(r'(?:besed[aeoiu]|izraz(?:a|u)?|termin(?:a)?|zveza|zvezo|(?:osebno\s+)?im(?:e|ena)|samostalnik)\s+',text[start:end],re.I)
   if label:start+=label.end()
+  language_scope=re.search(
+   r'\s+v\s+(?:slovenščin\w*|italijanščin\w*)\s*$',text[start:end],re.I)
+  if language_scope:end=start+language_scope.start()
   end=_scope_cut(text,start,end)
   if start<end and len(list(WORD.finditer(text[start:end])))<=16:return start,end
  return None
 
-_NAME_DESCRIPTOR=re.compile(r'(?:[^\W\d_]+(?:sk[oi]|šk[oi]|čk[oi])|mošk[oi]|žensk[oi]|osebn[oi]|tuj[ei]|lastn[oi]|rojstn[oi]|krstn[oi]|domač[ei])',re.I)
 def named_lexical_target(span,original=None):
  """Separate an explicit name label from an unquoted inflection object.
 
@@ -519,7 +531,12 @@ def portable_request_plan(interpretation,language='und'):
                              if row['number']is not None))
  else:cases,numbers=authoritative_grammar_slots(text,context)
  broad_inflection=bool(re.search(rf'\b(?:{INFLECTION_CUE})\b',text,re.I))
- portable_morphology=cases or(['inflection']if broad_inflection else['morphology'])
+ grammar_ambiguities=interpretation.get('grammar_ambiguities',[])
+ if cases:
+  portable_morphology=cases+(
+   ['inflection']if broad_inflection and grammar_ambiguities else[])
+ else:
+  portable_morphology=['inflection']if broad_inflection else['morphology']
  portable_facets=[]
  for facet in facets:
   portable_facets.extend(portable_morphology if facet=='morphology'else[facet])
@@ -590,6 +607,11 @@ def negated_existence_frame(text,spans):
 
 def plan(text,context,language,analysis,request_plan=None):
  words=list(WORD.finditer(text));requested=[k for k,p in FACETS.items()if re.search(p,text,re.I)]
+ if ('morphology'in requested and'translation'in requested
+     and not re.search(r'prevod|preved|prevaj|ustreznic|traduc|traduz|'
+                       r'(?:pove|povemo|reče|rečemo)\s+(?:po\s+)?'
+                       r'(?:slovensko|italijansko)',text,re.I)):
+  requested.remove('translation')
  grammar=structured_grammar_request(text)
  hints=[w for r in analysis.get('raw_engines',{}).values()for w in r.get('analysis',{}).get('words',[])];spans=[];kind='question';basis=[]
  def add(a,b,why):

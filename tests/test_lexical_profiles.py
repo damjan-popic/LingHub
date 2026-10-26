@@ -1,4 +1,7 @@
 import copy
+import json
+import os
+from pathlib import Path
 import pytest
 from core.analysis_profiles import align
 from core.lexical_planner import plan
@@ -52,6 +55,26 @@ def test_postfixed_case_inflection_does_not_collapse_coordinated_names():
  assert request['target_spans']==[]
  assert request['requested_grammar_slots']==[]
  assert request['ambiguities']==['grammar_target_binding_unresolved']
+
+
+def test_web_plans_match_the_pinned_core_grammar_interpretation_contract():
+ root=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
+ if not root:pytest.skip('KLIKAI_PINNED_CORE_ROOT is not configured')
+ path=Path(root)/'tests/zrc/fixtures/grammar_interpretation_contract.json'
+ contract=json.loads(path.read_text(encoding='utf-8'))
+ assert contract['version']=='klikai.grammar-interpretation-contract.v1'
+ for case in contract['cases']:
+  question=case['question']
+  request=plan(question,'',case['language'],{'raw_engines':{}})['request_plan']
+  actual={
+   'targets':[row['text']for row in request['target_spans']],
+   'requested_grammar_slots':request['requested_grammar_slots'],
+   'requested_facets':request['requested_facets'],
+   'ambiguities':request['ambiguities'],
+  }
+  assert actual==case['expected'],case['id']
+  assert all(question[row['start']:row['end']]==row['text']
+             for row in request['target_spans']),case['id']
 
 @pytest.mark.parametrize('language,text,case',[
  ('sl','Imenovalnik imena Hugo?','nominative'),
@@ -143,7 +166,7 @@ def test_repeated_case_number_shorthand_expands_ordered_slots(language,text,slot
 def test_disjunctive_grammar_connectors_never_become_cumulative_slots(language,text):
  request=plan(text,'',language,{'raw_engines':{}})['request_plan']
  assert request['requested_grammar_slots']==[]
- assert [row['text']for row in request['target_spans']]==['Hugo']
+ assert request['target_spans']==[]
  assert 'grammar_slot_pairing_unresolved'in request['ambiguities']
 
 
@@ -175,10 +198,7 @@ def test_unparseable_pairing_or_ambiguous_target_fails_closed(
         language,text,ambiguity):
  request=plan(text,'',language,{'raw_engines':{}})['request_plan']
  assert request['requested_grammar_slots']==[]
- if ambiguity=='grammar_target_binding_unresolved':
-  assert request['target_spans']==[]
- else:
-  assert [row['text']for row in request['target_spans']]==['Hugo']
+ assert request['target_spans']==[]
  assert ambiguity in request['ambiguities']
 
 
@@ -210,7 +230,8 @@ def test_portable_plan_retains_every_ambiguous_case_and_number(
         language,text,facets):
  result=plan(text,'',language,{'raw_engines':{}})
  assert result['request_plan']['requested_facets']==facets
- assert [target['text']for target in result['targets']]==['Hugo']
+ expected=[]if result['request_plan']['ambiguities']else['Hugo']
+ assert [target['text']for target in result['targets']]==expected
 
 @pytest.mark.parametrize('text',[
  'Come si declina il nome Hugo?',

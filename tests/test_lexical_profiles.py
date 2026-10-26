@@ -62,7 +62,7 @@ def test_web_plans_match_the_pinned_core_grammar_interpretation_contract():
  if not root:pytest.skip('KLIKAI_PINNED_CORE_ROOT is not configured')
  path=Path(root)/'tests/zrc/fixtures/grammar_interpretation_contract.json'
  contract=json.loads(path.read_text(encoding='utf-8'))
- assert contract['version']=='klikai.grammar-interpretation-contract.v1'
+ assert contract['version']=='klikai.grammar-interpretation-contract.v2'
  for case in contract['cases']:
   question=case['question']
   request=plan(question,'',case['language'],{'raw_engines':{}})['request_plan']
@@ -213,17 +213,17 @@ def test_grammar_role_label_without_lexical_target_fails_closed(language,text):
  assert request['ambiguities']==['grammar_target_binding_unresolved']
 
 @pytest.mark.parametrize('language,text,facets',[
- ('sl','Dajalnik ali rodilnik imena Hugo?',['dative','genitive']),
+ ('sl','Dajalnik ali rodilnik imena Hugo?',['genitive','dative']),
  ('sl','Rodilnik ali dajalnik imena Hugo?',['genitive','dative']),
- ('it','Dativo oppure genitivo del nome Hugo?',['dative','genitive']),
+ ('it','Dativo oppure genitivo del nome Hugo?',['genitive','dative']),
  ('it','Genitivo oppure dativo del nome Hugo?',['genitive','dative']),
- ('sl','Kako se glasi dajalnik ali rodilnik imena Hugo?',['dative','genitive']),
- ('it','Qual è il dativo oppure genitivo del nome Hugo?',['dative','genitive']),
+ ('sl','Kako se glasi dajalnik ali rodilnik imena Hugo?',['genitive','dative']),
+ ('it','Qual è il dativo oppure genitivo del nome Hugo?',['genitive','dative']),
  ('it','Quali sono il dativo e il genitivo del nome Hugo?',['dative','genitive']),
- ('sl','Rodilnik množine ali ednine besede Hugo?',['genitive','plural','singular']),
+ ('sl','Rodilnik množine ali ednine besede Hugo?',['genitive','singular','plural']),
  ('sl','Rodilnik ednine ali množine besede Hugo?',['genitive','singular','plural']),
- ('sl','Kako se glasi rodilnik množine ali ednine besede Hugo?',['genitive','plural','singular']),
- ('it','Genitivo plurale oppure singolare del nome Hugo?',['genitive','plural','singular']),
+ ('sl','Kako se glasi rodilnik množine ali ednine besede Hugo?',['genitive','singular','plural']),
+ ('it','Genitivo plurale oppure singolare del nome Hugo?',['genitive','singular','plural']),
  ('it','Genitivo singolare oppure plurale del nome Hugo?',['genitive','singular','plural']),
 ])
 def test_portable_plan_retains_every_ambiguous_case_and_number(

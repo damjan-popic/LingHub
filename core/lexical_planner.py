@@ -37,8 +37,10 @@ _SL_NUMBER_TOKEN=r'(?:ednine|dvojine|množine)'
 _IT_NUMBER_TOKEN=r'(?:singolare|plurale)'
 _SL_SLOT=rf'{_SL_CASE_TOKEN}(?:\s+{_SL_NUMBER_TOKEN})?'
 _IT_SLOT=rf'(?:il\s+)?{_IT_CASE_TOKEN}(?:\s+{_IT_NUMBER_TOKEN})?'
+_SL_INFLECTION_MODAL=r'(?:naj|bi|lahko)'
+_SL_INFLECTION_MODIFIER=r'(?:naj|bi|lahko|pravilno|v\s+slovenščini)'
 _NAME_DESCRIPTOR=re.compile(
- r'(?:[^\W\d_]+(?:sk[oi]|šk[oi]|čk[oi])|'
+ r'(?:[^\W\d_]+(?:sk|šk|čk)(?:i|a|o|e|ega|emu|em|im|ih|ima|imi)|'
  r'slovensk\w*|francosk\w*|italijansk\w*|mošk\w*|žensk\w*|'
  r'osebn\w*|tuj\w*|lastn\w*|rojstn\w*|krstn\w*|domač\w*)',re.I)
 _SL_NAMED_ROLE=rf'(?:(?:{_NAME_DESCRIPTOR.pattern})\s+){{0,4}}(?:ime|priimek|besed[ao]|samostalnik|izraz)'
@@ -101,11 +103,67 @@ def _grammar_pairing_failure(text,language,target_span=None):
  return {'matched':True,'slots':[],'target':None,
   'ambiguity':'grammar_slot_pairing_unresolved'}
 
+def _grammar_value(surface,inventory):
+ return next((name for name,pattern in inventory
+              if surface and re.fullmatch(pattern,surface,re.I)),None)
+
+def _grammar_inventory_pattern(inventory):
+ patterns=[]
+ for _,pattern in inventory:
+  if pattern.startswith(r'\b')and pattern.endswith(r'\b'):
+   pattern=pattern[2:-2]
+  patterns.append(pattern)
+ return '(?:'+'|'.join(patterns)+')'
+
+def _grammar_slot_sequence(segment,language):
+ """Parse ordered case/number pairs without inventing a cross-product."""
+ italian=language=='it'
+ case_word=_grammar_inventory_pattern(GRAMMAR_CASES)
+ number_word=_grammar_inventory_pattern(GRAMMAR_NUMBERS)
+ article=r'(?:(?:il|lo|la)\s+)?'if italian else''
+ slot=re.compile(
+  rf'\s*{article}(?P<case>{case_word})'
+  rf'(?:\s+(?P<number>{number_word}))?\s*',re.I)
+ number_only=re.compile(rf'\s*(?P<number>{number_word})\s*',re.I)
+ separator=re.compile(
+  r'\s*(?:,|\b(?:e|ed)\b)\s*'if italian else
+  r'\s*(?:,|\b(?:in|ter)\b)\s*',re.I)
+ if re.search(r'\b(?:o|oppure)\b'if italian else r'\bali\b',segment,re.I):
+  return [],True
+ slots=[];shorthand=False;position=0
+ while position<len(segment):
+  match=slot.match(segment,position)
+  if match is None:return [],True
+  slots.append({'case':_grammar_value(match['case'],GRAMMAR_CASES),
+   'number':_grammar_value(match['number'],GRAMMAR_NUMBERS)})
+  position=match.end()
+  if position==len(segment):break
+  connector=separator.match(segment,position)
+  if connector is None or connector.end()==len(segment):return [],True
+  position=connector.end()
+  if slot.match(segment,position)is not None:continue
+  number=number_only.match(segment,position)
+  if number is None or slots[-1]['number']is None:return [],True
+  shorthand=True
+  slots.append({'case':slots[-1]['case'],
+                'number':_grammar_value(number['number'],GRAMMAR_NUMBERS)})
+  position=number.end()
+  if position==len(segment):break
+  connector=separator.match(segment,position)
+  if connector is None or connector.end()==len(segment):return [],True
+  position=connector.end()
+ identities=[(row['case'],row['number'])for row in slots]
+ if (not slots or len(slots)>6 or len(identities)!=len(set(identities))
+     or shorthand and len({row['case']for row in slots})!=1
+     or any(row['case']is None for row in slots)):
+  return [],True
+ return slots,False
+
 def structured_grammar_request(text):
  """Parse ordered case/number pairs and their one exact lexical target."""
  postfix=re.fullmatch(
-  rf'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:se\s+)?'
-  r'(?:(?:v\s+slovenščin\w*)\s+)?(?:pravilno\s+)?'
+  rf'\s*kako\s+(?:(?:{_SL_INFLECTION_MODAL})\s+)?(?:se\s+)?'
+  rf'(?:(?:{_SL_INFLECTION_MODIFIER})\s+){{0,3}}'
   rf'(?:{SL_INFLECTION_ACTION})\s+(?P<label>{_SL_NAMED_ROLE})\s+'
   rf'(?P<target>[^?!.;\n]{{1,160}}?)\s+v\s+'
   rf'(?P<grammar>{_SL_CASE_SURFACE}[^?!.;\n]{{0,120}})\s*[.?!]*\s*$',text,re.I)
@@ -114,15 +172,11 @@ def structured_grammar_request(text):
    text,'sl',*postfix.span('target'))
   if ambiguity:
    return {'matched':True,'slots':[],'target':None,'ambiguity':ambiguity}
-  words=[row.group()for row in WORD.finditer(postfix['grammar'])]
-  case=(next((name for name,pattern in GRAMMAR_CASES
-              if words and re.fullmatch(pattern,words[0],re.I)),None))
-  number=(next((name for name,pattern in GRAMMAR_NUMBERS
-                if len(words)==2 and re.fullmatch(pattern,words[1],re.I)),None))
-  if case is None or len(words)>2 or len(words)==2 and number is None:
+  slots,invalid=_grammar_slot_sequence(postfix['grammar'],'sl')
+  if invalid:
    return {'matched':True,'slots':[],'target':None,
            'ambiguity':'grammar_slot_pairing_unresolved'}
-  return {'matched':True,'slots':[{'case':case,'number':number}],
+  return {'matched':True,'slots':slots,
           'target':target,'ambiguity':None}
  wrappers=(
   re.compile(r'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
@@ -133,33 +187,8 @@ def structured_grammar_request(text):
  for language,pattern in _GRAMMAR_REQUESTS:
   match=pattern.fullmatch(text)
   if not match:continue
-  grammar=match['grammar'];connector=(r'\b(?:ali|in|ter)\b'if language=='sl'
-   else r'\b(?:oppure|o|e|ed)\b')
-  disjunctive=(r'\bali\b'if language=='sl'else r'\b(?:o|oppure)\b')
-  if re.search(disjunctive,grammar,re.I):
-   return _grammar_pairing_failure(text,language,match.span('target'))
-  parts=[part.strip()for part in re.split(connector,grammar,flags=re.I)]
-  slots=[];shorthand=False
-  for part in parts:
-   cleaned=re.sub(r'^il\s+','',part,flags=re.I)
-   words=[word.group().casefold()for word in WORD.finditer(cleaned)]
-   if words and words[0]in GRAMMAR_CASE_NAMES:
-    if len(words)>2 or(len(words)==2 and words[1]not in GRAMMAR_NUMBER_NAMES):
-     return _grammar_pairing_failure(text,language,match.span('target'))
-    slots.append({'case':GRAMMAR_CASE_NAMES[words[0]],
-     'number':GRAMMAR_NUMBER_NAMES.get(words[1])if len(words)==2 else None})
-   elif len(words)==1 and words[0]in GRAMMAR_NUMBER_NAMES:
-    if not slots or len({row['case']for row in slots})!=1:
-     return _grammar_pairing_failure(text,language,match.span('target'))
-    shorthand=True
-    slots.append({'case':slots[-1]['case'],'number':GRAMMAR_NUMBER_NAMES[words[0]]})
-   else:
-    return _grammar_pairing_failure(text,language,match.span('target'))
-  # Once two distinct cases occur, a number-only conjunct has no unique owner.
-  if shorthand and len({row['case']for row in slots})!=1:
-   return _grammar_pairing_failure(text,language,match.span('target'))
-  if (len(slots)>6
-      or len({(row['case'],row['number'])for row in slots})!=len(slots)):
+  slots,invalid=_grammar_slot_sequence(match['grammar'],language)
+  if invalid:
    return _grammar_pairing_failure(text,language,match.span('target'))
   target,ambiguity=_validated_grammar_target(
    text,language,*match.span('target'))
@@ -532,6 +561,11 @@ def portable_request_plan(interpretation,language='und'):
  else:cases,numbers=authoritative_grammar_slots(text,context)
  broad_inflection=bool(re.search(rf'\b(?:{INFLECTION_CUE})\b',text,re.I))
  grammar_ambiguities=interpretation.get('grammar_ambiguities',[])
+ if grammar_ambiguities:
+  case_order={name:index for index,(name,_)in enumerate(GRAMMAR_CASES)}
+  number_order={name:index for index,(name,_)in enumerate(GRAMMAR_NUMBERS)}
+  cases=sorted(set(cases),key=case_order.__getitem__)
+  numbers=sorted(set(numbers),key=number_order.__getitem__)
  if cases:
   portable_morphology=cases+(
    ['inflection']if broad_inflection and grammar_ambiguities else[])

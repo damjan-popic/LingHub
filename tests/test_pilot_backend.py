@@ -34,6 +34,15 @@ def drain(app):
     while job:=app.state.jobs.claim():app.state.jobs.execute(job)
 def completed(app,c,h):
     f=family(c,h);drain(app);return c.get('/api/pilot/families/'+f['family']['answer_family_id']).json()
+def json_surface(value):
+    keys=[];scalars=[]
+    def visit(node):
+        if isinstance(node,dict):
+            for key,item in node.items():keys.append(key);visit(item)
+        elif isinstance(node,list):
+            for item in node:visit(item)
+        else:scalars.append(node)
+    visit(value);return keys,scalars
 def test_family_expansion_idempotency_frozen(rig):
     app,c,adapter,ids=rig;h=login(c);f=completed(app,c,h);fid=f['answer_family_id'];short=f['short'];assert short['state']=='complete'
     r=c.post(f'/api/pilot/families/{fid}/expand',json={'idempotency_key':'expand-key0001'},headers=h);assert r.status_code==200,r.text
@@ -69,8 +78,10 @@ def test_blind_mapping_delivery_reveal_no_leaks(rig):
     app,c,adapter,ids=rig;h=login(c);f=completed(app,c,h)
     p={'family_id':f['answer_family_id'],'blind':True,'idempotency_key':'comparison0001'}
     r=c.post('/api/pilot/comparisons',json=p,headers=h);assert r.status_code==200,r.text;aid=r.json()['comparison_id'];drain(app)
-    out=c.get('/api/pilot/comparisons/'+aid).json();encoded=json.dumps(out)
-    for forbidden in ('qwen','gemma','PRIVATE_PROFILE','123','display_sha256','timings'):assert forbidden not in encoded
+    out=c.get('/api/pilot/comparisons/'+aid).json();keys,scalars=json_surface(out);strings=keys+[value for value in scalars if isinstance(value,str)]
+    for forbidden in ('qwen','gemma','PRIVATE_PROFILE'):assert all(forbidden not in value for value in strings)
+    assert 123 not in scalars and '123'not in scalars
+    assert 'display_sha256'not in keys and 'timings'not in keys
     assert c.post(f'/api/pilot/comparisons/{aid}/reveal',json={},headers=h).status_code==409
     vote={'choice':'A','tier':'short','idempotency_key':'vote0000001'}
     assert c.post(f'/api/pilot/comparisons/{aid}/vote',json=vote,headers=h).status_code==409

@@ -29,6 +29,30 @@ def test_portable_plan_distinguishes_narrow_case_from_broad_inflection():
  assert broad['slot_focus']is None
  assert broad['request_plan']['requested_facets']==['inflection']
 
+
+@pytest.mark.parametrize(('question','target','case'),[
+ ('Kako se sklanja ime Hugo v rodilniku?','Hugo','genitive'),
+ ('Kako pregibamo priimek Novak v dajalniku?','Novak','dative'),
+])
+def test_postfixed_case_inflection_binds_one_named_target_and_ordered_slot(
+        question,target,case):
+ request=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+ assert request['target_spans']==[{
+  'text':target,'start':question.index(target),
+  'end':question.index(target)+len(target),
+  'basis':'natural lexical object; whole original span'}]
+ assert request['requested_grammar_slots']==[{'case':case,'number':None}]
+ assert request['requested_facets']==[case]
+ assert request['ambiguities']==[]
+
+
+def test_postfixed_case_inflection_does_not_collapse_coordinated_names():
+ question='Kako se sklanja ime Hugo in Miha v rodilniku?'
+ request=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+ assert request['target_spans']==[]
+ assert request['requested_grammar_slots']==[]
+ assert request['ambiguities']==['grammar_target_binding_unresolved']
+
 @pytest.mark.parametrize('language,text,case',[
  ('sl','Imenovalnik imena Hugo?','nominative'),
  ('sl','Rodilnik imena Hugo?','genitive'),

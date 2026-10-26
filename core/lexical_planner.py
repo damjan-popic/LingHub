@@ -32,6 +32,7 @@ GRAMMAR_NUMBER_NAMES={
  'dvojine':'dual','množine':'plural','plurale':'plural'}
 _SL_CASE_TOKEN=r'(?:imenovalnik|rodilnik|dajalnik|tožilnik|mestnik|orodnik)'
 _IT_CASE_TOKEN=r'(?:nominativo|genitivo|dativo|accusativo|locativo|strumentale)'
+_SL_CASE_SURFACE=r'(?:imenovalnik\w*|rodilnik\w*|dajalnik\w*|tožilnik\w*|mestnik\w*|orodnik\w*)'
 _SL_NUMBER_TOKEN=r'(?:ednine|dvojine|množine)'
 _IT_NUMBER_TOKEN=r'(?:singolare|plurale)'
 _SL_SLOT=rf'{_SL_CASE_TOKEN}(?:\s+{_SL_NUMBER_TOKEN})?'
@@ -96,6 +97,22 @@ def _grammar_pairing_failure(text,language,target_span=None):
 
 def structured_grammar_request(text):
  """Parse ordered case/number pairs and their one exact lexical target."""
+ postfix=re.fullmatch(
+  rf'\s*kako\s+(?:(?:naj|lahko)\s+)?(?:se\s+)?(?:{SL_INFLECTION_ACTION})\s+'
+  r'(?P<label>ime|priimek|besedo|samostalnik|izraz)\s+'
+  rf'(?P<target>[^?!.;\n]{{1,160}}?)\s+v\s+'
+  rf'(?P<case>{_SL_CASE_SURFACE})\s*[.?!]*\s*$',text,re.I)
+ if postfix:
+  target,ambiguity=_validated_grammar_target(
+   text,'sl',*postfix.span('target'))
+  if ambiguity:
+   return {'matched':True,'slots':[],'target':None,'ambiguity':ambiguity}
+  case=next((name for name,pattern in GRAMMAR_CASES
+             if re.fullmatch(pattern,postfix['case'],re.I)),None)
+  if case is None:
+   return _grammar_pairing_failure(text,'sl',postfix.span('target'))
+  return {'matched':True,'slots':[{'case':case,'number':None}],
+          'target':target,'ambiguity':None}
  wrappers=(
   re.compile(r'\s*(?:kako\s+se\s+(?:glasi|glasita|glasijo)\s+)?'
              rf'(?:{_SL_CASE_TOKEN})\b',re.I),

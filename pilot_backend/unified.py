@@ -26,7 +26,8 @@ REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
-    'terminology_equivalence','bounded_attestation','exact_source_excerpt'})
+    'terminology_equivalence','curated_recommendation','bounded_attestation',
+    'exact_source_excerpt'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
     'text','claim_id','support_ids'})
 ANSWER_PLAN_CLAIM_FIELDS = frozenset({'claim_id','text','support_ids','fact_ids','section',

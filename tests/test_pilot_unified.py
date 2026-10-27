@@ -324,6 +324,15 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
     assert output['display_blocks'][0]['evidence_ids']==['known']
 
 
+def test_deterministic_curated_recommendation_uses_the_same_bound_graph():
+    result=bounded_answer_plan_result()
+    result['display_blocks'][0]['unit_type']='curated_recommendation'
+    output=run_bounded_answer_plan(result)
+    assert output['generation']['status']=='generated'
+    assert output['generation_status']=='deterministic_bounded_answer_plan'
+    assert output['display_blocks'][0]['evidence_ids']==['known']
+
+
 @pytest.mark.parametrize('locator',[
     {},
     {'section':'A'},

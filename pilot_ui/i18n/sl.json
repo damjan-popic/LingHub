@@ -340,7 +340,7 @@
   "limitation_source_scope": "Odgovor je omejen na obseg navedenih virov.",
   "limitation_uncertain_entry_boundary": "Meja izvirnega zapisa ni zanesljivo določena. Preverite izvirnik.",
   "limitation_unsupported_inference": "Podpora za del sklepanja v odgovoru ni potrjena. Preverite navedene izvirne odlomke.",
-  "limitation_unsupported_interpretation": "Viri so na voljo, vendar njihove vsebine za ta odgovor ni mogoče dovolj zanesljivo razložiti. Preverite navedene izvirne odlomke.",
+  "limitation_unsupported_interpretation": "Viri so na voljo, vendar jih aplikacija za ta odgovor ni mogla dovolj zanesljivo razložiti.",
   "beta_more": "Viri",
   "beta_less": "Skrijte vire",
   "beta_sources_heading": "Najdeni viri",

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {answerNotes,noAnswerFeedback} from '../pilot_ui/core.mjs';
 import {answerCopyText} from '../pilot_ui/interface-details.mjs';
 
-test('source-present interpretation blockers remain qualifications rather than no-hit',()=>{
+test('source-present interpretation blockers show one notice without citation laundering',()=>{
   const tier={status:'validated',answer_kind:'source_only',generation_status:'returned_processing_limitation',
     evidence_state:{status:'source_present_unresolved_interpretation'},
     blocks:[{block_id:'notice',text:'Source excerpt remains available.'}],
@@ -14,11 +14,17 @@ test('source-present interpretation blockers remain qualifications rather than n
     limitations:[{code:'unsupported_interpretation',scope:'answer',claim_ids:[]}]};
   const before=JSON.stringify(tier),notes=answerNotes(tier);
   assert.equal(noAnswerFeedback(tier),false);
-  assert.deepEqual(notes.map(note=>note.key),['limitation_unsupported_interpretation']);
-  assert.deepEqual(notes[0].evidence.map(item=>[item.citation_id,item.note_number]),[['source',1],['other',2]]);
-  const copied=answerCopyText('Notice\nInterpretation note [1][2]',tier,item=>item.source_slug,'Sources');
-  assert.equal(copied,'Notice\nInterpretation note [1][2]\n\nSources\n[1] advice — Original source\n[2] dictionary — Other original');
-  assert(!copied.includes('Same original'),'The first preserved opening identity credits the source record once');
+  assert.deepEqual(notes,[],'The answer block is already the one processing notice');
+  assert.equal(answerCopyText('Notice',tier,item=>item.source_slug,'Sources'),'Notice');
+  const noteOnly=answerNotes({...tier,blocks:[]});
+  assert.deepEqual(noteOnly.map(note=>[note.key,note.evidence]),[
+    ['limitation_unsupported_interpretation',[]]
+  ],'A standalone processing note does not cite unrelated retrieved records');
+  const substantive=answerNotes({...tier,answer_kind:'generated',generation_status:'generated',
+    blocks:[{block_id:'claim',text:'Supported bounded answer.',evidence_ids:['source']}]});
+  assert.deepEqual(substantive.map(note=>[note.key,note.evidence.map(item=>item.citation_id)]),[
+    ['limitation_unsupported_interpretation',['source']]
+  ],'A substantive answer keeps its interpretation qualification and exact supporting source');
   assert.equal(JSON.stringify(tier),before);
   assert.equal(answerNotes({...tier,limitations:[{code:'arbitrary_private_code',scope:'answer',claim_ids:[]}]}).length,0);
   for(const malformed of [
@@ -48,6 +54,7 @@ test('Slovene and Italian interpretation labels are readable and the note region
     const labels=JSON.parse(fs.readFileSync(new URL('../pilot_ui/i18n/'+locale+'.json',import.meta.url)));
     const text=labels.limitation_unsupported_interpretation;
     assert.equal(typeof text,'string');assert(text.length>70);assert(!/[<>{}]/.test(text));assert(text.endsWith('.'));
+    assert(!/odlomk|passagg/i.test(text),'A processing failure does not promise excerpts or cited passages');
   }
   const source=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');
   assert.match(source,/class:'answer-notes',lang:state\.locale,'aria-label':t\('answer_notes'\)/);

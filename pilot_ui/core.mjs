@@ -165,6 +165,14 @@ export function answerNotes(tier) {
     if(typeof value==='object' && value?.scope==='claim' && (!Array.isArray(value.claim_ids) || !value.claim_ids.some(id=>blocks.some(block=>block.block_id===id))))continue;
     const interpretation=value?.code==='unsupported_interpretation';
     if(interpretation && (value?.scope!=='answer'||tier?.evidence_state?.status!=='source_present_unresolved_interpretation'||!visibleEvidence.length))continue;
+    const processingInterpretation=interpretation && tier?.answer_kind==='source_only' &&
+      tier?.generation_status==='returned_processing_limitation';
+    // A source-only processing result already carries its one primary notice
+    // as the answer block.  Repeating a second generic warning beneath it is
+    // not additional qualification, and attaching every retrieved source to
+    // that warning makes the links look like support for a conclusion that was
+    // never produced.
+    if(processingInterpretation && blocks.length)continue;
     if(!text && !limitationKeys[value?.code])continue;
     const ids=new Set(blocks.filter(block=>value?.scope!=='claim' || value.claim_ids.includes(block.block_id)).flatMap(block=>block.evidence_ids || []));
     const comparison=['comparison_coverage_incomplete','comparison_explanation_incomplete'].includes(value?.code);
@@ -174,12 +182,10 @@ export function answerNotes(tier) {
       seen.add(item.evidence_id);decisionSources.push({evidence_id:item.evidence_id,title:item.title});
     }
     let noteEvidence=evidence.filter(item=>ids.has(eid(item)));
-    if(interpretation&&value?.scope==='answer'&&!noteEvidence.length){
-      // The source-only notice has no claim scope. Link each visible record from
-      // the qualification without adding support IDs to the saved notice block.
-      const records=new Set();noteEvidence=[];
-      for(const item of visibleEvidence){const record=JSON.stringify([item.source_slug,item.external_id||eid(item),item.source_revision]);if(records.has(record))continue;records.add(record);noteEvidence.push({...item,note_number:noteEvidence.length+1});}
-    }
+    // A processing limitation has no supported claim.  The source explorer
+    // keeps the records available without turning them into citations on the
+    // limitation itself.
+    if(processingInterpretation)noteEvidence=[];
     add({category:value?.code || 'limitation',...(text?{text}:{key:limitationKeys[value.code],values:{}}),evidence:noteEvidence,...(decisionSources.length?{decisionSources}:{})});
   }
   if(hasSupportedAnswer(tier)) {

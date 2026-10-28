@@ -92,6 +92,7 @@ test('long wait uses pending state, threshold and actual returned results only',
 
 test('release label is immutable served metadata, independent of browser time and refreshed capabilities',()=>{
   assert(Object.isFrozen(publicRelease));
+  assert.deepEqual(publicRelease,{version:'0.5.0',date:'2026-10-27'});
   const release={version:'0.1.1',date:'2026-09-19'};
   assert.equal(releaseLabel(release,'sl',t),'Version 0.1.1 · 19. 9. 2026');
   assert.equal(releaseLabel(release,'it',t),'Version 0.1.1 · 19.9.2026');

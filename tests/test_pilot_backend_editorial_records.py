@@ -209,7 +209,9 @@ def test_service_token_is_sent_only_to_explicit_editorial_detail(monkeypatch):
                       editorial_full_records=True, editorial_operator_policy_id=editorial.OPERATOR_POLICY_ID)
     for path in ['/api/search?q=query', '/api/health', '/api/editorial/records/jezikovna_posta/jezikovna_posta%3Afixture-1']:
         gateway.request(path, None, gateway.klikai_url)
-    assert [value for path,value in observed] == [None, None, token]
+    gateway.interpret('Exact question','Exact context','sl','it')
+    assert observed[-1][0]=='/internal/pilot/interpret'
+    assert [value for path,value in observed] == [None, None, token, token]
     for policy, enabled in [('arbitrary', True), (editorial.OPERATOR_POLICY_ID, False)]:
         with pytest.raises(ValueError):
             Gateway('http://127.0.0.1:18320',token,klikai_url='http://127.0.0.1:8000',

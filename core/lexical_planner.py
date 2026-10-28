@@ -640,6 +640,7 @@ def negated_existence_frame(text,spans):
  return bare(stripped)
 
 def plan(text,context,language,analysis,request_plan=None):
+ supplied_plan=copy.deepcopy(request_plan)if request_plan is not None else None
  words=list(WORD.finditer(text));requested=[k for k,p in FACETS.items()if re.search(p,text,re.I)]
  if ('morphology'in requested and'translation'in requested
      and not re.search(r'prevod|preved|prevaj|ustreznic|traduc|traduz|'
@@ -655,10 +656,30 @@ def plan(text,context,language,analysis,request_plan=None):
   if a<b and not any(s['start']==a and s['end']==b for s in spans):spans.append({'start':a,'end':b,'text':text[a:b],'basis':why})
  if request_plan is not None:
   if request_plan.get('version')!=REQUEST_VERSION or request_plan.get('original')!=text or request_plan.get('context','')!=context:raise ValueError('Request plan input differs')
-  for target in request_plan.get('target_spans',[]):
+  requested=request_plan.get('requested_facets')
+  slots=request_plan.get('requested_grammar_slots')
+  ambiguities=request_plan.get('ambiguities')
+  targets=request_plan.get('target_spans')
+  if (not isinstance(requested,list)or any(not isinstance(value,str)for value in requested)
+      or not isinstance(slots,list)or any(not isinstance(value,dict)
+       or value.get('case')not in {'nominative','genitive','dative','accusative','locative','instrumental'}
+       or value.get('number')not in {None,'singular','dual','plural'} for value in slots)
+      or not isinstance(ambiguities,list)or any(not isinstance(value,str)for value in ambiguities)
+      or not isinstance(targets,list)or len(targets)>4):
+   raise ValueError('Request plan interpretation differs')
+  effective=text+'\n'+context if context else text
+  def bound(target):
+   if not isinstance(target,dict)or target.get('span_scope')not in {None,'context'}:return False
    a,b=target.get('start'),target.get('end')
-   source=text+'\n'+context if target.get('span_scope')=='context'else text
-   if type(a)is not int or type(b)is not int or not 0<=a<b<=len(source) or source[a:b]!=target.get('text') or (target.get('span_scope')=='context'and a<=len(text)):raise ValueError('Request target span differs')
+   source=effective if target.get('span_scope')=='context'else text
+   if (type(a)is not int or type(b)is not int or not 0<=a<b<=len(source)
+       or source[a:b]!=target.get('text')
+       or target.get('span_scope')=='context'and a<=len(text)):return False
+   nested=target.get('context_span')
+   return nested is None or bound(nested)
+  if not all(bound(target)for target in targets):
+   raise ValueError('Request target span differs')
+  for target in targets:
    spans.append(copy.deepcopy(target))
  elif grammar['matched']:
   if grammar['target']:
@@ -667,7 +688,9 @@ def plan(text,context,language,analysis,request_plan=None):
  elif is_referential_request(text):
   target=bound_context_target(text,context,language)
   if target:spans.append(target)
- if spans:
+ if supplied_plan is not None:
+  kind='comparison'if len(spans)>1 else'word'if spans and lexical_word(text)else'phrase'if spans and len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
+ elif spans:
   kind='comparison'if len(spans)>1 else'word'if lexical_word(text)else'phrase'if len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
  elif grammar['matched']:pass
  elif is_referential_request(text):pass
@@ -710,10 +733,10 @@ def plan(text,context,language,analysis,request_plan=None):
   if not spans and len(words)<=8 and words:
    for w in words:
     if w.group().casefold()not in SCAFFOLD and not any(re.search(p,w.group(),re.I)for p in FACETS.values()):add(w.start(),w.end(),'degraded lexical candidate; source match required')
- corrected=corrected_context_targets(text,context)
+ corrected=None if supplied_plan is not None else corrected_context_targets(text,context)
  if corrected is not None:
   spans=corrected;kind='comparison'if len(corrected)>1 else'question'
- if len(spans)>1 and len({s['text'].casefold()for s in spans})==1 and len({s['text']for s in spans})>1 and 'orthography'not in requested:requested.append('orthography')
+ if supplied_plan is None and len(spans)>1 and len({s['text'].casefold()for s in spans})==1 and len({s['text']for s in spans})>1 and 'orthography'not in requested:requested.append('orthography')
  if kind=='question'and len(spans)==1 and len(list(WORD.finditer(spans[0]['text'])))>1:kind='phrase'
  langs=[language]if language in {'sl','it'}else ['sl','it']
  # Direction cues describe target policy, not certain input-language detection.
@@ -722,14 +745,25 @@ def plan(text,context,language,analysis,request_plan=None):
   s['lemma_candidates']=list(dict.fromkeys(w['lemma']for w in hints if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end']and w['lemma']))[:6]
   s['lemma_sequences']=list(dict.fromkeys(' '.join(w['lemma']for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end'])for r in analysis.get('raw_engines',{}).values()))
   s['context_features']=[{'engine':name,'feats':w['feats'],'upos':w['upos']}for name,r in analysis.get('raw_engines',{}).items()for w in r.get('analysis',{}).get('words',[])if w.get('start')is not None and s['start']<=w['start']and w['end']<=s['end']]
- grammar_slots,grammar_ambiguity=authoritative_grammar_sequence(grammar,context)
- cases,numbers=authoritative_grammar_slots(text,context)
+ if supplied_plan is not None:
+  grammar_slots=copy.deepcopy(supplied_plan['requested_grammar_slots'])
+  grammar_ambiguities=copy.deepcopy(supplied_plan['ambiguities'])
+ else:
+  grammar_slots,grammar_ambiguity=authoritative_grammar_sequence(grammar,context)
+  grammar_ambiguities=[grammar_ambiguity]if grammar_ambiguity else[]
+ if supplied_plan is not None:
+  cases=list(dict.fromkeys(row.get('case')for row in grammar_slots
+                           if isinstance(row.get('case'),str)))
+  numbers=list(dict.fromkeys(row.get('number')for row in grammar_slots
+                             if isinstance(row.get('number'),str)))
+ else:
+  cases,numbers=authoritative_grammar_slots(text,context)
  case=grammar_slots[0]['case']if len(grammar_slots)==1 else None
- if not grammar_slots and not cases:
+ if supplied_plan is None and not grammar_slots and not cases:
   case='genitive'if re.search(r'\bbrez\b',text,re.I)or negated_existence_frame(text,spans)else'nominative'if re.search(r'\bkdo je\b',text,re.I)else None
  number=(grammar_slots[0]['number']if len(grammar_slots)==1 else
          numbers[0]if len(numbers)==1 else'singular'if case and not cases else None)
- result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'requested_grammar_slots':grammar_slots,'grammar_ambiguities':[grammar_ambiguity]if grammar_ambiguity else[],'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':number,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
+ result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'requested_grammar_slots':grammar_slots,'grammar_ambiguities':grammar_ambiguities,'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':number,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
 
- result['request_plan']=portable_request_plan(result,language)
+ result['request_plan']=supplied_plan if supplied_plan is not None else portable_request_plan(result,language)
  return result

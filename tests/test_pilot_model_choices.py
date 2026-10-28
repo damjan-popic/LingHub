@@ -226,6 +226,21 @@ def test_generation_http_failure_preserves_status_and_only_known_code(monkeypatc
     assert calls==['/internal/pilot/generate']
 
 
+def test_freeze_plan_mismatch_http_failure_remains_request_local(monkeypatch):
+    calls=[]
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(409,json={'detail':'PILOT_REQUEST_PLAN_MISMATCH'})
+    original=httpx.Client
+    monkeypatch.setattr(httpx,'Client',lambda **kwargs:original(
+        transport=httpx.MockTransport(handler),**kwargs))
+    with pytest.raises(Failure,match='request_plan_mismatch')as error:
+        Gateway('http://127.0.0.1:18320','synthetic-token-'*4).request(
+            '/internal/pilot/freeze',{'request_plan':{}})
+    assert error.value.status==409
+    assert calls==['/internal/pilot/freeze']
+
+
 @pytest.mark.parametrize('code,stage,reason,error_type',[
     ('invalid_generated_content','response_json','invalid_final_json','JSONDecodeError'),
     ('malformed_provider_response','response_shape','invalid_content_type','ValueError'),

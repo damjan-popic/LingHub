@@ -5,6 +5,7 @@ import pytest
 from core.lexical_planner import plan
 from core.lexical_focus import focus_profile
 from pilot_backend import collation, unified
+from pilot_backend.security import Failure
 
 
 @pytest.mark.parametrize('question,target', [
@@ -182,6 +183,141 @@ def test_explicit_context_resolves_one_target_without_rewriting_question():
     assert effective[target['start']:target['end']]=='modra mapa'
     assert p['original']==q and p['context']==context
     assert plan(q,context,'sl',{},request_plan=p['request_plan'])['targets']==p['targets']
+
+
+def test_supplied_plan_is_projected_and_preserved_while_analyzer_only_enriches_targets():
+    question='Kako se sklanja ime Aljoša?'
+    start=question.index('Aljoša')
+    supplied={'version':'klikai.request-plan.v1','original':question,'context':'',
+        'target_spans':[{'text':'Aljoša','start':start,'end':start+6,
+                         'basis':'authenticated CORE interpretation'}],
+        'candidate_lemmas':[],'operation':'rule_lookup','source_language':'sl',
+        'translation_language':None,'response_language':None,
+        'requested_facets':['genitive'],
+        'requested_grammar_slots':[{'case':'genitive','number':None}],
+        'domain':None,'jurisdiction':None,'requested_source':None,
+        'requested_edition':None,'ambiguities':['synthetic_preserved_ambiguity'],
+        'confidence':'bounded_surface'}
+    analysis={'raw_engines':{'fixture':{'analysis':{'words':[{
+        'text':'Aljoša','start':start,'end':start+6,'lemma':'Aljoša',
+        'upos':'PROPN','feats':{'Case':'Nom'}}]}}}}
+    result=plan(question,'','sl',analysis,request_plan=supplied)
+    assert result['request_plan']==supplied and result['request_plan']is not supplied
+    assert result['requested_facets']==supplied['requested_facets']
+    assert result['requested_grammar_slots']==supplied['requested_grammar_slots']
+    assert result['grammar_ambiguities']==supplied['ambiguities']
+    assert result['targets'][0]['text']=='Aljoša'
+    assert result['targets'][0]['lemma_candidates']==['Aljoša']
+
+
+def authoritative_empty_plan(question,facets=None,ambiguities=None):
+    return {'version':'klikai.request-plan.v1','interpretation_version':'fixture-v1',
+        'original':question,'context':'','target_spans':[],
+        'candidate_lemmas':[],'operation':None,'source_language':'sl',
+        'translation_language':None,'response_language':'sl',
+        'requested_facets':facets or [],'requested_grammar_slots':[],
+        'domain':None,'jurisdiction':None,'requested_source':None,
+        'requested_edition':None,'ambiguities':ambiguities or [],
+        'confidence':'broad_routes'}
+
+
+@pytest.mark.parametrize(('question','facets','ambiguities'),[
+    ('Ali lahko danes pridem ali jutri?',[],[]),
+    ('Kako se sklanjata imeni Marko in Hugo?',['inflection'],
+     ['coordinated_target_unresolved']),
+])
+def test_authenticated_empty_plan_never_falls_through_to_web_targets(
+        question,facets,ambiguities):
+    supplied=authoritative_empty_plan(question,facets,ambiguities)
+    result=plan(question,'','sl',{'raw_engines':{}},request_plan=supplied)
+    assert result['targets']==[]
+    assert result['request_plan']==supplied
+    assert result['requested_facets']==facets
+    assert result['grammar_ambiguities']==ambiguities
+
+
+class ProfileProjectionGateway:
+    lexical_profiles=True
+    linghub_url='http://127.0.0.1:8010'
+    klikai_url=None
+
+    def __init__(self,response=None):
+        self.response=response
+        self.calls=[]
+
+    def request(self,path,payload,base=None):
+        self.calls.append((path,deepcopy(payload),base))
+        if path=='/v1/capabilities':
+            return {'lexical_profile':{'available':self.response is not None}}
+        if path=='/v1/lexical/profile':return deepcopy(self.response)
+        raise AssertionError(path)
+
+
+def profile_response(question,request_plan):
+    return {'request_schema_version':'linghub.lexical-profile.v1',
+        'query':{'text':question},
+        'interpretation':{'targets':[],
+            'requested_facets':deepcopy(request_plan['requested_facets']),
+            'requested_grammar_slots':[],
+            'grammar_ambiguities':deepcopy(request_plan['ambiguities']),
+            'request_plan':deepcopy(request_plan)},
+        'provenance':{'resource_editions':{}}}
+
+
+@pytest.mark.parametrize(('question','facets','ambiguities'),[
+    ('Ali lahko danes pridem ali jutri?',[],[]),
+    ('Kako se sklanjata imeni Marko in Hugo?',['inflection'],
+     ['coordinated_target_unresolved']),
+])
+def test_enabled_profile_keeps_authenticated_empty_projection(
+        question,facets,ambiguities):
+    supplied=authoritative_empty_plan(question,facets,ambiguities)
+    gateway=ProfileProjectionGateway(profile_response(question,supplied))
+    result=collation.collect(gateway,{'question':question,'context':'',
+        'input_language':'sl','locale':'sl','request_plan':supplied},automatic=True)
+    capture,=result['captures']
+    assert capture['response']['interpretation']['targets']==[]
+    assert capture['response']['interpretation']['request_plan']==supplied
+    assert [row[0]for row in gateway.calls]==[
+        '/v1/capabilities','/v1/lexical/profile']
+
+
+@pytest.mark.parametrize(('question','facets','ambiguities'),[
+    ('Ali lahko danes pridem ali jutri?',[],[]),
+    ('Kako se sklanjata imeni Marko in Hugo?',['inflection'],
+     ['coordinated_target_unresolved']),
+])
+def test_unavailable_profile_does_not_use_web_semantic_fallback(
+        question,facets,ambiguities):
+    supplied=authoritative_empty_plan(question,facets,ambiguities)
+    gateway=ProfileProjectionGateway()
+    assert collation.collect(gateway,{'question':question,'context':'',
+        'input_language':'sl','locale':'sl','request_plan':supplied},automatic=True) is None
+    assert [row[0]for row in gateway.calls]==['/v1/capabilities']
+
+
+@pytest.mark.parametrize('field',[
+    'targets','requested_facets','requested_grammar_slots','grammar_ambiguities',
+    'request_plan',
+])
+def test_enabled_profile_rejects_projection_outside_authenticated_plan(field):
+    question='Ali lahko danes pridem ali jutri?'
+    supplied=authoritative_empty_plan(question)
+    response=profile_response(question,supplied)
+    mutations={
+        'targets':[{'text':'pridem','start':10,'end':16,
+                    'basis':'local fallback'}],
+        'requested_facets':['usage'],
+        'requested_grammar_slots':[{'case':'genitive','number':None}],
+        'grammar_ambiguities':['local_ambiguity'],
+        'request_plan':dict(supplied,confidence='local_override'),
+    }
+    response['interpretation'][field]=mutations[field]
+    gateway=ProfileProjectionGateway(response)
+    with pytest.raises(Failure,match='invalid_answer'):
+        collation.collect(gateway,{'question':question,'context':'',
+            'input_language':'sl','locale':'sl','request_plan':supplied},
+            automatic=True)
 
 
 @pytest.mark.parametrize('context',['','Nekaj ni jasno. Imam drugo vprašanje?','»modra mapa« ali »rdeča torba«'])

@@ -137,7 +137,7 @@ def test_automatic_route_is_opt_in_and_explicit_requested_tools_are_unchanged():
     assert gateway.calls==[]
 
 
-def test_normal_unified_freeze_retains_documentary_sources_with_rule_no_match_or_outage():
+def test_normal_unified_freeze_retains_documentary_sources_without_local_tool_fallback():
     from test_pilot_unified import UnifiedGateway
     class OrdinaryGateway(UnifiedGateway):
         linghub_url='http://127.0.0.1:8010'
@@ -155,8 +155,9 @@ def test_normal_unified_freeze_retains_documentary_sources_with_rule_no_match_or
         request=next(payload for path,payload,_ in gateway.calls if path=='/internal/pilot/freeze')
         assert request['question']==family()['question']
         coverage=next(row for row in request['unified_evidence']['retrieval']if row['family']=='linghub_tools')
-        assert coverage['status']==('timeout'if fail else'no_match')
-        assert ('tool_evidence'in request) is (not fail)
+        assert coverage['status']=='not_documentary'
+        assert coverage['reason']=='no_applicable_lookup_route'
+        assert 'tool_evidence'not in request and gateway.analyzer.calls==[]
         assert not any(path.endswith('/generate')for path,_,_ in gateway.calls)
 
 

@@ -51,6 +51,10 @@ _TARGET_LANGUAGE = {
     'sl': re.compile(r'\b(?:v\s+slovenščini|in\s+sloveno)\b', re.I),
     'it': re.compile(r'\b(?:v\s+italijanščini|in\s+italiano)\b', re.I),
 }
+_TARGET_ENRICHMENTS = frozenset({
+    'lemma_candidates', 'lemma_sequences', 'context_features',
+    'resource_identity_preference',
+})
 
 
 def single_word_plan(question, input_language='und'):
@@ -147,33 +151,80 @@ def plan(question, input_language='und', focus=None):
     return {'version':VERSION,'operations':operations,'focus':focus,'input_language':input_language,'status':'ready','routing_kind':'explicit_requested_operations_and_focus_field'if explicit_focus else'explicit_requested_operations_and_quoted_focus'}
 
 
+def _profile_matches_request_plan(response, request_plan):
+    interpretation=response.get('interpretation')
+    if not isinstance(interpretation,dict):return False
+    expected=request_plan.get('target_spans')
+    observed=interpretation.get('targets')
+    if (not isinstance(expected,list)or not isinstance(observed,list)
+            or len(observed)!=len(expected)
+            or interpretation.get('request_plan')!=request_plan
+            or interpretation.get('requested_facets')!=request_plan.get('requested_facets')
+            or interpretation.get('requested_grammar_slots')!=request_plan.get('requested_grammar_slots')
+            or interpretation.get('grammar_ambiguities')!=request_plan.get('ambiguities')):
+        return False
+    for actual,bound in zip(observed,expected):
+        if (not isinstance(actual,dict)or not isinstance(bound,dict)
+                or {key:value for key,value in actual.items()
+                    if key not in _TARGET_ENRICHMENTS}!=bound):
+            return False
+    return True
+
+
+def _authenticated_plan_route(family, request_plan):
+    targets=request_plan.get('target_spans')
+    if not isinstance(targets,list)or len(targets)!=1:return None
+    target=targets[0]
+    if (not isinstance(target,dict)or not isinstance(target.get('text'),str)
+            or not target['text'].strip()or len(target['text'])>512):return None
+    input_language=family.get('input_language','und')
+    facets=request_plan.get('requested_facets')
+    if not isinstance(facets,list):return None
+    operations=[name for name in _PATTERNS if name in facets]
+    if not operations:return None
+    ready=not any(name!='terminology'for name in operations)or input_language in {'sl','it'}
+    routing={'version':VERSION,'operations':operations,'focus':target['text'],
+        'status':'ready'if ready else'clarification_required',
+        'routing_kind':'authenticated_request_plan_explicit_operations',
+        'reason':'authenticated_request_plan_explicit_operations'
+            if ready else'explicit_tool_context_required'}
+    if input_language in {'sl','it'}:routing['input_language']=input_language
+    start,end=target.get('start'),target.get('end')
+    if type(start)is not int or type(end)is not int:return None
+    routing['focus_span']={'start':start,'end':end,
+        'offset_basis':'authenticated_request_plan_unicode_codepoint_half_open'}
+    if target.get('span_scope')=='context':
+        routing['focus_span']['span_scope']='context'
+    return routing
+
+
 def collect(gateway, family, *, automatic=False):
     question=family.get('original_question',family['question'])
+    request_plan=family.get('request_plan')
     # Only a configured opt-in LingHub release advertises the new contract.
     if automatic and getattr(gateway,'lexical_profiles',False) and gateway.linghub_url and len(question)<=3000:
         capabilities=gateway.request('/v1/capabilities',None,gateway.linghub_url)
         if capabilities.get('lexical_profile',{}).get('available'):
-            request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_classla_primary_v1','limit':4,'request_plan':family.get('request_plan')}
+            request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_classla_primary_v1','limit':4,'request_plan':request_plan}
             before=time.monotonic();response=gateway.request('/v1/lexical/profile',request,gateway.linghub_url)
-            if response.get('request_schema_version')!='linghub.lexical-profile.v1' or response.get('query',{}).get('text')!=question:raise Failure('invalid_answer',502)
+            if (response.get('request_schema_version')!='linghub.lexical-profile.v1'
+                    or response.get('query',{}).get('text')!=question
+                    or request_plan is not None
+                    and not _profile_matches_request_plan(response,request_plan)):
+                raise Failure('invalid_answer',502)
             cap={'operation':'lexical_profile','request':request,'response':response,'response_sha256':digest(response),'duration_ms':(time.monotonic()-before)*1000}
             value={'version':'klikai.lexical-collation.v1','plan':{'version':'klikai.lexical-collation.v1','status':'ready','operations':['morphology','loris','synonyms','collocations','terminology'],'routing_kind':'automatic_lexical_profile','focus':question},'captures':[cap],'capture_set_sha256':digest([cap]),'capabilities_identity':digest(response['provenance']['resource_editions'])}
             if len(canonical(value).encode())>1536*1024:raise Failure('unified_capture_too_large',413)
             return value
-    shared_targets=(family.get('request_plan')or{}).get('target_spans',[])
     routing=None
-    if automatic and len(shared_targets)==1 and shared_targets[0].get('span_scope')=='context':
-        target=shared_targets[0]
-        routing=single_word_plan(target['text'],family.get('input_language','und'))
-        if routing is None:
-            routing={'version':VERSION,'operations':['loris'],'focus':target['text'],
-                'input_language':family.get('input_language')if family.get('input_language')in {'sl','it'}else'sl',
-                'status':'ready','routing_kind':'automatic_question_rule_lookup','reason':'explicit_context_target',
-                'language_basis':'explicit_context_request','focus_span':{'start':target['start'],'end':target['end'],'span_scope':'context'}}
-    if routing is None:routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
-    if routing is None:routing=plan(question,family.get('input_language','und'),family.get('focus'))
-    if routing is None and automatic:
-        routing=automatic_plan(question,family.get('input_language','und'))
+    if automatic and request_plan is not None:
+        routing=_authenticated_plan_route(family,request_plan)
+        if routing is None:return None
+    else:
+        if routing is None:routing=single_word_plan(question,family.get('input_language','und')) if automatic and not family.get('focus') else None
+        if routing is None:routing=plan(question,family.get('input_language','und'),family.get('focus'))
+        if routing is None and automatic:
+            routing=automatic_plan(question,family.get('input_language','und'))
     if routing is None:return None
     result={'version':VERSION,'plan':routing,'captures':[],'capabilities_identity':None,'timings':{}}
     if routing['status']!='ready':return result

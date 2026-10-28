@@ -25,11 +25,23 @@ class Gateway:
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
-            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
+            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base or path=='/internal/pilot/interpret'else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
                 editorial_auth=bool(self.editorial_operator_policy_id and base==self.klikai_url and path.startswith('/api/editorial/records/'))
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
                     if response.status_code!=200:
                         failure=Failure('answer_unavailable',503)
+                        if (base is None and path=='/internal/pilot/freeze'
+                                and response.status_code==409):
+                            raw=bytearray()
+                            for chunk in response.iter_bytes():
+                                raw.extend(chunk[:1025-len(raw)])
+                                if len(raw)>1024:break
+                            try:
+                                data=json.loads(raw)if len(raw)<=1024 else{}
+                                if (isinstance(data,dict) and
+                                        data.get('detail')=='PILOT_REQUEST_PLAN_MISMATCH'):
+                                    failure=Failure('request_plan_mismatch',409)
+                            except (ValueError,TypeError):pass
                         if base is None and path=='/internal/pilot/generate':
                             # Preserve useful classifications without retaining an
                             # upstream response body, URL, credential or traceback.
@@ -107,6 +119,10 @@ class Gateway:
     def require_generation(self,models):
         observed=self.capabilities()
         if any(not observed['generation']['models'].get(model,{}).get('available')for model in models):raise Failure('generation_waiting_capacity',503)
+    def interpret(self,question,context,input_language,locale):
+        return self.request('/internal/pilot/interpret',{
+            'question':question,'context':context,
+            'input_language':input_language,'locale':locale})
     def freeze(self,family,policy):
         if family['task']=='reference'and self.unified_answers:
             guidance=request_tasks.freeze(family,self)

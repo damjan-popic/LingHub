@@ -85,6 +85,21 @@ def test_freeze_producer_uses_the_durable_nested_json_order(monkeypatch):
     monkeypatch.setattr(unified,'merge_source_matches',lambda rows:rows)
     sent=[]
     def request(path, body):
+        if path=='/internal/pilot/interpret':
+            plan={'version':'klikai.request-plan.v1',
+                'interpretation_contract':'klikai.request-interpretation.v1',
+                'original':body['question'],
+                'context':body['context'],'target_spans':[],
+                'requested_facets':[],'requested_grammar_slots':[],
+                'ambiguities':[],
+                'source_language':body['input_language']
+                    if body['input_language']in {'sl','it'}else None,
+                'response_language':body['locale']}
+            return {'contract':'klikai.request-interpretation.v1',
+                'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',
+                                       **body}),'request_plan':plan,
+                'request_plan_sha256':digest(plan)}
+        assert path=='/internal/pilot/freeze'
         sent.append(deepcopy(body))
         return {'bundle':{'payload':body},'matches':[dict(deepcopy(row),evidence_id='known')]}
     result=unified.freeze(SimpleNamespace(klikai_url='fixture',request=request),{'question':'Term?','locale':'sl'}, {})

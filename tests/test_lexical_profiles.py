@@ -57,20 +57,25 @@ def test_postfixed_case_inflection_does_not_collapse_coordinated_names():
  assert request['ambiguities']==['grammar_target_binding_unresolved']
 
 
-def test_web_plans_match_the_pinned_core_grammar_interpretation_contract():
+def test_web_projects_the_pinned_core_grammar_interpretation_contract():
  root=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
  if not root:pytest.skip('KLIKAI_PINNED_CORE_ROOT is not configured')
+ from tools.zrc_reference.request_interpretation import authoritative_request_plan
  path=Path(root)/'tests/zrc/fixtures/grammar_interpretation_contract.json'
  contract=json.loads(path.read_text(encoding='utf-8'))
  assert contract['version']=='klikai.grammar-interpretation-contract.v2'
  for case in contract['cases']:
   question=case['question']
-  request=plan(question,'',case['language'],{'raw_engines':{}})['request_plan']
+  request=authoritative_request_plan(
+   question,input_language=case['language'],locale=case['language'])
+  projected=plan(question,'',case['language'],{'raw_engines':{}},
+                 request_plan=request)
+  assert projected['request_plan']==request
   actual={
-   'targets':[row['text']for row in request['target_spans']],
-   'requested_grammar_slots':request['requested_grammar_slots'],
-   'requested_facets':request['requested_facets'],
-   'ambiguities':request['ambiguities'],
+   'targets':[row['text']for row in projected['targets']],
+   'requested_grammar_slots':projected['requested_grammar_slots'],
+   'requested_facets':projected['requested_facets'],
+   'ambiguities':projected['grammar_ambiguities'],
   }
   assert actual==case['expected'],case['id']
   assert all(question[row['start']:row['end']]==row['text']

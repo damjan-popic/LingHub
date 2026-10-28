@@ -26,7 +26,7 @@ REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
-    'terminology_equivalence','curated_recommendation','bounded_attestation',
+    'terminology_equivalence','comparison_synthesis','curated_recommendation','bounded_attestation',
     'exact_source_excerpt'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
     'text','claim_id','support_ids'})
@@ -64,6 +64,75 @@ ANSWER_PLAN_RENDERED_LIMITATIONS = {
 
 def evidence_id(row):
     return row.get('evidence_id') or row.get('passage_id') or row.get('citation_id')
+
+
+def shared_interpretation(gateway,question,context,input_language,locale):
+    """Fetch and validate the one authenticated request interpretation.
+
+    This runs before any source or tool request.  WEB may enrich the returned
+    targets in a lexical profile, but it never creates or repairs this plan.
+    """
+    request={'question':question,'context':context,
+        'input_language':input_language,'locale':locale}
+    input_identity={'contract':'klikai.request-interpretation.input.v1',**request}
+    try:
+        response=(gateway.interpret(**request)if hasattr(gateway,'interpret')else
+                  gateway.request('/internal/pilot/interpret',request))
+        if (not isinstance(response,dict)or set(response)!={
+                'contract','input_sha256','request_plan','request_plan_sha256'}
+                or response.get('contract')!='klikai.request-interpretation.v1'
+                or response.get('input_sha256')!=digest(input_identity)):
+            raise ValueError('Interpretation envelope differs')
+        plan=response.get('request_plan')
+        if (not isinstance(plan,dict)
+                or response.get('request_plan_sha256')!=digest(plan)
+                or plan.get('version')!='klikai.request-plan.v1'
+                or plan.get('interpretation_contract')!=response['contract']
+                or plan.get('original')!=question
+                or plan.get('context','')!=context
+                or plan.get('source_language')!=(
+                    input_language if input_language in {'sl','it'}else None)
+                or plan.get('response_language')!=locale):
+            raise ValueError('Interpretation plan binding differs')
+        spans=plan.get('target_spans')
+        facets=plan.get('requested_facets')
+        slots=plan.get('requested_grammar_slots')
+        ambiguities=plan.get('ambiguities')
+        if (not isinstance(spans,list)or len(spans)>4
+                or not isinstance(facets,list)
+                or any(not isinstance(value,str)for value in facets)
+                or not isinstance(slots,list)
+                or any(not isinstance(value,dict)
+                       or value.get('case')not in {'nominative','genitive','dative',
+                           'accusative','locative','instrumental'}
+                       or value.get('number')not in {None,'singular','dual','plural'}
+                       for value in slots)
+                or not isinstance(ambiguities,list)
+                or any(not isinstance(value,str)for value in ambiguities)):
+            raise ValueError('Interpretation plan structure differs')
+        effective=question+('\n'+context if context else'')
+        def bound(span):
+            if not isinstance(span,dict):return False
+            start,end=span.get('start'),span.get('end')
+            scoped=span.get('span_scope')
+            if scoped not in {None,'context'}:return False
+            source=effective if scoped=='context'else question
+            if (type(start)is not int or type(end)is not int
+                    or not 0<=start<end<=len(source)
+                    or source[start:end]!=span.get('text')
+                    or scoped=='context'and start<=len(question)):
+                return False
+            nested=span.get('context_span')
+            return nested is None or bound(nested)
+        if not all(bound(span)for span in spans):
+            raise ValueError('Interpretation target offsets differ')
+        return {'request_plan':deepcopy(plan),
+                'interpretation_input_sha256':response['input_sha256'],
+                'request_plan_sha256':response['request_plan_sha256']}
+    except Failure:
+        raise
+    except (AttributeError,KeyError,TypeError,ValueError):
+        raise Failure('invalid_answer',502)from None
 
 
 def checked(bundle):
@@ -595,11 +664,13 @@ def expand_reference_sources(gateway, family, definitions, tool_capture, found, 
 def freeze(gateway, family, policy):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
-    from core.lexical_planner import plan as lexical_plan
     family = deepcopy(family)
     original = family.get('original_question', family['question'])
-    family['request_plan'] = lexical_plan(original, family.get('context', ''),
-        family.get('input_language', 'und'), {'raw_engines': {}})['request_plan']
+    context=family.get('context','')
+    input_language=family.get('input_language','und')
+    interpretation=shared_interpretation(
+        gateway,original,context,input_language,family['locale'])
+    family['request_plan']=interpretation['request_plan']
     started = time.monotonic()
     stage_started = started
     timings = {}
@@ -639,9 +710,12 @@ def freeze(gateway, family, policy):
         # Freeze the same canonical JSON representation that the durable store
         # will retain. Source values/hashes are unchanged, but field iteration
         # must not depend on insertion order lost at the storage boundary.
-        freeze_request = json.loads(canonical({'question': family['question'],
-            'context': family.get('context', ''), 'locale': family['locale'], 'task': 'reference',
+        freeze_request = json.loads(canonical({'question': original,
+            'context': family.get('context', ''), 'input_language':input_language,
+            'locale': family['locale'], 'task': 'reference',
             'policy': policy, 'unified_evidence': packet, 'request_plan': family['request_plan'],
+            'interpretation_input_sha256': interpretation['interpretation_input_sha256'],
+            'request_plan_sha256': interpretation['request_plan_sha256'],
             **({'tool_evidence':tool_capture}if tool_capture is not None else{})}))
         response = gateway.request('/internal/pilot/freeze', freeze_request)
         remote = response.get('matches')
@@ -690,8 +764,12 @@ def freeze(gateway, family, policy):
         if isinstance(extra, list):
             known = {row['family'] for row in coverage}
             coverage.extend(row for row in extra if isinstance(row, dict) and row.get('family') not in known)
-    except (Failure, KeyError, TypeError, ValueError) as error:
-        coverage.append({'family': 'reference_gateway', 'status': 'timeout' if isinstance(error, Failure) and error.code == 'source_timeout' else 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'gateway_freeze')})
+    except Failure as error:
+        if error.code=='request_plan_mismatch':
+            raise
+        coverage.append({'family': 'reference_gateway', 'status': 'timeout' if error.code == 'source_timeout' else 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'gateway_freeze')})
+    except (KeyError, TypeError, ValueError) as error:
+        coverage.append({'family': 'reference_gateway', 'status': 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'gateway_freeze')})
     timings['gateway_freeze_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     statuses = {row['status'] for row in coverage}
     retrieval = {'status': 'partial' if statuses & {'partial', 'timeout', 'unavailable', 'unsupported'} else 'complete',
@@ -1018,7 +1096,11 @@ def _generate(gateway, bundle, tier, model, parent=None):
                     bound=[row for row in citations if row['claim_id']==block['claim_id']]
                     ids=list(dict.fromkeys(evidence_id(row)for row in bound))
                     support_ids=[row['support_id']for row in bound]
-                    if (not ids or len(set(support_ids))!=len(support_ids)
+                    citation_spans={(row['support_id'],row['evidence_id'],
+                                     row['char_start'],row['char_end'])for row in bound}
+                    if (not ids or len(citation_spans)!=len(bound)
+                            or (len(set(support_ids))!=len(support_ids)
+                                and block['unit_type']!='comparison_synthesis')
                             or set(support_ids)!=set(block['support_ids'])
                             or any(row['block_id']!=block['block_id']
                                    or row['unit_id']!=block['unit_id'] for row in bound)

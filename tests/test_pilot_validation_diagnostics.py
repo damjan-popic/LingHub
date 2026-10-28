@@ -31,6 +31,7 @@ from test_pilot import runtime, store
 from test_pilot_shared_provider import shared
 sys.path.remove(str(KLIKAI / 'tests/zrc'))
 from tools.zrc_reference.pilot_contracts import FreezeRequest, GenerateRequest
+from tools.zrc_reference.request_interpretation import response as interpret_response
 from pilot_backend.human_feedback import generation_validation_diagnostics, provider_diagnostics
 from test_pilot_unified import ORIGIN, UnifiedGateway, login
 from test_pilot_model_choices import app_choices, submit
@@ -57,6 +58,9 @@ def test_actual_writer_adapter_owned_api_and_saved_failure_preserve_exact_plan_e
         def request(self, path, payload, base=None):
             self.calls.append((path, deepcopy(payload), base))
             if path == '/api/sources':return {'sources': []}
+            if path == '/internal/pilot/interpret':
+                return interpret_response(payload['question'],payload['context'],
+                    payload['input_language'],payload['locale'])
             if path == '/internal/pilot/freeze':
                 return runtime.freeze(FreezeRequest.model_validate(payload),
                     fixed_evidence={'passages': runtime.engine.store.lexical('Hugo'), 'retrieval': 'fixed'})

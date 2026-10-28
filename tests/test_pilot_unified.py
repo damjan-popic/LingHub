@@ -44,13 +44,15 @@ def full_record():
 
 
 class UnifiedGateway(Gateway):
-    def __init__(self,*,source_failure=None,provider_failure=False,unknown_citation=False,freeze_failure=False,no_hits=False):
+    def __init__(self,*,source_failure=None,provider_failure=False,unknown_citation=False,freeze_failure=False,no_hits=False,
+                 interpret_failure=False,interpret_response=None):
         super().__init__('http://127.0.0.1:18320','synthetic-token-'*4,
             klikai_url='http://127.0.0.1:8000',editorial_full_records=True,
             editorial_operator_policy_id=editorial.OPERATOR_POLICY_ID,unified_answers=True)
         self.calls=[];self.lock=threading.Lock();self.blocked=False
         self.source_failure=source_failure;self.provider_failure=provider_failure
         self.unknown_citation=unknown_citation;self.freeze_failure=freeze_failure;self.no_hits=no_hits
+        self.interpret_failure=interpret_failure;self.interpret_response=interpret_response
         self.record=full_record();self.on_generate=None;self.barrier=None
 
     def require_generation(self,models):
@@ -59,6 +61,20 @@ class UnifiedGateway(Gateway):
     def request(self,path,payload,base=None):
         assert not self.blocked,'Frozen sources must not contact any upstream'
         with self.lock:self.calls.append((path,deepcopy(payload),base))
+        if path=='/internal/pilot/interpret':
+            if self.interpret_failure:raise Failure('answer_unavailable',503)
+            if self.interpret_response is not None:return deepcopy(self.interpret_response)
+            from core.lexical_planner import plan
+            request_plan=plan(payload['question'],payload['context'],payload['input_language'],
+                              {'raw_engines':{}})['request_plan']
+            request_plan['interpretation_contract']='klikai.request-interpretation.v1'
+            request_plan['source_language']=(payload['input_language']
+                if payload['input_language']in {'sl','it'}else None)
+            request_plan['response_language']=payload['locale']
+            return {'contract':'klikai.request-interpretation.v1',
+                'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',
+                                       **payload}),'request_plan':request_plan,
+                'request_plan_sha256':digest(request_plan)}
         if path=='/api/sources':
             return {'sources':[{'slug':slug,'display_name':'Synthetic '+slug,'adapter_key':adapter,
                 'rights_mode':rights,'source_type':'owned','is_active':True,'root_path':'PRIVATE_REGISTRY_PATH'}
@@ -148,6 +164,22 @@ def ask(app,client,headers,**fields):
     return fid,client.get('/api/pilot/families/'+fid).json()
 
 
+def shared_plan(question,context='',target=None,input_language='und',locale='sl'):
+    target=question if target is None else target
+    start=question.index(target)
+    return {'version':'klikai.request-plan.v1',
+        'interpretation_contract':'klikai.request-interpretation.v1',
+        'original':question,'context':context,
+        'target_spans':[{'text':target,'start':start,'end':start+len(target),
+                         'basis':'authenticated CORE interpretation'}],
+        'candidate_lemmas':[],'operation':None,
+        'source_language':input_language if input_language in {'sl','it'}else None,
+        'translation_language':None,'response_language':locale,'requested_facets':[],
+        'requested_grammar_slots':[],'domain':None,'jurisdiction':None,
+        'requested_source':None,'requested_edition':None,'ambiguities':[],
+        'confidence':'bounded_surface'}
+
+
 def test_default_query_combines_all_families_generates_and_browses_owned_frozen_matches(tmp_path):
     gateway=UnifiedGateway();gateway.barrier=threading.Barrier(2)
     app=app_for(tmp_path,gateway)
@@ -186,6 +218,73 @@ def test_default_query_combines_all_families_generates_and_browses_owned_frozen_
         login(client,'unified-other')
         for path in ('/api/pilot/families/'+fid,'/api/pilot/families/'+fid+'/matches',route):
             assert client.get(path).status_code==404
+
+
+def test_normal_route_uses_shared_interpretation_first_without_local_fallback(
+        tmp_path,monkeypatch):
+    original='  '+QUERY+'  ';context='Nespremenjeni dodatni kontekst.'
+    request={'question':original,'context':context,'input_language':'sl','locale':'sl'}
+    request_plan=shared_plan(original,context,QUERY,input_language='sl')
+    response={'contract':'klikai.request-interpretation.v1',
+        'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',
+                               **request}),'request_plan':deepcopy(request_plan),
+        'request_plan_sha256':digest(request_plan)}
+    gateway=UnifiedGateway(interpret_response=response)
+    from core import lexical_planner
+    monkeypatch.setattr(lexical_planner,'plan',lambda *args,**kwargs:(_ for _ in ()).throw(
+        AssertionError('Normal WEB route must not plan locally')))
+    app=app_for(tmp_path,gateway)
+    with TestClient(app,base_url=ORIGIN)as client:
+        _,family=ask(app,client,login(client),question=original,context=context,
+                     input_language='sl')
+        assert family['short']['generation']['status']=='generated'
+    assert gateway.calls[0]==('/internal/pilot/interpret',request,None)
+    frozen=next(payload for path,payload,_ in gateway.calls
+                if path=='/internal/pilot/freeze')
+    assert (frozen['question'],frozen['context'],frozen['input_language'])==(
+        original,context,'sl')
+    assert frozen['request_plan']==request_plan
+    assert frozen['request_plan_sha256']==response['request_plan_sha256']
+
+
+@pytest.mark.parametrize('failure',[
+    'upstream','input_digest','plan_digest','offset','language_binding'])
+def test_interpretation_failure_stops_before_registry_tools_or_sources(failure):
+    request={'question':QUERY,'context':'','input_language':'und','locale':'sl'}
+    request_plan=shared_plan(QUERY)
+    response={'contract':'klikai.request-interpretation.v1',
+        'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',
+                               **request}),'request_plan':deepcopy(request_plan),
+        'request_plan_sha256':digest(request_plan)}
+    if failure=='input_digest':response['input_sha256']='0'*64
+    if failure=='plan_digest':response['request_plan_sha256']='0'*64
+    if failure=='offset':
+        response['request_plan']['target_spans'][0]['end']-=1
+        response['request_plan_sha256']=digest(response['request_plan'])
+    if failure=='language_binding':
+        response['request_plan']['source_language']='sl'
+        response['request_plan_sha256']=digest(response['request_plan'])
+    gateway=UnifiedGateway(interpret_failure=failure=='upstream',
+                           interpret_response=None if failure=='upstream'else response)
+    with pytest.raises(Failure):
+        unified.freeze(gateway,{'question':QUERY,'context':'','input_language':'und',
+                                'locale':'sl'}, {})
+    assert gateway.calls==[('/internal/pilot/interpret',request,None)]
+
+
+def test_core_plan_mismatch_is_request_local_failure_not_source_only():
+    class MismatchGateway(UnifiedGateway):
+        def request(self,path,payload,base=None):
+            if path=='/internal/pilot/freeze':
+                with self.lock:self.calls.append((path,deepcopy(payload),base))
+                raise Failure('request_plan_mismatch',409)
+            return super().request(path,payload,base)
+    gateway=MismatchGateway()
+    with pytest.raises(Failure,match='request_plan_mismatch')as failure:
+        unified.freeze(gateway,{'question':QUERY,'context':'',
+            'input_language':'und','locale':'sl'}, {})
+    assert failure.value.status==409
+    assert any(path=='/internal/pilot/freeze'for path,_,_ in gateway.calls)
 
 
 @pytest.mark.parametrize('option', ['provider_failure','unknown_citation','freeze_failure'])
@@ -324,13 +423,75 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
     assert output['display_blocks'][0]['evidence_ids']==['known']
 
 
-def test_deterministic_curated_recommendation_uses_the_same_bound_graph():
+@pytest.mark.parametrize('unit_type',[
+    'curated_recommendation','comparison_synthesis'])
+def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
-    result['display_blocks'][0]['unit_type']='curated_recommendation'
+    result['display_blocks'][0]['unit_type']=unit_type
     output=run_bounded_answer_plan(result)
     assert output['generation']['status']=='generated'
     assert output['generation_status']=='deterministic_bounded_answer_plan'
     assert output['display_blocks'][0]['evidence_ids']==['known']
+
+
+def test_real_core_comparison_and_curated_units_cross_the_web_consumer(monkeypatch):
+    """Use CORE's real registries/renderers, not relabelled WEB fixtures."""
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_documentary_constraints import evidence
+    from test_pilot_answer_plan import curated_item
+    from tools.zrc_reference.request_interpretation import response as interpret_response
+
+    runtime=_plan_runtime()
+    question='lesenka';curated_rows=[curated_item(key='curated')]
+    curated_rows[0].update(span={'external_id':'curated'},source_id='source:curated',
+        source_revision='c'*64,url='https://www.jeziknaklik.it/')
+    curated_payload=_plan_runtime_payload(question,curated_rows,deepcopy(curated_rows),
+        request_plan=interpret_response(question,'','sl','sl')['request_plan'])
+    curated_registry=runtime._answer_registry(curated_payload,'answer')
+    curated_unit=next(row for row in curated_registry.units
+                      if row['unit_type']=='curated_recommendation')
+    curated_result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
+        'block_id':'B1','unit_id':curated_unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},curated_registry,
+        payload=curated_payload,tier='answer')
+
+    question='Je prav "glodalec" ali "glodavec"?'
+    advice,_=evidence('Pravopis dopušča obe obliki, glodalec in glodavec. '
+        'Slovar daje prednost zapisu glodavec.',key='advice',
+        source_slug='jezikovna_svetovalnica',signed_date_text=['januar 2013'])
+    usage,_=evidence('V preteklosti je bila pogostejša oblika glodavec, danes pa '
+        'je v rabi pogostejša oblika glodalec.',key='usage',
+        source_slug='jezikovna_svetovalnica',signed_date_text=['junij 2023'])
+    comparison_rows=[advice,usage];passages=[]
+    for index,item in enumerate(comparison_rows,1):
+        item['span']={'post_id':str(index),'char_start':0,'char_end':len(item['text'])}
+        passages.append(dict(item,source_id=f'source-record:{index}',
+            source_revision=str(index)*64,title=f'Nasvet {index}',
+            url=f'https://example.invalid/{index}',role='expert_answer',
+            rights_mode='authenticated_pilot',context_eligible=True,
+            span=deepcopy(item['span'])))
+    comparison_payload=_plan_runtime_payload(question,comparison_rows,passages,
+        request_plan=interpret_response(question,'','sl','sl')['request_plan'])
+    comparison_registry=runtime._answer_registry(comparison_payload,'answer')
+    comparison_unit=next(row for row in comparison_registry.units
+                         if row['unit_type']=='comparison_synthesis')
+    comparison_result=runtime._process_fresh_answer_plan({
+        'answer_language':'sl','blocks':[{'block_id':'B1',
+            'unit_id':comparison_unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},comparison_registry,
+        payload=comparison_payload,tier='answer')
+
+    for result,unit_type in ((curated_result,'curated_recommendation'),
+                             (comparison_result,'comparison_synthesis')):
+        output=run_bounded_answer_plan(result)
+        assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+        assert output['generation_status']=='deterministic_bounded_answer_plan'
+        assert output['display_blocks'][0]['unit_type']==unit_type
+        assert output['display_blocks'][0]['evidence_ids']
 
 
 @pytest.mark.parametrize('locator',[
@@ -759,14 +920,14 @@ def test_explicit_existing_cpu_tool_capture_joins_default_documentary_freeze(tmp
         assert len(gateway.cpu_calls)==3 and len(frozen['unified_evidence']['matches'])==6
 
 
-def test_missing_explicit_tool_context_preserves_other_retrieval(tmp_path):
+def test_unsigned_web_tool_intent_does_not_override_authenticated_plan(tmp_path):
     gateway=UnifiedGateway();app=app_for(tmp_path,gateway)
     with TestClient(app,base_url=ORIGIN)as user:
         _,family=ask(app,user,login(user),question='Pojasni morfologijo »izraz«.')
         short=family['short']
-        assert short['generation']['status']=='generated'and short['retrieval']['status']=='partial'
+        assert short['generation']['status']=='generated'and short['retrieval']['status']=='complete'
         tool=next(row for row in short['retrieval']['coverage']if row['family']=='linghub_tools')
-        assert tool['reason']=='explicit_tool_context_required'
+        assert tool['reason']=='no_applicable_lookup_route'
         assert not any(path.startswith('/v1/')for path,_,_ in gateway.calls)
         assert 'tool_evidence'not in next(payload for path,payload,_ in gateway.calls if path=='/internal/pilot/freeze')
 
@@ -787,7 +948,14 @@ def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypa
     response={'bundle':{'synthetic':True},'matches':[{'evidence_id':view['citation_id'],
         'source_slug':'epravopis','source':view}]}
     def request(path,payload):
+        if path=='/internal/pilot/interpret':
+            request_plan=shared_plan(payload['question'],payload['context'])
+            return {'contract':'klikai.request-interpretation.v1',
+                'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',
+                                       **payload}),'request_plan':request_plan,
+                'request_plan_sha256':digest(request_plan)}
         assert path=='/internal/pilot/freeze'
+        assert payload['request_plan_sha256']==digest(payload['request_plan'])
         return deepcopy(response)
     monkeypatch.setattr(unified,'registry',lambda gateway:[])
     monkeypatch.setattr(unified,'collect_tools',lambda gateway,family:(None,None))
@@ -1189,6 +1357,7 @@ def test_application_capture_consumes_real_gateway_contract_and_answer_plan(
     from tools.zrc_reference.grounded import ReferenceEngine
     from tools.zrc_reference.pilot_runtime import PilotRuntime
     from tools.zrc_reference.pilot_contracts import FreezeRequest,GenerateRequest,MODEL_PINS
+    from tools.zrc_reference.request_interpretation import response as interpret_response
     monkeypatch.setattr(sys.modules[__name__],'QUERY',question)
     directory=tmp_path/'zrc';directory.mkdir()
     store=zrc_store.__wrapped__(directory)
@@ -1201,9 +1370,15 @@ def test_application_capture_consumes_real_gateway_contract_and_answer_plan(
     class ActualContractGateway(UnifiedGateway):
         def request(self,path,payload,base=None):
             assert not self.blocked
+            if path=='/internal/pilot/interpret':
+                self.calls.append((path,deepcopy(payload),base))
+                return interpret_response(payload['question'],payload['context'],
+                    payload['input_language'],payload['locale'])
             if path=='/internal/pilot/freeze':
                 self.calls.append((path,deepcopy(payload),base))
-                frozen=runtime.freeze(FreezeRequest(**payload),fixed_evidence={'passages':store.lexical('Hugo'),'retrieval':'disposable-fixture'})
+                assert payload['request_plan_sha256']==digest(payload['request_plan'])
+                frozen=runtime.freeze(FreezeRequest(**payload),fixed_evidence={
+                    'passages':store.lexical('Hugo'),'retrieval':'disposable-fixture'})
                 self.frozen=frozen
                 return frozen
             if path=='/internal/pilot/generate':

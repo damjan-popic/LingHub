@@ -424,7 +424,7 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 
 
 @pytest.mark.parametrize('unit_type',[
-    'curated_recommendation','comparison_synthesis'])
+    'curated_recommendation','comparison_synthesis','grammar_slot'])
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type

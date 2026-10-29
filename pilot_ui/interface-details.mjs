@@ -72,3 +72,11 @@ export function releaseLabel(release,locale,t) {
   const date=locale==='it'?Number(day)+'.'+Number(month)+'.'+year:Number(day)+'. '+Number(month)+'. '+year;
   return t('public_release',{version:release.version,date});
 }
+
+export function historyCreatedDate(family) {
+  const raw=family?.created_at??family?.created;
+  if(raw===null||raw===undefined||raw==='')return null;
+  const value=typeof raw==='number'&&raw<1e12?raw*1000:raw;
+  const date=new Date(value);
+  return Number.isFinite(date.getTime())?date:null;
+}

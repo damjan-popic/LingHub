@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {ordinaryFamilyView} from '../pilot_ui/core.mjs';
+import {historyCreatedDate} from '../pilot_ui/interface-details.mjs';
 
 const source=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');
 const between=(start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert(a>=0&&b>a,'Known source function boundaries');return source.slice(a,b);};
@@ -14,7 +15,7 @@ class Node {
   append(...children){this.children.push(...children);}
   replaceChildren(...children){this.children=children;}
   querySelector(){return this.child ||= new Node();}
-  querySelectorAll(){return [];}
+  querySelectorAll(selector){return selector==='button.history-item'?this.children.filter(child=>child.tag==='button'&&child.attrs?.class==='history-item'):[];}
   setAttribute(){}
   close(){this.open=false;this.closeCount=(this.closeCount||0)+1;}
   reset(){}
@@ -27,9 +28,9 @@ function harness(handler){
   const family=id=>({answer_family_id:id,question:'Question '+id,locale:'sl',task:'reference',short:{run_id:'run-'+id,state:'complete'},long:null});
   const state={boot:0,user:{id:'fixture'},locale:'sl',family:family('a'),feedbackTarget:null,feedback:new Map(),feedbackEvents:new Map(),feedbackDrafts:new Map(),delivered:new Set(),requestKeys:new Map(),polling:new Map(),capabilities:{},longOpen:false};
   const renders=[],calls=[];
-  const context={state,$,submission:{clear(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,
-    beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,
-    textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:()=>new Node(),clear:n=>n.replaceChildren(),
+  const context={state,$,submission:{clear(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,familyRequest:0,
+    beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,historyCreatedDate,
+    textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:(tag,text,attrs={})=>{const n=new Node();n.tag=tag;n.textContent=text??'';n.attrs=attrs;return n;},clear:n=>n.replaceChildren(),
     resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
     ordinaryFamilyView,modelText:()=>'',renderGenerationNotice(){},syncMatches(){},renderLexical(){},renderText(){},sourceButtons(){},
     jobState:t=>t?.state,tierBlocks:()=>[],acceptedStates:new Set(['complete']),pendingStates:new Set(['pending']),isCpuTask:()=>false,
@@ -43,6 +44,7 @@ function harness(handler){
     between('function renderFamily(','async function loadFeedback('),
     between('async function submitQuestion(','function expand('),
     between('async function saveFeedback(','async function historyList('),
+    between('async function historyList(','function toggleHistory('),
     line("document.addEventListener('selectionchange'"),
     line("$('new-question').addEventListener('click'"),
     line("$('question-form').addEventListener('submit'"),
@@ -113,4 +115,41 @@ test('delayed delivery failure belongs only to its captured family and run',asyn
 test('successful delivery from an old login cannot repopulate delivered state',async()=>{
   const response=deferred(),h=harness(()=>response.promise);h.state.family.short.display_sha256='hash';h.run("acknowledgeDelivery(state.family.short,'short')");
   h.run('resetPrivate()');response.resolve({acknowledged:true});await flush();assert.equal(h.state.delivered.size,0);
+});
+
+test('history removes stale buttons before its refresh resolves and renders the API timestamp',async()=>{
+  const response=deferred(),h=harness(path=>path==='/families'?response.promise:Promise.resolve({}));
+  const stale=new Node();stale.tag='button';stale.textContent='stale';h.$('history-list').append(stale);
+  const pending=h.run('historyList()');
+  assert.equal(h.$('history-list').children.length,1);
+  assert.equal(h.$('history-list').children[0].tag,'p');
+  assert.equal(h.$('history-list').children[0].textContent,'loading');
+  response.resolve({families:[{answer_family_id:'new',question:'Duplicate question',created:1793305150.3381796}]});
+  await pending;
+  const button=h.$('history-list').children[0];
+  assert.equal(button.tag,'button');assert.equal(button.textContent,'Duplicate question');
+  assert.equal(button.children.length,1);assert.match(button.children[0].textContent,/2026/);
+});
+
+test('history disables every family choice while a selected family is loading',async()=>{
+  const response=deferred(),h=harness(path=>path==='/families'?Promise.resolve({families:[
+    {answer_family_id:'first',question:'Duplicate question',created:1793305150},
+    {answer_family_id:'second',question:'Duplicate question',created:1793305100},
+  ]}):response.promise);
+  await h.run('historyList()');
+  const buttons=h.$('history-list').children;
+  const pending=buttons[0].events.click();
+  assert.deepEqual(buttons.map(button=>button.disabled),[true,true]);
+  response.resolve(h.family('first'));await pending;
+  assert.deepEqual(buttons.map(button=>button.disabled),[false,false]);
+  assert.equal(h.state.family.answer_family_id,'first');
+});
+
+test('an older family response cannot replace the most recently requested family',async()=>{
+  const first=deferred(),second=deferred(),h=harness(path=>path.endsWith('/first')?first.promise:second.promise);
+  const older=h.run("loadFamily('first')"),newer=h.run("loadFamily('second')");
+  second.resolve(h.family('second'));await newer;
+  assert.equal(h.state.family.answer_family_id,'second');assert.equal(h.$('question').value,'Question second');
+  first.resolve(h.family('first'));await older;
+  assert.equal(h.state.family.answer_family_id,'second');assert.equal(h.$('question').value,'Question second');
 });

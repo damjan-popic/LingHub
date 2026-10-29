@@ -1,14 +1,14 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {publicRelease} from './public-release.mjs';
 import {noAnswerFeedback,canOpenCurrentOriginal,ordinaryFamilyView} from './core.mjs';
-import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks} from './interface-details.mjs';
+import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks,historyCreatedDate} from './interface-details.mjs';
 import {createSourceExplorer,recordUsed,citedEvidenceIds} from './source-explorer.mjs';
 import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,modelChoiceKey,modelAvailabilityKey,savedProvider,progressLabel,matchGroups,settledMatchUsage,matchUseLabel,generationNotice,answerNotes,sourceStatusNotes,blockTextPresentation,sourceKey,usedBadges,safeSourceLink,sourceExcerptPresentation,jobState,readableLocator,pendingStates,acceptedStates,errorKey} from './core.mjs';
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
 const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false,followup:null,feedbackEvents:new Map(),submitting:false};
-let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0;
+let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0, familyRequest=0;
 let registry = {sources:[]};
 let signInResume = null;
 const loginDraftKey = 'klikai-login-draft:'+base;
@@ -267,7 +267,7 @@ function renderFamily(family) {
   $('retry-answer').hidden=!beta()||!['failed','cancelled'].includes(jobState(family.short));
   setURL();
 }
-async function loadFamily(id) {if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=false;renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
+async function loadFamily(id) {const request=++familyRequest,boot=state.boot;if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));if(request!==familyRequest||boot!==state.boot)return null;$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=false;renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
 async function loadFeedback(){const boot=state.boot;const data=await api('/feedback');if(boot!==state.boot)return;for(const f of data.feedback||data.items||data||[])if(f.run_id)state.feedback.set(f.run_id,f);state.feedbackEvents.clear();}
 function setJob(job,tier) {
   const waitStarted=state.job?.job_id===job.job_id?state.job.waitStarted:performance.now();state.job={...job,tier,waitStarted};
@@ -307,7 +307,7 @@ async function submitQuestion(button,overrides={}) {
   const question=overrides.question||$('question').value;if(!question.trim()){textStatus('global-status','question_required');$('question').focus();return;}
   state.submitting=true;
   try{await action(button,async()=>{
-    textStatus('global-status','');clearFeedbackContext();resetMatches();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
+    familyRequest++;textStatus('global-status','');clearFeedbackContext();resetMatches();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
     const locale=overrides.locale||$('answer-locale').value;
     let payload={question,locale,interface_locale:state.locale,input_language:['text_check','morphology','reference'].includes($('task').value)&&['sl','it'].includes($('input-language').value)?$('input-language').value:'und',model:overrides.model||$('model').value,task:$('task').value};
     if(beta()){delete payload.model;payload.task='reference';}
@@ -394,7 +394,25 @@ async function saveFeedback(button) {
     $('feedback-dialog').close();state.feedbackTarget=null;renderFeedback(target.tier,target.kind,$(target.kind+'-feedback'));textStatus('answer-status','feedback_saved');
   }catch(error){if(current())throw error;}},'feedback-status');
 }
-async function historyList() {await action(null,async()=>{textStatus('global-status','');const data=await api('/families');clear($('history-list'));const families=data.families||data.items||data;if(!families.length){const key=state.user?.shared_group===true?'shared_history_empty':'history_empty';$('history-list').append(el('p',t(key),{class:'small muted','data-i18n':key}));return;}for(const family of families){const b=el('button',family.question,{type:'button',class:'history-item'});if(family.created_at)b.append(el('small',new Date(family.created_at).toLocaleString(state.locale==='it'?'it-IT':'sl-SI')));b.addEventListener('click',()=>action(b,async()=>{state.longOpen=false;state.comparison=null;$('comparison').hidden=true;await loadFamily(family.answer_family_id);$('history').hidden=true;$('history-toggle').setAttribute('aria-expanded','false');$('answer-card').scrollIntoView({block:'start'});}));$('history-list').append(b);}});}
+async function historyList() {
+  const list=$('history-list');
+  clear(list);
+  list.append(el('p',t('loading'),{class:'small muted','data-i18n':'loading',role:'status'}));
+  await action(null,async()=>{
+    textStatus('global-status','');
+    const data=await api('/families');
+    clear(list);
+    const families=data.families||data.items||data;
+    if(!families.length){const key=state.user?.shared_group===true?'shared_history_empty':'history_empty';list.append(el('p',t(key),{class:'small muted','data-i18n':key}));return;}
+    for(const family of families){
+      const b=el('button',family.question,{type:'button',class:'history-item'});
+      const created=historyCreatedDate(family);
+      if(created)b.append(el('small',created.toLocaleString(state.locale==='it'?'it-IT':'sl-SI')));
+      b.addEventListener('click',async()=>{const buttons=[...list.querySelectorAll('button.history-item')];for(const button of buttons)button.disabled=true;try{await action(null,async()=>{state.longOpen=false;state.comparison=null;$('comparison').hidden=true;const loaded=await loadFamily(family.answer_family_id);if(!loaded)return;$('history').hidden=true;$('history-toggle').setAttribute('aria-expanded','false');$('answer-card').scrollIntoView({block:'start'});});}finally{for(const button of buttons)button.disabled=false;}});
+      list.append(b);
+    }
+  });
+}
 function toggleHistory(){const open=$('history').hidden;$('history').hidden=!open;$('history-toggle').setAttribute('aria-expanded',String(open));if(open)historyList();}
 async function startComparison(blind,button) {await action(button,async()=>{$('compare-dialog').close();state.comparison=null;setURL();$('comparison').hidden=false;$('comparison-reveal').hidden=true;$('comparison-expand').disabled=true;$('comparison-votes').querySelectorAll('button').forEach(b=>b.disabled=true);for(const side of ['a','b']){clear($('side-'+side+'-answer'));clear($('side-'+side+'-sources'));$('side-'+side+'-title').textContent=t('answer_'+side);}textStatus('comparison-status','comparison_pending');const data=await api('/comparisons',{method:'POST',body:{family_id:familyId(),blind,tier:'short',idempotency_key:keyFor('compare:'+familyId()+':'+blind)}});renderComparison(data.comparison||data);pollComparison(state.comparison.comparison_id);});}
 function renderComparison(data){state.comparison=data;$('comparison').dataset.tier=data.tier;$('comparison').hidden=false;$('blind-notice').hidden=!data.blind;$('comparison-reveal').hidden=!data.blind||data.revealed||!data.vote;let pending=false;

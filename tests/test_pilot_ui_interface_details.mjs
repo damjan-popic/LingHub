@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks} from '../pilot_ui/interface-details.mjs';
+import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks,historyCreatedDate} from '../pilot_ui/interface-details.mjs';
 import {publicRelease} from '../pilot_ui/public-release.mjs';
 import {sourceStatusNotes} from '../pilot_ui/core.mjs';
 
@@ -99,4 +99,12 @@ test('release label is immutable served metadata, independent of browser time an
   const before=releaseLabel(publicRelease,'sl',t),now=Date.now;
   try{Date.now=()=>9999999999999;assert.equal(releaseLabel(publicRelease,'sl',t),before);}finally{Date.now=now;}
   assert.equal(releaseLabel({version:'0.1.0',date:'2026-09-18'},'sl',t),'Version 0.1.0 · 18. 9. 2026');
+});
+
+test('history accepts current epoch seconds and legacy date values',()=>{
+  const current=historyCreatedDate({created:1793305150.3381796});
+  assert(current instanceof Date);assert.equal(current.getTime(),1793305150338);
+  assert.equal(historyCreatedDate({created_at:'2026-10-29T20:00:00Z',created:1}).toISOString(),'2026-10-29T20:00:00.000Z');
+  assert.equal(historyCreatedDate({created:'broken'}),null);
+  assert.equal(historyCreatedDate({}),null);
 });

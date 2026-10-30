@@ -241,6 +241,35 @@ def test_freeze_plan_mismatch_http_failure_remains_request_local(monkeypatch):
     assert calls==['/internal/pilot/freeze']
 
 
+@pytest.mark.parametrize('status,body,expected',[
+    (409,{'detail':'PILOT_FROZEN_RESOURCE_UNAVAILABLE'},'PILOT_FROZEN_RESOURCE_UNAVAILABLE'),
+    (422,{'detail':'PILOT_INVALID_FROZEN_REQUEST'},'PILOT_INVALID_FROZEN_REQUEST'),
+    (503,{'detail':'PILOT_BUSY'},'PILOT_BUSY'),
+    (503,{'error':{'code':'PILOT_TIMEOUT','message':'PRIVATE_TOKEN'}},'PILOT_TIMEOUT'),
+    (503,{'detail':'PRIVATE_INTERNAL_FAILURE'},'answer_unavailable'),
+    (503,{'padding':'x'*1025},'answer_unavailable')])
+def test_freeze_http_failure_preserves_only_known_safe_code(monkeypatch,status,body,expected):
+    from pilot_backend.unified import diagnostic
+    calls=[]
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(status,json=body)
+    original=httpx.Client
+    monkeypatch.setattr(httpx,'Client',lambda **kwargs:original(
+        transport=httpx.MockTransport(handler),**kwargs))
+    with pytest.raises(Failure)as error:
+        Gateway('http://127.0.0.1:18320','synthetic-token-'*4).request(
+            '/internal/pilot/freeze',{'request_plan':{}})
+    observed=diagnostic(error.value,'gateway_freeze')
+    assert observed['error_code']==expected
+    assert observed['stage']=='gateway_freeze'
+    assert ('http_status'in observed)==(expected!='answer_unavailable')
+    if expected!='answer_unavailable':assert observed['http_status']==status
+    assert observed['technical_cause']['error_type']=='Failure'
+    assert 'PRIVATE'not in json.dumps(observed)
+    assert calls==['/internal/pilot/freeze']
+
+
 @pytest.mark.parametrize('code,stage,reason,error_type',[
     ('invalid_generated_content','response_json','invalid_final_json','JSONDecodeError'),
     ('malformed_provider_response','response_shape','invalid_content_type','ValueError'),

@@ -30,17 +30,29 @@ class Gateway:
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
                     if response.status_code!=200:
                         failure=Failure('answer_unavailable',503)
-                        if (base is None and path=='/internal/pilot/freeze'
-                                and response.status_code==409):
+                        if base is None and path=='/internal/pilot/freeze':
+                            # Freeze failures are request-local and the CORE
+                            # endpoint already exposes a small, fixed set of
+                            # safe classifications.  Preserve only those codes;
+                            # never retain an upstream message, URL, credential
+                            # or traceback.  Without this distinction a 409,
+                            # 422 and 503 all become ``answer_unavailable`` and
+                            # the retained attempt cannot identify the defect.
                             raw=bytearray()
                             for chunk in response.iter_bytes():
                                 raw.extend(chunk[:1025-len(raw)])
                                 if len(raw)>1024:break
                             try:
                                 data=json.loads(raw)if len(raw)<=1024 else{}
-                                if (isinstance(data,dict) and
-                                        data.get('detail')=='PILOT_REQUEST_PLAN_MISMATCH'):
+                                detail=(data.get('error')or data.get('detail')or{})if isinstance(data,dict)else{}
+                                code=detail.get('code')if isinstance(detail,dict)else detail
+                                if code=='PILOT_REQUEST_PLAN_MISMATCH':
                                     failure=Failure('request_plan_mismatch',409)
+                                else:
+                                    from .human_feedback import PROVIDER_FAILURE_CODES
+                                    if isinstance(code,str)and code in PROVIDER_FAILURE_CODES:
+                                        failure=Failure(code,response.status_code)
+                                        failure.http_status=response.status_code
                             except (ValueError,TypeError):pass
                         if base is None and path=='/internal/pilot/generate':
                             # Preserve useful classifications without retaining an

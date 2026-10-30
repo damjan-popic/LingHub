@@ -5,6 +5,8 @@ and source routes. The provider response is a fixture, not live model evidence.
 """
 from copy import deepcopy
 import json
+import os
+from pathlib import Path
 import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -20,6 +22,16 @@ from pilot_backend.store import digest
 
 ORIGIN='http://127.0.0.1:18310'
 QUERY='synthetic common expression'
+
+
+def core_test_root():
+    """Use the release-selected CORE tree; keep the sibling only for local tests."""
+    configured=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
+    root=(Path(configured).absolute() if configured else
+          Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911')
+    if not(root/'tools/zrc_reference/pilot_contracts.py').is_file():
+        raise RuntimeError('KLIKAI_PINNED_CORE_ROOT does not identify a CORE tree')
+    return root
 
 
 def term(slug,rid='shared-id',rationale='Qualification of this distinct sense.'):
@@ -437,7 +449,7 @@ def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
 def test_real_core_comparison_and_curated_units_cross_the_web_consumer(monkeypatch):
     """Use CORE's real registries/renderers, not relabelled WEB fixtures."""
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
@@ -560,7 +572,7 @@ def test_deterministic_coverage_only_plan_rejects_provenance_or_support_mutation
 
 def test_actual_core_coverage_renderer_shape_is_admitted_without_inventing_support(monkeypatch):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_documentary_constraints import evidence as core_evidence
     from test_pilot_answer_plan import input_profile,signed,PROFILE_KEY,COVERAGE_KEY
@@ -642,7 +654,7 @@ def test_mixed_deterministic_graph_rejects_unbound_coverage_and_text_mutations(d
 
 def test_actual_core_mixed_claim_and_coverage_graph_is_admitted(monkeypatch):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
     from test_fulltext_grounded import passage
@@ -680,7 +692,7 @@ def test_actual_core_mixed_claim_and_coverage_graph_is_admitted(monkeypatch):
 @pytest.mark.parametrize('damage',['drop_processing','relabel_supported','validation_status'])
 def test_actual_core_broad_inflection_cannot_drop_or_relabel_processing_limit(monkeypatch,damage):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_bounded_recomposition import _plan_runtime
     from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
@@ -936,7 +948,7 @@ def test_unsigned_web_tool_intent_does_not_override_authenticated_plan(tmp_path)
 def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypatch,status):
     from pathlib import Path
     from types import SimpleNamespace
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from tools.zrc_reference.pilot_evidence import source_views
     passage={'source_slug':'epravopis','title':'Synthetic dictionary entry','url':None,
@@ -988,7 +1000,7 @@ def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypa
 def test_web_signed_correction_and_history_plan_matches_core_slot_authority(
         monkeypatch,language,question,context,facets,target):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1000,7 +1012,7 @@ def test_web_signed_correction_and_history_plan_matches_core_slot_authority(
 
 def test_web_signed_multi_target_correction_stays_ambiguous_for_core(monkeypatch):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1022,7 +1034,7 @@ def test_web_signed_multi_target_correction_stays_ambiguous_for_core(monkeypatch
 def test_web_signed_replacement_plan_builds_real_core_registry_for_new_target(
         monkeypatch,locale,question,context,source_text,form,role_context):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
@@ -1052,7 +1064,7 @@ def test_web_signed_replacement_plan_builds_real_core_registry_for_new_target(
 def test_web_signed_unresolved_or_historical_replacement_cannot_build_core_source_unit(
         monkeypatch,context,targets,ambiguities):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
@@ -1074,7 +1086,7 @@ def test_web_signed_unresolved_or_historical_replacement_cannot_build_core_sourc
 
 def test_web_signed_italian_ui_matrix_request_keeps_exact_names_and_role_context(monkeypatch):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1113,7 +1125,7 @@ def test_web_signed_italian_ui_matrix_request_keeps_exact_names_and_role_context
 def test_web_signed_ordered_grammar_slot_contract_matches_core_direct_parse(
         monkeypatch,locale,question,slots):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1151,7 +1163,7 @@ def test_web_signed_ordered_grammar_slot_contract_matches_core_direct_parse(
 def test_web_and_core_preserve_same_closed_grammar_slot_ambiguity(
         monkeypatch,locale,question,ambiguity):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1171,7 +1183,7 @@ def test_web_and_core_preserve_same_closed_grammar_slot_ambiguity(
 def test_web_and_core_reject_grammar_role_without_lexical_target(
         monkeypatch,locale,question):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     from core.lexical_planner import plan
     from tools.zrc_reference.query_relevance import interpret
@@ -1191,7 +1203,7 @@ def test_web_and_core_reject_grammar_role_without_lexical_target(
 def test_web_signed_single_grammar_slot_builds_real_core_answer_unit(
         monkeypatch,locale,question,source_text,expected_number,form):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
@@ -1225,7 +1237,7 @@ def test_web_signed_single_grammar_slot_builds_real_core_answer_unit(
 def test_web_signed_multi_slot_reaches_core_without_first_slot_or_cross_product(
         monkeypatch,locale,question,sources,slots):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
@@ -1252,7 +1264,7 @@ def test_web_signed_multi_slot_reaches_core_without_first_slot_or_cross_product(
 
 def test_web_signed_multi_slot_rejects_unbound_arbitrary_form(monkeypatch):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
@@ -1287,7 +1299,7 @@ def test_web_signed_multi_slot_rejects_unbound_arbitrary_form(monkeypatch):
 def test_web_signed_grammar_ambiguity_blocks_real_core_registry_with_source_present(
         monkeypatch,locale,question,reason):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_item,input_profile,PROFILE_KEY
@@ -1314,7 +1326,7 @@ def test_web_signed_grammar_ambiguity_blocks_real_core_registry_with_source_pres
 ])
 def test_tampered_web_grammar_slots_block_real_core_registry(monkeypatch,mutation):
     from pathlib import Path
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from core.lexical_planner import plan
     from test_pilot_answer_plan import exact_excerpt_units,input_profile,PROFILE_KEY
@@ -1349,7 +1361,7 @@ def test_application_capture_consumes_real_gateway_contract_and_answer_plan(
     from pathlib import Path
     from unittest.mock import Mock
     import subprocess,sys
-    root=Path(__file__).resolve().parents[2]/'klikai-human-testing-20260911'
+    root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_fulltext_grounded import store as zrc_store

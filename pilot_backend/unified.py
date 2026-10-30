@@ -61,9 +61,94 @@ ANSWER_PLAN_RENDERED_LIMITATIONS = {
         ('recommendation','ne vsebuje zahtevanega priporočila','non contiene la raccomandazione richiesta'),
         ('usage','ne vsebuje zahtevanih podatkov o rabi','non contiene le informazioni d’uso richieste'))}}
 
+CITATION_MISMATCH_REASONS = frozenset({
+    'missing_evidence','invalid_frozen_binding','evidence_text','source_key',
+    'locator','range','snippet','source_id','source_revision'})
+
 
 def evidence_id(row):
     return row.get('evidence_id') or row.get('passage_id') or row.get('citation_id')
+
+
+def frozen_citation_binding(item, view):
+    """Retain the exact CORE source tuple privately inside a new WEB freeze.
+
+    Public source projections intentionally omit some citation fields and may
+    pretty-print tool records.  This small hash-and-metadata tuple is covered by
+    the family snapshot and remains private; it lets the consumer validate a
+    future answer against the freeze instead of trusting redundant display
+    metadata returned with that answer.
+    """
+    text=view.get('snippet');locator=view.get('locator')
+    source_key=view.get('source_slug');external_id=view.get('external_id')
+    revision=view.get('source_revision')
+    identity=evidence_id(item)
+    if (not isinstance(text,str)or not text
+            or not isinstance(locator,dict)or not locator
+            or not isinstance(source_key,str)or source_key!=item.get('source_slug')
+            or not isinstance(external_id,str)or not external_id
+            or not isinstance(revision,str)or not revision
+            or view.get('citation_id')!=identity):
+        return None
+    source_id=(external_id if ':'in external_id else source_key+':'+external_id)
+    return {'source_key':source_key,'external_id':external_id,
+        'source_id':source_id,'source_revision':revision,
+        'locator_sha256':digest(locator),'text_sha256':digest(text),
+        'text_length':len(text)}
+
+
+def citation_mismatch(row, source, binding=None, frozen_locator=None):
+    """Return one fixed, non-sensitive reason while preserving strict checks."""
+    if not isinstance(source,dict):return'missing_evidence'
+    source_text=source.get('snippet')
+    if binding is not None:
+        required={'source_key','external_id','source_id','source_revision',
+                  'locator_sha256','text_sha256','text_length'}
+        if (not isinstance(binding,dict)or set(binding)!=required
+                or not isinstance(binding.get('source_key'),str)
+                or not isinstance(binding.get('external_id'),str)
+                or not isinstance(binding.get('source_id'),str)
+                or not isinstance(binding.get('source_revision'),str)
+                or not isinstance(binding.get('locator_sha256'),str)
+                or not isinstance(binding.get('text_sha256'),str)
+                or type(binding.get('text_length'))is not int
+                or not isinstance(frozen_locator,dict)or not frozen_locator
+                or digest(frozen_locator)!=binding['locator_sha256']):
+            return'invalid_frozen_binding'
+        if (not isinstance(source_text,str)
+                or len(source_text)!=binding['text_length']
+                or digest(source_text)!=binding['text_sha256']):
+            return'evidence_text'
+        source_key=binding['source_key'];source_locator=frozen_locator
+        expected_source_id=binding['source_id'];source_revision=binding['source_revision']
+    else:
+        source_locator=source.get('locator');external_id=source.get('external_id')
+        source_key=source.get('source_slug')
+        expected_source_id=(external_id if isinstance(external_id,str)and':'in external_id
+            else source_key+':'+external_id
+            if isinstance(source_key,str)and isinstance(external_id,str)and external_id else None)
+        source_revision=source.get('source_revision')
+    if row.get('source_key')!=source_key:return'source_key'
+    if not isinstance(source_locator,dict)or source_locator!=row.get('locator'):return'locator'
+    start,end=row.get('char_start'),row.get('char_end')
+    if (not isinstance(source_text,str)or type(start)is not int or type(end)is not int
+            or not 0<=start<end<=len(source_text)):
+        return'range'
+    if source_text[start:end]!=row.get('snippet'):return'snippet'
+    if (row.get('source_id')!=expected_source_id
+            if expected_source_id is not None else'source_id'in row):
+        return'source_id'
+    if (row.get('source_revision')!=source_revision
+            if isinstance(source_revision,str)and source_revision
+            else'source_revision'in row):
+        return'source_revision'
+    return None
+
+
+def citation_failure(reason):
+    error=Failure('unknown_citation',502)
+    if reason in CITATION_MISMATCH_REASONS:error.citation_mismatch=reason
+    return error
 
 
 def shared_interpretation(gateway,question,context,input_language,locale):
@@ -243,7 +328,10 @@ def diagnostic(error, stage):
     code = error.code if isinstance(error, Failure) and error.code in codes else 'invalid_gateway_response'
     status=getattr(error,'http_status',None)
     from .human_feedback import safe_exception
-    return {'technical_cause':safe_exception(error),'error_code': code, 'stage': stage, **({'http_status':status}if type(status)is int and 100<=status<=599 else{})}
+    mismatch=getattr(error,'citation_mismatch',None)
+    return {'technical_cause':safe_exception(error),'error_code': code, 'stage': stage,
+            **({'citation_mismatch':mismatch}if mismatch in CITATION_MISMATCH_REASONS else{}),
+            **({'http_status':status}if type(status)is int and 100<=status<=599 else{})}
 
 
 def match(capture, kind, label, text, source, locale, weight=0):
@@ -726,6 +814,8 @@ def freeze(gateway, family, policy):
             if not isinstance(item, dict) or not isinstance(evidence_id(item), str) or not isinstance(item.get('source'), dict):
                 raise Failure('invalid_answer', 502)
             view=item['source']
+            binding=frozen_citation_binding(item,view)
+            if binding is not None:item['_citation_binding']=binding
             item['source']={key:deepcopy(view[key])for key in ('title','url','locator','status','edition','publication_scope','annual_scope')if key in view}
             if 'status' not in view and 'source_status' in view:
                 item['source']['status']=deepcopy(view['source_status'])
@@ -863,6 +953,7 @@ def _generate(gateway, bundle, tier, model, parent=None):
                 or (decision_sources and not scoped_partial)):
             raise Failure('unknown_citation', 502)
         matched = {evidence_id(row): row for row in bundle['matches']}
+        if len(matched)!=len(bundle['matches']):raise Failure('unknown_citation',502)
         checked_sources, seen_sources = [], set()
         cited_ids = {evidence_id(row) for row in evidence + citations}
         for row in decision_sources:
@@ -1071,26 +1162,23 @@ def _generate(gateway, bundle, tier, model, parent=None):
                 evidence_by_id={evidence_id(row):row for row in evidence}
                 for row in citations:
                     source=evidence_by_id.get(row['evidence_id'])
-                    source_text=source.get('snippet')if isinstance(source,dict)else None
-                    source_locator=source.get('locator')if isinstance(source,dict)else None
-                    external_id=source.get('external_id')if isinstance(source,dict)else None
-                    source_slug=source.get('source_slug')if isinstance(source,dict)else None
-                    expected_source_id=(external_id if isinstance(external_id,str)and':'in external_id
-                        else source_slug+':'+external_id
-                        if isinstance(source_slug,str)and isinstance(external_id,str)and external_id else None)
-                    source_revision=source.get('source_revision')if isinstance(source,dict)else None
-                    if (not source or row['source_key']!=source_slug
-                            or not isinstance(source_locator,dict)
-                            or source_locator!=row['locator']
-                            or not isinstance(source_text,str)
-                            or row['char_end']>len(source_text)
-                            or source_text[row['char_start']:row['char_end']]!=row['snippet']
-                            or (row.get('source_id')!=expected_source_id
-                                if expected_source_id is not None else'source_id'in row)
-                            or (row.get('source_revision')!=source_revision
-                                if isinstance(source_revision,str)and source_revision
-                                else'source_revision'in row)):
-                        raise Failure('unknown_citation',502)
+                    frozen=matched.get(row['evidence_id'])
+                    binding=(frozen.get('_citation_binding')
+                             if isinstance(frozen,dict)else None)
+                    frozen_source=(frozen.get('source')
+                                   if isinstance(frozen,dict)else None)
+                    frozen_locator=(frozen_source.get('locator')
+                                    if isinstance(frozen_source,dict)else None)
+                    mismatch=citation_mismatch(row,source,binding,frozen_locator)
+                    if mismatch:raise citation_failure(mismatch)
+                    if binding is not None:
+                        # Only the redundant reader projection is normalized;
+                        # answer text and citations already matched the signed
+                        # frozen source tuple exactly above.
+                        source.update(source_slug=binding['source_key'],
+                            external_id=binding['external_id'],
+                            source_revision=binding['source_revision'],
+                            locator=deepcopy(frozen_locator))
                 for block in claim_blocks:
                     claim=claim_by_id[block['claim_id']]
                     bound=[row for row in citations if row['claim_id']==block['claim_id']]

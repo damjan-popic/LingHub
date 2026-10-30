@@ -418,15 +418,77 @@ def mixed_answer_plan_result():
     return result
 
 
-def run_bounded_answer_plan(result):
+def run_bounded_answer_plan(result,matches=None):
     from types import SimpleNamespace
     known={'known','other-known'}|{unified.evidence_id(row)for row in
         [*result.get('evidence',[]),*result.get('citations',[])]}
     body={'contract':unified.CONTRACT,'locale':'sl',
-        'matches':[{'evidence_id':value}for value in sorted(known)if value],
+        'matches':(matches if matches is not None else
+            [{'evidence_id':value}for value in sorted(known)if value]),
         'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
     return unified.generate(SimpleNamespace(request=lambda *args:result),
         dict(body,snapshot_sha256=digest(body)),'short','qwen')
+
+
+def frozen_match_from_evidence(evidence):
+    external_id=evidence['external_id'];source_key=evidence['source_slug']
+    source_id=(external_id if ':'in external_id else source_key+':'+external_id)
+    return {'evidence_id':unified.evidence_id(evidence),'source_slug':source_key,
+        'external_id':external_id,'source':{'locator':deepcopy(evidence['locator'])},
+        '_citation_binding':{'source_key':source_key,'external_id':external_id,
+            'source_id':source_id,'source_revision':evidence['source_revision'],
+            'locator_sha256':digest(evidence['locator']),
+            'text_sha256':digest(evidence['snippet']),
+            'text_length':len(evidence['snippet'])}}
+
+
+def frozen_matches_from_result(result):
+    return [frozen_match_from_evidence(row)for row in result['evidence']]
+
+
+def bounded_frozen_match():
+    return frozen_match_from_evidence(bounded_answer_plan_evidence())
+
+
+def test_frozen_citation_binding_accepts_only_exact_citation_and_repairs_reader_projection():
+    result=bounded_answer_plan_result()
+    result['evidence'][0].update(source_slug='display-drift',external_id='display-drift',
+        source_revision='display-drift',locator={'display-drift':True})
+    output=run_bounded_answer_plan(result,[bounded_frozen_match()])
+    assert output['generation']['status']=='generated'
+    assert {key:output['evidence'][0][key]for key in
+            ('source_slug','external_id','source_revision','locator')}=={
+        'source_slug':'synthetic','external_id':'record-1',
+        'source_revision':'b'*64,'locator':{'synthetic':True}}
+
+
+@pytest.mark.parametrize(('damage','reason'),[
+    ('source_key','source_key'),('locator','locator'),('source_id','source_id'),
+    ('source_revision','source_revision'),('snippet','snippet'),('range','range'),
+    ('evidence_text','evidence_text')])
+def test_frozen_citation_binding_rejects_every_changed_citation_fact(damage,reason):
+    result=bounded_answer_plan_result()
+    if damage=='source_key':result['citations'][0]['source_key']='forged'
+    elif damage=='locator':result['citations'][0]['locator']={'forged':True}
+    elif damage=='source_id':result['citations'][0]['source_id']='synthetic:forged'
+    elif damage=='source_revision':result['citations'][0]['source_revision']='f'*64
+    elif damage=='snippet':result['citations'][0]['snippet']='Forged source support.'
+    elif damage=='range':result['citations'][0]['char_end']=999
+    elif damage=='evidence_text':result['evidence'][0]['snippet']='Changed source support.'
+    output=run_bounded_answer_plan(result,[bounded_frozen_match()])
+    assert {key:output['generation'][key]for key in
+            ('status','error_code','stage','citation_mismatch')}=={
+        'status':'failed','error_code':'unknown_citation',
+        'stage':'citation_validation','citation_mismatch':reason}
+    assert output['evidence']==[]
+
+
+def test_duplicate_frozen_evidence_identity_is_rejected_before_binding_lookup():
+    match=bounded_frozen_match()
+    output=run_bounded_answer_plan(
+        bounded_answer_plan_result(),[match,deepcopy(match)])
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
 
 
 def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structured_graph():
@@ -440,7 +502,7 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type
-    output=run_bounded_answer_plan(result)
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result))
     assert output['generation']['status']=='generated'
     assert output['generation_status']=='deterministic_bounded_answer_plan'
     assert output['display_blocks'][0]['evidence_ids']==['known']
@@ -499,11 +561,49 @@ def test_real_core_comparison_and_curated_units_cross_the_web_consumer(monkeypat
 
     for result,unit_type in ((curated_result,'curated_recommendation'),
                              (comparison_result,'comparison_synthesis')):
-        output=run_bounded_answer_plan(result)
+        output=run_bounded_answer_plan(result,frozen_matches_from_result(result))
         assert output['generation']['status']=='generated',json.dumps(output,indent=2)
         assert output['generation_status']=='deterministic_bounded_answer_plan'
         assert output['display_blocks'][0]['unit_type']==unit_type
         assert output['display_blocks'][0]['evidence_ids']
+
+
+def test_real_core_marko_homograph_grammar_unit_crosses_the_web_consumer(monkeypatch):
+    """Exercise the exact CORE producer shape used by the ordinary name question."""
+    from pathlib import Path
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root));monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_pilot_answer_plan import recorded_grammar_slot_item
+    from tools.zrc_reference.request_interpretation import authoritative_request_plan
+
+    question='Prosim, kako se sklanja ime Marko v rodilniku?'
+    masculine,masculine_source=recorded_grammar_slot_item(
+        'Marko','Marka',entry='lexeme:masculine',key='marko-masculine')
+    feminine,feminine_source=recorded_grammar_slot_item(
+        'Marko','Marko',entry='lexeme:feminine',key='marko-feminine',
+        gender='feminine')
+    rows=[masculine,feminine];passages=[masculine_source,feminine_source]
+    for item,source in zip(rows,passages):
+        item.update(span=deepcopy(source['span']),source_id=source['source_id'],
+                    source_revision=source['source_revision'])
+    request_plan=authoritative_request_plan(
+        question,'',input_language='sl',locale='sl')
+    payload=_plan_runtime_payload(
+        question,rows,passages,request_plan=request_plan)
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    unit=next(row for row in registry.units if row['unit_type']=='grammar_slot')
+    result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
+        'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result))
+    assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+    assert output['answer_md']==(
+        'Če gre za moško ime »Marko«, je rodilnik »Marka«; če gre za žensko '
+        'ime »Marko«, je rodilnik »Marko« (vir: Sloleks).')
+    assert output['display_blocks'][0]['unit_type']=='grammar_slot'
+    assert len(output['display_blocks'][0]['evidence_ids'])==2
 
 
 @pytest.mark.parametrize('locator',[

@@ -48,11 +48,10 @@ class Gateway:
                                 code=detail.get('code')if isinstance(detail,dict)else detail
                                 if code=='PILOT_REQUEST_PLAN_MISMATCH':
                                     failure=Failure('request_plan_mismatch',409)
-                                else:
-                                    from .human_feedback import PROVIDER_FAILURE_CODES
-                                    if isinstance(code,str)and code in PROVIDER_FAILURE_CODES:
-                                        failure=Failure(code,response.status_code)
-                                        failure.http_status=response.status_code
+                                elif code in {'PILOT_FROZEN_RESOURCE_UNAVAILABLE',
+                                        'PILOT_INVALID_FROZEN_REQUEST','PILOT_BUSY','PILOT_TIMEOUT'}:
+                                    failure=Failure(code,response.status_code)
+                                    failure.http_status=response.status_code
                             except (ValueError,TypeError):pass
                         if base is None and path=='/internal/pilot/generate':
                             # Preserve useful classifications without retaining an

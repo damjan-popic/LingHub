@@ -121,7 +121,7 @@ def reader(bundle):
  def measures(items):
   return '; '.join(str(x['value'])+' · '+(x.get('corpus')or ('corpus non specificato'if it else'korpus ni naveden')) for x in items if x.get('value')is not None and x.get('measure')=='frequency')
  morphology=[]
- for part in p['facets']['morphology']['data']:
+ for part in p.get('facets',{}).get('morphology',{}).get('data')or[]:
   for le in (part.get('result')or{}).get('lexemes',[]):
    state=by_id.get(le['source_entry_id'],{}).get('state','primary')
    if decision and state=='excluded':continue

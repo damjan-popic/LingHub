@@ -462,6 +462,57 @@ def test_frozen_citation_binding_accepts_only_exact_citation_and_repairs_reader_
         'source_revision':'b'*64,'locator':{'synthetic':True}}
 
 
+def test_frozen_documentary_binding_preserves_core_namespace_for_colon_native_id():
+    result=bounded_answer_plan_result()
+    result['display_blocks'][0]['unit_type']='grammar_slot'
+    result['evidence'][0]['external_id']='synthetic:native-record-1'
+    result['citations'][0]['source_id']='synthetic:synthetic:native-record-1'
+    evidence=result['evidence'][0]
+    match={'evidence_id':unified.evidence_id(evidence),
+        'source_slug':evidence['source_slug'],'capture_sha256':'c'*64,
+        'source':{'locator':deepcopy(evidence['locator'])}}
+    view=dict(evidence,citation_id=unified.evidence_id(evidence))
+    match['_citation_binding']=unified.frozen_citation_binding(match,view)
+    assert match['_citation_binding']['source_id']=='synthetic:synthetic:native-record-1'
+    output=run_bounded_answer_plan(result,[match])
+    assert output['generation']['status']=='generated'
+
+
+def test_grammar_and_colon_native_documentary_citations_share_strict_graph():
+    result=bounded_answer_plan_result()
+    result['display_blocks'][0]['unit_type']='grammar_slot'
+    result['display_blocks'].append({'block_id':'B2','paragraph_id':'P2',
+        'unit_id':'U0000000000000002','unit_type':'exact_source_excerpt',
+        'claim_id':'C2','text':'Additional exact documentary support.',
+        'support_ids':['S2']})
+    result['claims'].append({'claim_id':'C2','paragraph_id':'P2',
+        'unit_id':'U0000000000000002','text':'Additional exact documentary support.',
+        'support_ids':['S2'],'fact_ids':[],'section':'answer','depends_on':[],
+        'support_mode':'deterministic_bounded_answer_plan'})
+    documentary={'evidence_id':'documentary','source_slug':'synthetic',
+        'external_id':'synthetic:native-record-2','source_revision':'c'*64,
+        'snippet':'Exact documentary support.','locator':{'documentary':True}}
+    result['evidence'].append(documentary)
+    result['citations'].append({'block_id':'B2','claim_id':'C2',
+        'unit_id':'U0000000000000002','evidence_id':'documentary',
+        'support_id':'S2','source_key':'synthetic',
+        'snippet':'Exact documentary support.','locator':{'documentary':True},
+        'char_start':0,'char_end':26,
+        'source_id':'synthetic:synthetic:native-record-2',
+        'source_revision':'c'*64})
+    result['answer_md']=result['short_answer']=unified.deterministic_answer_text(
+        result['display_blocks'])
+    match={'evidence_id':'documentary','source_slug':'synthetic',
+        'capture_sha256':'c'*64,'source':{'locator':{'documentary':True}}}
+    view=dict(documentary,citation_id='documentary')
+    match['_citation_binding']=unified.frozen_citation_binding(match,view)
+    output=run_bounded_answer_plan(
+        result,[frozen_match_from_evidence(result['evidence'][0]),match])
+    assert output['generation']['status']=='generated'
+    assert {row['source_id']for row in output['citations']}=={
+        'synthetic:record-1','synthetic:synthetic:native-record-2'}
+
+
 @pytest.mark.parametrize(('damage','reason'),[
     ('source_key','source_key'),('locator','locator'),('source_id','source_id'),
     ('source_revision','source_revision'),('snippet','snippet'),('range','range'),

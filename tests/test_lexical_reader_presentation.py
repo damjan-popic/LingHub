@@ -53,6 +53,15 @@ def test_old_snapshot_keeps_candidate_ambiguity_without_replaying_engine_disagre
     assert 'classla'not in visible(cards)and'spacy'not in visible(cards)
 
 
+def test_unavailable_morphology_facet_does_not_break_the_saved_answer_reader():
+    b=bundle();p=b['analysis']['captures'][0]['response']
+    p['facets']['morphology']['data']=None
+    cards=reader(b)
+    sections={s['title']:s['items']for s in cards['sections']}
+    assert 'Oblike in pregibanje'not in sections
+    assert 'Razlaga besedne zveze'in sections
+
+
 def test_italian_cards_localize_derived_text_and_relation_labels():
     b=bundle();b['locale']='it';cards=reader(b);text=visible(cards)
     sections={s['title']:s['items']for s in cards['sections']}

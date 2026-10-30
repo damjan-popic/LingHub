@@ -90,7 +90,15 @@ def frozen_citation_binding(item, view):
             or not isinstance(revision,str)or not revision
             or view.get('citation_id')!=identity):
         return None
-    source_id=(external_id if ':'in external_id else source_key+':'+external_id)
+    # CORE always namespaces documentary captures, including native record IDs
+    # that already contain a colon. Tool and ordinary passage IDs retain the
+    # historical already-namespaced convention. `capture_sha256` is populated
+    # only for documentary rows in CORE's frozen match projection.
+    documentary=(isinstance(item.get('capture_sha256'),str)
+                 and bool(item['capture_sha256']))
+    source_id=(source_key+':'+external_id if documentary
+               else external_id if ':'in external_id
+               else source_key+':'+external_id)
     return {'source_key':source_key,'external_id':external_id,
         'source_id':source_id,'source_revision':revision,
         'locator_sha256':digest(locator),'text_sha256':digest(text),

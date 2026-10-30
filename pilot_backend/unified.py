@@ -757,6 +757,109 @@ def expand_reference_sources(gateway, family, definitions, tool_capture, found, 
         else:status['status']='ok' if status['returned_count'] else 'no_match'
 
 
+O_NAME_DECLENSION_RULE_QUERY = (
+    'Marko glavnem sklanjatvenem vzorcu korak zapis osnovnih oblik bratu')
+O_NAME_DECLENSION_RULE_LOOKUP_LIMIT = 1
+
+
+def o_name_declension_rule_query(family):
+    """Return one class-level rule lookup from the shared request plan.
+
+    This consumes the interpretation already obtained from CORE.  WEB does not
+    maintain a second parser or infer an answer; it only freezes the two
+    documentary rule scopes that CORE may later admit.
+    """
+    plan=family.get('request_plan') if isinstance(family,dict) else None
+    if not isinstance(plan,dict) or plan.get('ambiguities'):
+        return None
+    slots=plan.get('requested_grammar_slots');targets=plan.get('target_spans')
+    if (not isinstance(slots,list) or len(slots)!=1
+            or not isinstance(targets,list) or len(targets)!=1
+            or not isinstance(slots[0],dict) or not isinstance(targets[0],dict)):
+        return None
+    slot=slots[0];target=targets[0].get('text')
+    context=targets[0].get('context_span',{})
+    context_text=context.get('text') if isinstance(context,dict) else ''
+    if (set(slot)!={'case','number'}
+            or slot.get('case')not in {'genitive','dative'}
+            or slot.get('number')not in {None,'singular'}
+            or not isinstance(target,str) or len(target)<3
+            or target[-1:].casefold()!='o'
+            or not isinstance(context_text,str)
+            or re.search(r'\b(?:ime|imena|priimek|priimka|nome|cognome)\b',
+                         context_text,re.I)is None):
+        return None
+    return O_NAME_DECLENSION_RULE_QUERY
+
+
+def o_name_declension_rule_capture(row):
+    """Identify the two current SP2001 rule scopes without record-ID pinning."""
+    if (not isinstance(row,dict) or row.get('source_slug')!='sp2001'
+            or row.get('capture_kind')!='resource_record'):
+        return False
+    capture=row.get('capture')
+    if (not isinstance(capture,dict)
+            or capture.get('normative_status')!='current_reference'):
+        return False
+    text=capture.get('original_text')
+    if not isinstance(text,str):return False
+    first=(re.search(
+        r'Nekateri\s+samostalniki,\s+ki\s+gredo\s+po\s+glavnem\s+'
+        r'sklanjatvenem\s+vzorcu\s+korak,.{1,360}?'
+        r'imenovalniške\s+končnice.{1,180}?-o.{1,180}?Marko',
+        text,re.I|re.S)is not None)
+    paradigm=all(re.search(pattern,text,re.I|re.S)is not None for pattern in (
+        r'Zapisi\s+osnovnih\s+oblik.{1,260}?nakazujejo\s+cele\s+naglasne\s+tipe',
+        r'rodilniška\s+končnica.{1,360}?vsej\s+sklanjatvi',
+        r'br[aà]t\s+br[aá]ta.{1,260}?sledi\s+br[aá]tu'))
+    return first or paradigm
+
+
+def expand_o_name_declension_rules(
+        gateway,family,definitions,found,coverage,detail_pool,pool):
+    """Freeze one bounded SP2001 rule lookup beside the surface lookup."""
+    query=o_name_declension_rule_query(family)
+    if query is None:return
+    definition=next((row for row in definitions
+        if row.get('slug')=='sp2001'
+        and row.get('adapter_key')=='official_reference_jsonl'),None)
+    by_source={row['family']:row for row in coverage}
+    status=by_source.get('sp2001')
+    if definition is None or status is None:return
+    # This is a separate construction-level cap, not an unbounded morphology
+    # expansion: exactly one additional source request may be issued.
+    matches,extra=pool.submit(
+        collect_source,gateway,family,definition,detail_pool,
+        query_override=query).result()
+    scoped=[row for row in matches if o_name_declension_rule_capture(row)]
+    known={(row['source_slug'],row['external_id'],row['capture_sha256'])
+           for row in found}
+    added=[]
+    for row in scoped:
+        identity=(row['source_slug'],row['external_id'],row['capture_sha256'])
+        if identity not in known:
+            found.append(row);added.append(row);known.add(identity)
+    status['declension_rule_expansion']={
+        'basis':'shared_request_plan_o_name_singular_slot',
+        'query':query,'status':extra['status'],
+        'scoped_returned_count':len(scoped),'added_count':len(added),
+        'candidates':deepcopy(extra.get('candidates',[]))}
+    status.setdefault('surface_returned_count',status['returned_count'])
+    status.setdefault('per_query_limit',status['limit'])
+    status['query_variants']=list(dict.fromkeys(
+        [*status.get('query_variants',[]),*extra.get('query_variants',[])]))
+    status['limit']+=status['per_query_limit']*O_NAME_DECLENSION_RULE_LOOKUP_LIMIT
+    status['returned_count']=len({
+        (row['external_id'],row['capture_kind'],row['capture_sha256'])
+        for row in found if row['source_slug']=='sp2001'})
+    status['search_ms']+=extra['search_ms'];status['elapsed_ms']+=extra['elapsed_ms']
+    failed={'partial','timeout','unavailable','unsupported'}
+    if status['status']in failed or extra['status']in failed:
+        status['status']=('partial' if status['returned_count'] else
+            (status['status'] if status['status']in failed else extra['status']))
+    else:status['status']='ok' if status['returned_count'] else 'no_match'
+
+
 def freeze(gateway, family, policy):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
@@ -790,6 +893,8 @@ def freeze(gateway, family, policy):
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
         expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
+        expand_o_name_declension_rules(
+            gateway,family,definitions,found,coverage,details,pool)
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.

@@ -159,14 +159,29 @@ def _grammar_slot_sequence(segment,language):
   return [],True
  return slots,False
 
+def _without_slovenian_preference_tail(text):
+ """Remove one finite follow-up after an otherwise complete slot request."""
+ right=len(text.rstrip())
+ while right and text[right-1]in'?!.':
+  right-=1
+  while right and text[right-1].isspace():right-=1
+ tail=re.search(
+  r'\s+(?:in|ter)\s+kater\w+\s+'
+  r'(?:oblik\w*|od\s+(?:teh|obeh)\s+oblik\w*)\s+'
+  r'(?:je\s+)?(?:priporoč\w*|navadnejš\w*|bolj\s+navadn\w*)\s*$',
+  text[:right],re.I)
+ if tail is None:return text
+ return text[:tail.start()]
+
 def structured_grammar_request(text):
  """Parse ordered case/number pairs and their one exact lexical target."""
+ grammar_text=_without_slovenian_preference_tail(text)
  postfix=re.fullmatch(
   rf'\s*kako\s+(?:(?:{_SL_INFLECTION_MODAL})\s+)?(?:se\s+)?'
   rf'(?:(?:{_SL_INFLECTION_MODIFIER})\s+){{0,3}}'
   rf'(?:{SL_INFLECTION_ACTION})\s+(?P<label>{_SL_NAMED_ROLE})\s+'
   rf'(?P<target>[^?!.;\n]{{1,160}}?)\s+v\s+'
-  rf'(?P<grammar>{_SL_CASE_SURFACE}[^?!.;\n]{{0,120}})\s*[.?!]*\s*$',text,re.I)
+  rf'(?P<grammar>{_SL_CASE_SURFACE}[^?!.;\n]{{0,120}})\s*[.?!]*\s*$',grammar_text,re.I)
  if postfix:
   target,ambiguity=_validated_grammar_target(
    text,'sl',*postfix.span('target'))
@@ -183,9 +198,9 @@ def structured_grammar_request(text):
              rf'(?:{_SL_CASE_TOKEN})\b',re.I),
   re.compile(r'\s*(?:(?:qual\s+[èe]|quali\s+sono)\s+(?:il\s+)?)?'
              rf'(?:il\s+)?(?:{_IT_CASE_TOKEN})\b',re.I))
- candidate=any(pattern.match(text)for pattern in wrappers)
+ candidate=any(pattern.match(grammar_text)for pattern in wrappers)
  for language,pattern in _GRAMMAR_REQUESTS:
-  match=pattern.fullmatch(text)
+  match=pattern.fullmatch(grammar_text)
   if not match:continue
   slots,invalid=_grammar_slot_sequence(match['grammar'],language)
   if invalid:
@@ -196,7 +211,7 @@ def structured_grammar_request(text):
    return {'matched':True,'slots':[],'target':None,'ambiguity':ambiguity}
   return {'matched':True,'slots':slots,'target':target,'ambiguity':ambiguity}
  if candidate:
-  language='it'if re.search(_IT_CASE_TOKEN,text,re.I)else'sl'
+  language='it'if re.search(_IT_CASE_TOKEN,grammar_text,re.I)else'sl'
   return _grammar_pairing_failure(text,language)
  return {'matched':False,'slots':[],'target':None,'ambiguity':None}
 
@@ -592,12 +607,84 @@ def portable_request_plan(interpretation,language='und'):
   'candidate_lemmas':[{'target':t['text'],'candidates':list(t.get('lemma_candidates',[])),'basis':'analyzer_nomination_requires_resource_match'}for t in interpretation['targets'] if t.get('lemma_candidates')],
   'operation':operation,'source_language':language if language in {'sl','it'}else None,
   'translation_language':destination[0]if len(destination)==1 else None,'response_language':None,
-  'requested_facets':list(dict.fromkeys([*portable_facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen'),('recommendation',r'priporočen|odsvetovan|nezaželen'),('usage',r'uporablja|rabi\b')]if re.search(pattern,text,re.I)]])),'requested_grammar_slots':grammar_slots,'domain':domain_text,'geography':geography,'jurisdiction':None,
+  'requested_facets':list(dict.fromkeys([*portable_facets,*[name for name,pattern in [('example',r'primer|stavk'),('explanation',r'zakaj|razlag'),('spacing',r'skupaj|narazen'),('recommendation',r'priporočen|navadnejš|bolj\s+navadn|odsvetovan|nezaželen'),('usage',r'uporablja|rabi\b')]if re.search(pattern,text,re.I)]])),'requested_grammar_slots':grammar_slots,'domain':domain_text,'geography':geography,'jurisdiction':None,
   'requested_source':'pravopis8'if proposal else None,'requested_edition':'proposal'if proposal else None,
   'ambiguities':(['translation_direction_unspecified']if operation=='translation_help'and len(destination)!=1 else[])+(['unresolved_reference']if not targets and is_referential_request(text)else[])+(['coordinated_target_unresolved']if any(target.get('basis')=='ambiguous correction replacement; original surface'for target in targets)else[])+list(interpretation.get('grammar_ambiguities',[])),
   'confidence':'bounded_surface'if targets else'broad_routes'}
 
 _COMPARISON_CONTEXT={'brez','ni','ne','je','so','sta','smo','ste','sem','si','se','v','za','na','pri','od','do','z','s','iz','ob','po','k','h'}
+
+def bounded_slovenian_comparison(text):
+ """Bind exactly two alternatives in a closed ordinary question frame.
+
+ ``None`` leaves unrelated requests to the established parsers; ``[]`` marks
+ a recognized but unsafe comparison and prevents a permissive fallback.
+ """
+ atom=r"[^\W\d_]+(?:[-’'][^\W\d_]+)*"
+ scope=(r'(?:(?:v|po)\s+(?:(?:knjižn\w*|standardn\w*)\s+)?'
+        r'(?:slovenščin\w*|slovensk\w+\s+jezik\w*)\s+)?')
+ tail=(r'(?:zakaj|kater\w+\s+(?:oblik\w*|od\s+(?:teh|obeh)\s+'
+       r'oblik\w*)\s+(?:je\s+)?(?:priporoč\w*|navadnejš\w*|'
+       r'bolj\s+navadn\w*)(?:\s+in\s+zakaj)?)')
+ tailed=re.fullmatch(
+  rf'\s*ali\s+je\s+{scope}pravilno\s+'
+  r'(?:(?:reči|uporabiti|zapisati|napisati)\s+)?'
+  rf'(?P<pair>[^?!.;\n]{{3,180}}?)\s+in\s+{tail}\?\s*',text,re.I)
+ meta=re.fullmatch(
+  rf'\s*ali\s+je\s+{scope}pravilno\s+'
+  r'(?:reči|uporabiti|zapisati|napisati)\s+'
+  r'(?P<pair>[^?!.;\n]{3,180}?)\?\s*',text,re.I)
+ base=re.fullmatch(
+  rf'\s*ali\s+je\s+{scope}pravilno\s+'
+  r'(?P<pair>[^?!.;\n]{3,180}?)\?\s*',text,re.I)
+ recognized=bool(re.match(rf'\s*ali\s+je\s+{scope}pravilno\b',text,re.I))
+ match=tailed or meta or base
+ if match is None:return []if recognized else None
+ pair=match['pair'];offset=match.start('pair')
+ case_word=_grammar_inventory_pattern(GRAMMAR_CASES)
+ number_word=_grammar_inventory_pattern(GRAMMAR_NUMBERS)
+ if re.search(rf'\b(?:{case_word}|{number_word})\b',pair,re.I):return []
+ boundaries=list(re.finditer(r'\s+ali\s+',pair,re.I))
+ if len(boundaries)!=1:return []
+ boundary=boundaries[0]
+ raw_parts=(pair[:boundary.start()],pair[boundary.end():])
+ offsets=(offset,offset+boundary.end())
+ unsafe={'ali','in','oziroma','ter','ne','ni','niti'}
+ def lexical(raw,absolute):
+  left=len(raw)-len(raw.lstrip());right=len(raw.rstrip())
+  value=raw[left:right];words=[row.group()for row in WORD.finditer(value)]
+  if (not re.fullmatch(rf'{atom}(?:\s+{atom}){{0,3}}',value)
+      or not 1<=len(words)<=4 or len(value)>80
+      or {word.casefold()for word in words}&unsafe):return None
+  start=absolute+left
+  return {'text':value,'start':start,'end':start+len(value)}
+ prepositional=[bool(re.match(r'\s*(?:z|s|k|h|brez)\s+',raw,re.I))
+                for raw in raw_parts]
+ if any(prepositional)and not all(prepositional):return []
+ spans=[]
+ if all(prepositional):
+  parts=[]
+  for raw,absolute in zip(raw_parts,offsets):
+   phrase=re.fullmatch(
+    rf'\s*(?P<preposition>z|s|k|h|brez)\s+'
+    rf'(?P<target>{atom}(?:\s+{atom}){{0,3}})\s*',raw,re.I)
+   if phrase is None:return []
+   target=lexical(phrase['target'],absolute+phrase.start('target'))
+   if target is None:return []
+   context_start=absolute+phrase.start('preposition')
+   context_end=absolute+phrase.end('target')
+   target['basis']='shared-preposition comparison alternative; original surface'
+   target['context_span']={'text':text[context_start:context_end],
+    'start':context_start,'end':context_end,
+    'basis':'shared-preposition comparison context; original surface'}
+   parts.append((phrase['preposition'].casefold(),target))
+  if parts[0][0]!=parts[1][0]:return []
+  spans=[target for _,target in parts]
+ else:
+  spans=[lexical(raw,absolute)for raw,absolute in zip(raw_parts,offsets)]
+  if any(span is None for span in spans):return []
+  for span in spans:span['basis']='bounded comparison alternative; original surface'
+ return spans if spans[0]['text'].casefold()!=spans[1]['text'].casefold()else[]
 
 def comparison_lexical_spans(text,spans):
  """Separate contrasted lexical forms from shared grammatical clause context.
@@ -648,6 +735,8 @@ def plan(text,context,language,analysis,request_plan=None):
                        r'(?:slovensko|italijansko)',text,re.I)):
   requested.remove('translation')
  grammar=structured_grammar_request(text)
+ bounded_comparison=(None if supplied_plan is not None or grammar['matched']
+                     else bounded_slovenian_comparison(text))
  hints=[w for r in analysis.get('raw_engines',{}).values()for w in r.get('analysis',{}).get('words',[])];spans=[];kind='question';basis=[]
  def add(a,b,why):
   if any(m.start()<b and a<m.end() for m in re.finditer(r'https?://\S+|\b\w*[0-9_]\w*\b',text)):return
@@ -688,11 +777,16 @@ def plan(text,context,language,analysis,request_plan=None):
  elif is_referential_request(text):
   target=bound_context_target(text,context,language)
   if target:spans.append(target)
+ elif bounded_comparison is not None:
+  spans=copy.deepcopy(bounded_comparison)
+  kind='comparison'
  if supplied_plan is not None:
   kind='comparison'if len(spans)>1 else'word'if spans and lexical_word(text)else'phrase'if spans and len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
  elif spans:
   kind='comparison'if len(spans)>1 else'word'if lexical_word(text)else'phrase'if len(list(WORD.finditer(spans[0]['text'])))>1 else'question'
  elif grammar['matched']:pass
+ elif bounded_comparison is not None:
+  kind='comparison'
  elif is_referential_request(text):pass
  elif lexical_word(text):
   m=WORD.search(text);add(m.start(),m.end(),'single lexical surface');kind='word'
@@ -751,6 +845,8 @@ def plan(text,context,language,analysis,request_plan=None):
  else:
   grammar_slots,grammar_ambiguity=authoritative_grammar_sequence(grammar,context)
   grammar_ambiguities=[grammar_ambiguity]if grammar_ambiguity else[]
+  if bounded_comparison==[]:
+   grammar_ambiguities.append('coordinated_target_unresolved')
  if supplied_plan is not None:
   cases=list(dict.fromkeys(row.get('case')for row in grammar_slots
                            if isinstance(row.get('case'),str)))

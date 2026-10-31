@@ -1344,6 +1344,58 @@ def test_web_and_core_preserve_same_closed_grammar_slot_ambiguity(
     assert ambiguity in signed['ambiguities']and ambiguity in direct['ambiguities']
 
 
+@pytest.mark.parametrize('question',[
+    'Ali je pravilno reči z otroki ali z otroci in zakaj?',
+    'Ali je pravilno volivec ali volilec in katera oblika je priporočena?',
+    'Ali je pravilno uporabiti volivec ali volilec?',
+    ('Kako se pravilno sklanja moško ime Aljoša v rodilniku ednine '
+     'in katera oblika je navadnejša?'),
+])
+def test_web_and_core_share_bounded_ordinary_paraphrase_contract(
+        monkeypatch,question):
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+    direct=interpret(question)
+    assert [(row['text'],row['start'],row['end'])for row in
+            signed['target_spans']]==[(row['text'],row['start'],row['end'])
+                                     for row in direct['target_spans']]
+    assert signed['requested_grammar_slots']==direct['requested_grammar_slots']
+    assert signed['requested_facets']==direct['requested_facets']
+    assert signed['ambiguities']==direct['ambiguities']==[]
+
+
+@pytest.mark.parametrize('question',[
+    'Ali je pravilno reči z otroki ali k otrokom in zakaj?',
+    'Ali je pravilno volivec ali volilec ali volivka in katera oblika je priporočena?',
+    'Ali je pravilno ne volivec ali volilec in zakaj?',
+    'Ali je pravilno volivec ali volilec v dajalniku?',
+    'Ali je pravilno reči volivec ali volilec v rodilniku ednine?',
+    'Ali je pravilno volivec ali volilec v rodilniku ednine in zakaj?',
+    ('Ali je pravilno volivec ali volilec v rodilniku ednine in katera '
+     'oblika je priporočena?'),
+    ('Kako se pravilno sklanja moško ime Aljoša v rodilniku ednine '
+     'in katera oblika je navadnejša v dajalniku?'),
+    ('Kako se pravilno sklanja ime Aljoša ali Miha v rodilniku ednine '
+     'in katera oblika je navadnejša?'),
+])
+def test_web_and_core_keep_new_unsafe_paraphrases_closed(monkeypatch,question):
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    from core.lexical_planner import plan
+    from tools.zrc_reference.query_relevance import interpret
+    signed=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+    direct=interpret(question)
+    for request in (signed,direct):
+        assert request['target_spans']==[]
+        assert request['ambiguities']
+    assert signed['requested_grammar_slots']==direct['requested_grammar_slots']
+    assert set(signed['requested_facets'])==set(direct['requested_facets'])
+    assert signed['ambiguities']==direct['ambiguities']
+
+
 @pytest.mark.parametrize('locale,question',[
     ('sl','Kako se glasi rodilnik imena?'),
     ('it','Qual è il genitivo del nome?'),

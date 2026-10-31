@@ -57,6 +57,63 @@ def test_postfixed_case_inflection_does_not_collapse_coordinated_names():
  assert request['ambiguities']==['grammar_target_binding_unresolved']
 
 
+@pytest.mark.parametrize(('question','targets','contexts','facets'),[
+ ('Ali je pravilno reči z otroki ali z otroci in zakaj?',
+  ['otroki','otroci'],['z otroki','z otroci'],{'explanation'}),
+ ('Ali je pravilno volivec ali volilec in katera oblika je priporočena?',
+  ['volivec','volilec'],[None,None],{'recommendation'}),
+ ('Ali je pravilno uporabiti volivec ali volilec?',
+  ['volivec','volilec'],[None,None],set()),
+ ('Ali je pravilno zapisati volivec ali volilec?',
+  ['volivec','volilec'],[None,None],set()),
+ ('Ali je pravilno napisati volivec ali volilec?',
+  ['volivec','volilec'],[None,None],set()),
+])
+def test_bounded_ordinary_comparison_contract(
+        question,targets,contexts,facets):
+ request=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+ assert [row['text']for row in request['target_spans']]==targets
+ assert [row.get('context_span',{}).get('text')for row in
+         request['target_spans']]==contexts
+ assert facets<=set(request['requested_facets'])
+ assert request['ambiguities']==[]
+
+
+@pytest.mark.parametrize('question',[
+ ('Kako se pravilno sklanja moško ime Aljoša v rodilniku ednine '
+  'in katera oblika je navadnejša?'),
+ ('Kako se pravilno sklanja moško ime Aljoša v rodilniku ednine '
+  'ter katera od teh oblik je bolj navadna?'),
+])
+def test_finite_preference_followup_keeps_web_grammar_contract(question):
+ request=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+ assert [row['text']for row in request['target_spans']]==['Aljoša']
+ assert request['requested_grammar_slots']==[
+  {'case':'genitive','number':'singular'}]
+ assert 'recommendation'in request['requested_facets']
+ assert request['ambiguities']==[]
+
+
+@pytest.mark.parametrize('question',[
+ 'Ali je pravilno reči z otroki ali k otrokom in zakaj?',
+ 'Ali je pravilno volivec ali volilec ali volivka in katera oblika je priporočena?',
+ 'Ali je pravilno ne volivec ali volilec in zakaj?',
+ 'Ali je pravilno volivec ali volilec v dajalniku?',
+ 'Ali je pravilno reči volivec ali volilec v rodilniku ednine?',
+ 'Ali je pravilno volivec ali volilec v rodilniku ednine in zakaj?',
+ ('Ali je pravilno volivec ali volilec v rodilniku ednine in katera '
+  'oblika je priporočena?'),
+ ('Kako se pravilno sklanja moško ime Aljoša v rodilniku ednine '
+  'in katera oblika je navadnejša v dajalniku?'),
+ ('Kako se pravilno sklanja ime Aljoša ali Miha v rodilniku ednine '
+  'in katera oblika je navadnejša?'),
+])
+def test_new_paraphrases_keep_unsafe_requests_closed(question):
+ request=plan(question,'','sl',{'raw_engines':{}})['request_plan']
+ assert request['target_spans']==[]
+ assert request['ambiguities']
+
+
 def test_web_projects_the_pinned_core_grammar_interpretation_contract():
  root=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
  if not root:pytest.skip('KLIKAI_PINNED_CORE_ROOT is not configured')

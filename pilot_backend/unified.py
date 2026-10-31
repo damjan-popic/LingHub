@@ -26,8 +26,8 @@ REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
-    'terminology_equivalence','comparison_synthesis','curated_recommendation','bounded_attestation',
-    'exact_source_excerpt','grammar_slot'})
+    'terminology_equivalence','comparison_synthesis','recommendation_synthesis',
+    'curated_recommendation','bounded_attestation','exact_source_excerpt','grammar_slot'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
     'text','claim_id','support_ids'})
 ANSWER_PLAN_CLAIM_FIELDS = frozenset({'claim_id','text','support_ids','fact_ids','section',
@@ -761,6 +761,90 @@ O_NAME_DECLENSION_RULE_QUERY = (
     'Marko glavnem sklanjatvenem vzorcu korak zapis osnovnih oblik bratu')
 O_NAME_DECLENSION_RULE_LOOKUP_LIMIT = 1
 
+SAME_PREPOSITION_LEGEND_QUERY = (
+    'Splošne normativne oznake ● prepovedano beseda ali besedna zveza '
+    'ki ne ustreza normi knjižnega jezika')
+SAME_PREPOSITION_LEGEND_LOOKUP_LIMIT = 1
+
+
+def same_preposition_legend_query(family):
+    """Return one SP2001 legend lookup for a shared-preposition choice.
+
+    CORE owns the construction parser.  WEB consumes only its signed request
+    plan and freezes the publisher's marker explanation as a separate source;
+    it does not infer either the requested case or the answer.
+    """
+    plan=family.get('request_plan') if isinstance(family,dict) else None
+    if not isinstance(plan,dict) or plan.get('ambiguities'):
+        return None
+    targets=plan.get('target_spans')
+    if (not isinstance(targets,list) or len(targets)!=2
+            or any(not isinstance(row,dict) or row.get('basis')!=
+                'shared-preposition comparison alternative; original surface'
+                for row in targets)):
+        return None
+    return SAME_PREPOSITION_LEGEND_QUERY
+
+
+def same_preposition_legend_capture(row):
+    """Admit only the current SP2001 page that states the marker meaning."""
+    if (not isinstance(row,dict) or row.get('source_slug')!='sp2001'
+            or row.get('capture_kind')!='resource_record'):
+        return False
+    capture=row.get('capture')
+    if (not isinstance(capture,dict)
+            or capture.get('normative_status')!='current_reference'):
+        return False
+    text=capture.get('original_text')
+    return isinstance(text,str) and re.search(
+        r'Splošne\s+normativne\s+oznake.{0,240}?'
+        r'●\s+prepovedano\s+beseda\s+ali\s+besedna\s+zveza,\s*ki\s+'
+        r'ne\s+ustreza\s+normi\s+knjižnega\s+jezika',
+        text,re.I|re.S)is not None
+
+
+def expand_same_preposition_legend(
+        gateway,family,definitions,found,coverage,detail_pool,pool):
+    """Freeze one separately cited SP2001 marker legend beside the entry."""
+    query=same_preposition_legend_query(family)
+    if query is None:return
+    definition=next((row for row in definitions
+        if row.get('slug')=='sp2001'
+        and row.get('adapter_key')=='official_reference_jsonl'),None)
+    by_source={row['family']:row for row in coverage}
+    status=by_source.get('sp2001')
+    if definition is None or status is None:return
+    matches,extra=pool.submit(
+        collect_source,gateway,family,definition,detail_pool,
+        query_override=query).result()
+    scoped=[row for row in matches if same_preposition_legend_capture(row)]
+    known={(row['source_slug'],row['external_id'],row['capture_sha256'])
+           for row in found}
+    added=[]
+    for row in scoped:
+        identity=(row['source_slug'],row['external_id'],row['capture_sha256'])
+        if identity not in known:
+            found.append(row);added.append(row);known.add(identity)
+    status['same_preposition_legend_expansion']={
+        'basis':'shared_request_plan_same_preposition_comparison',
+        'query':query,'status':extra['status'],
+        'scoped_returned_count':len(scoped),'added_count':len(added),
+        'candidates':deepcopy(extra.get('candidates',[]))}
+    status.setdefault('surface_returned_count',status['returned_count'])
+    status.setdefault('per_query_limit',status['limit'])
+    status['query_variants']=list(dict.fromkeys(
+        [*status.get('query_variants',[]),*extra.get('query_variants',[])]))
+    status['limit']+=status['per_query_limit']*SAME_PREPOSITION_LEGEND_LOOKUP_LIMIT
+    status['returned_count']=len({
+        (row['external_id'],row['capture_kind'],row['capture_sha256'])
+        for row in found if row['source_slug']=='sp2001'})
+    status['search_ms']+=extra['search_ms'];status['elapsed_ms']+=extra['elapsed_ms']
+    failed={'partial','timeout','unavailable','unsupported'}
+    if status['status']in failed or extra['status']in failed:
+        status['status']=('partial' if status['returned_count'] else
+            (status['status'] if status['status']in failed else extra['status']))
+    else:status['status']='ok' if status['returned_count'] else 'no_match'
+
 
 def o_name_declension_rule_query(family):
     """Return one class-level rule lookup from the shared request plan.
@@ -893,6 +977,8 @@ def freeze(gateway, family, policy):
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
         expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
+        expand_same_preposition_legend(
+            gateway,family,definitions,found,coverage,details,pool)
         expand_o_name_declension_rules(
             gateway,family,definitions,found,coverage,details,pool)
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
@@ -1301,7 +1387,8 @@ def _generate(gateway, bundle, tier, model, parent=None):
                                      row['char_start'],row['char_end'])for row in bound}
                     if (not ids or len(citation_spans)!=len(bound)
                             or (len(set(support_ids))!=len(support_ids)
-                                and block['unit_type']!='comparison_synthesis')
+                                and block['unit_type']not in {
+                                    'comparison_synthesis','recommendation_synthesis'})
                             or set(support_ids)!=set(block['support_ids'])
                             or any(row['block_id']!=block['block_id']
                                    or row['unit_id']!=block['unit_id'] for row in bound)

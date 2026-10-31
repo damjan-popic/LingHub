@@ -549,7 +549,8 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 
 
 @pytest.mark.parametrize('unit_type',[
-    'curated_recommendation','comparison_synthesis','grammar_slot'])
+    'curated_recommendation','comparison_synthesis','recommendation_synthesis',
+    'grammar_slot'])
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type
@@ -559,13 +560,14 @@ def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     assert output['display_blocks'][0]['evidence_ids']==['known']
 
 
-def test_real_core_comparison_and_curated_units_cross_the_web_consumer(monkeypatch):
+def test_real_core_synthesis_and_curated_units_cross_the_web_consumer(monkeypatch):
     """Use CORE's real registries/renderers, not relabelled WEB fixtures."""
     from pathlib import Path
     root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
-    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_bounded_recomposition import (
+        _plan_runtime,_plan_runtime_payload,_recommendation_synthesis_payload)
     from test_documentary_constraints import evidence
     from test_pilot_answer_plan import curated_item
     from tools.zrc_reference.request_interpretation import response as interpret_response
@@ -610,13 +612,28 @@ def test_real_core_comparison_and_curated_units_cross_the_web_consumer(monkeypat
         'no_sufficient_evidence':False},comparison_registry,
         payload=comparison_payload,tier='answer')
 
+    recommendation_payload=_recommendation_synthesis_payload()
+    recommendation_registry=runtime._answer_registry(
+        recommendation_payload,'answer')
+    recommendation_unit=next(row for row in recommendation_registry.units
+        if row['unit_type']=='recommendation_synthesis')
+    recommendation_result=runtime._process_fresh_answer_plan({
+        'answer_language':'sl','blocks':[{'block_id':'B1',
+            'unit_id':recommendation_unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},recommendation_registry,
+        payload=recommendation_payload,tier='answer')
+
     for result,unit_type in ((curated_result,'curated_recommendation'),
-                             (comparison_result,'comparison_synthesis')):
+                             (comparison_result,'comparison_synthesis'),
+                             (recommendation_result,'recommendation_synthesis')):
         output=run_bounded_answer_plan(result,frozen_matches_from_result(result))
         assert output['generation']['status']=='generated',json.dumps(output,indent=2)
         assert output['generation_status']=='deterministic_bounded_answer_plan'
         assert output['display_blocks'][0]['unit_type']==unit_type
         assert output['display_blocks'][0]['evidence_ids']
+        if unit_type=='recommendation_synthesis':
+            assert len(output['citations'])==4
+            assert len({row['support_id']for row in output['citations']})==2
 
 
 def test_real_core_marko_homograph_grammar_unit_crosses_the_web_consumer(monkeypatch):

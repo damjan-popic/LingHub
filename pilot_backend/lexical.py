@@ -1,6 +1,8 @@
 """Frozen reader facets, independent of today's analyzers and writer availability."""
 from copy import deepcopy
 import re
+from core.lexical_identity import morphology_key,source_occurrence_key
+from core.loris_roles import loris_advice_roles
 
 EXPLICIT_BRIEF=re.compile(r'\b(?:na kratko|kratko prosim|brevemente|in breve|briefly|in short)\b',re.I)
 
@@ -109,7 +111,7 @@ def reader(bundle):
  it=bundle['locale']=='it';sections=[];alternatives=[];labels=GRAMMAR['it'if it else'sl']
  decision=p['interpretation'].get('selection');by_id={}
  for u in p['evidence']:
-  if u['kind']=='morphology':by_id[u['entry_id'].split(':slot:')[0]]=u.get('selection',{})
+   if u['kind']=='morphology':by_id[morphology_key(u)]=u.get('selection',{})
  def status_label(raw):
   value=str(raw or '').lower()
   if value in {'manual','ssss-manual'}:return 'revisione manuale'if it else'ročno pregledano'
@@ -123,24 +125,37 @@ def reader(bundle):
  morphology=[]
  for part in p.get('facets',{}).get('morphology',{}).get('data')or[]:
   for le in (part.get('result')or{}).get('lexemes',[]):
-   state=by_id.get(le['source_entry_id'],{}).get('state','primary')
+   state=by_id.get(morphology_key(le),{}).get('state','primary')
    if decision and state=='excluded':continue
-   if any(r['record_id']==le['source_entry_id']for r in morphology+alternatives):continue
+   occurrence=source_occurrence_key(le.get('evidence',{}))
+   if occurrence and any(r.get('source_occurrence_key')==occurrence for r in morphology+alternatives):continue
    grammar=le['grammatical_features'];freq=measures(le['frequency_observations'])
-   rows=[];focus=p['interpretation']['slot_focus']
+   rows=[];focus={k:v for k,v in (p['interpretation']['slot_focus']or{}).items()if k in {'case','number'}and v}
+   choice=p['interpretation'].get('form_choice')or(p['interpretation'].get('request_plan')or{}).get('form_choice')or{}
+   construction=choice.get('construction')or{}
+   cases=set(construction.get('case_candidates',[]));numbers=set(construction.get('number_candidates',[]))
    for s in le['slots']:
     fs=s['normalized_features'];forms=list(dict.fromkeys(v['form']for v in s['variants']))
     label=' · '.join(labels[str(fs[k])]for k in ('case','number','gender','degree','definiteness','definite','animacy')if str(fs.get(k))in labels)
-    rows.append({'title':label,'text':' / '.join(forms),'label':'Sloleks 3.1','record_id':le['source_entry_id']})
-   noteworthy=[r for r,s in zip(rows,le['slots'])if len({v['form']for v in s['variants']})>1 and (not focus or all(s['normalized_features'].get(k)==v for k,v in focus.items()if k in {'case','number'}and v))]
+    memberships=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(index+1),
+        'forms':list(dict.fromkeys(le['slots'][m['slot']]['variants'][m['variant']]['form']for m in pat['members']if m['slot']==s['slot_locator']))}
+        for index,pat in enumerate(le['patterns'])if any(m['slot']==s['slot_locator']for m in pat['members'])]
+    rows.append({'title':label,'text':' / '.join(forms),'label':'Sloleks 3.1','record_id':le['source_entry_id'],'pattern_memberships':memberships})
+   submitted={a['slot_locator']for a in le.get('submitted_analyses',[])}
+   noteworthy=[r for r,s in zip(rows,le['slots'])if
+       (all(s['normalized_features'].get(k)==v for k,v in focus.items())if focus else
+        (not cases or s['normalized_features'].get('case')in cases)and(not numbers or s['normalized_features'].get('number')in numbers)if cases or numbers else s['slot_locator']in submitted)]
+   if not noteworthy:noteworthy=[r for r,s in zip(rows,le['slots'])if len({v['form']for v in s['variants']})>1][:2]
    title=le['lemma']+' · '+', '.join(labels[v]for v in grammar.values()if v in labels)
    if decision:title=le['lemma']+' · '+labels.get(le['grammatical_type'],le['grammatical_type'])+(' · '+', '.join(labels[v]for v in grammar.values()if v!='general'and v in labels)if any(v!='general'for v in grammar.values())else'')
-   row={'title':title,'text':(('Frequenza del lessema: 'if it else'Pogostnost leksema: ')+freq if freq else ('Frequenza non registrata.'if it else'Pogostnost ni zapisana.')),'label':'Sloleks 3.1 · '+status_label(le['source_status']),'details':status_details(le['source_status']),'record_id':le['source_entry_id'],'items':noteworthy[:2],'forms':rows,'patterns':[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(number+1),'items':[{'title':rows[m['slot']]['title'],'text':le['slots'][m['slot']]['variants'][m['variant']]['form']}for m in pat['members']]}for number,pat in enumerate(le['patterns'])]}
+   pattern_details=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(number+1),'text':str(len(pat['members']))+(' forme associate nel paradigma completo.'if it else' povezanih oblik v celotnem pregibanju.')}for number,pat in enumerate(le['patterns'])]
+   row={'title':title,'text':(('Frequenza del lessema: 'if it else'Pogostnost leksema: ')+freq if freq else ('Frequenza non registrata.'if it else'Pogostnost ni zapisana.')),'label':'Sloleks 3.1 · '+status_label(le['source_status']),'details':status_details(le['source_status'])+pattern_details,'record_id':le['source_entry_id'],'source_occurrence_key':occurrence,'items':noteworthy[:6],'forms':rows}
    (alternatives if state=='alternative'else morphology).append(row)
  section('Forme e flessione'if it else'Oblike in pregibanje',morphology)
  synonyms=[];collocations=[];loris=[];terms=[]
  for u in p['evidence']:
-  if u.get('selection',{}).get('state')in {'excluded','alternative'}:continue
+  state=u.get('selection',{}).get('state')
+  if state=='excluded'or state=='alternative'and u['kind']!='loris':continue
   d=u['fields'];base={'record_id':u['record_id'],'label':{'synonyms':'Sopomenke 2.2','collocations':'Kolokacije 2.2','loris':'LORIS'}.get(u['kind'],'Terminologia'if it else'Terminološki vir'),'title':u['target']}
   if u['match_relation']=='alternative_lexical_identity':base['label']+=' · '+('altra voce lessicale'if it else'druga slovarska iztočnica')
   if u['match_relation']=='component_only':base['label']+=' · '+('solo componente'if it else'le sestavina')
@@ -157,7 +172,19 @@ def reader(bundle):
    if u.get('editorial_status',{}).get('raw'):base['label']+=' · '+status_label(u['editorial_status']['raw']);base['details']=status_details(u['editorial_status']['raw'])
    freq=d.get('frequency');collocations.append({**base,'title':d['surface'],'text':(('Frequenza della collocazione: 'if it else'Pogostnost kolokacije: ')+str(freq)+' · Gigafida 2.0'if freq is not None else ('Frequenza non registrata'if it else'Pogostnost ni zapisana'))+(' · logDice: '+str(d['logDice'])if d.get('logDice')is not None else'')+(' · '+('solo componente'if it else'le sestavina')if u['match_relation']=='component_only'else'')})
   elif u['kind']=='loris':
-   payload=d.get('payload',{});loris.append({**base,'text':((' → '+payload['SteMislili']+'. ')if payload.get('SteMislili')else'')+str(payload.get('Vslo')or payload.get('explanation')or payload.get('message')or payload.get('description')or payload.get('sl')or payload.get('recommendation')or '')})
+   payload=d.get('payload',{});advice=loris_advice_roles(d)
+   text=(advice.get('explanation')or'')if advice else str(payload.get('Vslo')or payload.get('explanation')or payload.get('message')or payload.get('description')or payload.get('sl')or payload.get('recommendation')or '')
+   replacement=advice.get('recommended_replacements')if advice else payload.get('SteMislili')
+   canonical=d.get('trigger')
+   if (replacement and advice and advice['relation']=='normative_explanation'
+       and isinstance(canonical,str)and canonical.strip()
+       and canonical!=advice.get('input_form')):
+    # The source rule may be matched through a different inflected surface.
+    # Its canonical replacement is provenance, not that surface's replacement.
+    base['details']=[{'title':'Relazione nella fonte'if it else'Virsko izhodišče',
+        'text':canonical+' → '+replacement}]
+   elif replacement:text=' → '+replacement+'. '+text
+   if text.strip():(alternatives if state=='alternative'else loris).append({**base,'text':text,'reference_url':advice.get('reference_url')if advice else None})
   elif u['kind']=='terminology':terms.append({**base,'title':d['title'],'text':' · '.join(d.get('standardized_terms',[])+d.get('proposals',[]))})
  section('Relazioni di significato'if it else'Pomenske povezave',synonyms)
  section('Collocazioni registrate'if it else'Zapisane besedne zveze',collocations)
@@ -186,5 +213,5 @@ def reader(bundle):
  section('Interpretazione della locuzione'if it else'Razlaga besedne zveze',interpretation_rows)
  section('Letture grammaticali registrate'if it else'Zapisane slovnične možnosti',analysis_rows)
  section('Contesto necessario'if it else'Potreben kontekst',uncertainty)
- section('Altre analisi automatiche registrate'if it else'Druge samodejno zapisane analize',alternatives)
+ section('Altre letture registrate'if it else'Druge zapisane možnosti',alternatives)
  return {'title':'Profilo lessicale'if it else'Podatki o izrazu','sections':sections,'note':'Dati delle fonti, indipendenti dalla risposta generata. Le frequenze non stabiliscono una preferenza normativa.'if it else'Podatki iz virov, neodvisni od generiranega odgovora. Pogostnost ne določa normativne prednosti.'}

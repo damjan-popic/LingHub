@@ -6,6 +6,8 @@ from fastapi import APIRouter,HTTPException,Request
 from pydantic import BaseModel,Field
 from starlette.concurrency import run_in_threadpool
 from .lexical_planner import plan,lexical_word
+from .lexical_identity import source_occurrence_key,morphology_key
+from .loris_roles import loris_advice_roles
 from .platform_api import AnalyzeRequest,analyze_once,AnalyzerFailure,available,bounded,public,bounded_thesaurus
 CONTRACT='linghub.lexical-profile.v1'
 router=APIRouter()
@@ -36,16 +38,28 @@ def aggregate(parts):
 
 def facet(status,data=None,**extra):return {'status':status,'data':data,**extra}
 def source_record(kind,entry_id,body,provenance,target,relation='recorded_target'):
- item=public({'kind':kind,'entry_id':entry_id,'target':target,'match_relation':relation,'fields':body,'provenance':provenance});item['record_id']='lexical:'+digest(item);return item
+ item=public({'kind':kind,'entry_id':entry_id,'target':target,'match_relation':relation,'fields':body,'provenance':provenance})
+ occurrence=source_occurrence_key(provenance)if kind=='morphology'else None
+ if occurrence:item['source_occurrence_key']=occurrence
+ item['record_id']='lexical:'+digest(item);return item
 
-def morphological_records(result,target,focus):
+def morphological_records(result,target,focus,construction=None):
  out=[]
+ focus={k:v for k,v in (focus or{}).items()if k in {'case','number'}and v}
+ construction=construction or{}
+ cases=set(construction.get('case_candidates',[]));numbers=set(construction.get('number_candidates',[]))
  for le in result['lexemes']:
   prov=le['evidence'];head={k:le[k]for k in ['source_entry_id','lemma','grammatical_type','grammatical_features','source_status','frequency_observations','submitted_form','submitted_analyses','matched_by','head_source']}
   out.append(source_record('morphology',le['source_entry_id'],head,prov,target))
   # Keep complete slots; a requested grammatical contrast precedes other slots.
   slots=sorted(le['slots'],key=lambda s:(not bool(focus and all(s['normalized_features'].get(k)==v for k,v in focus.items()if k in {'case','number'}and v)),not(len({v['form']for v in s['variants']})>1),s['slot_locator']))
-  for s in slots[:4]:
+  # A submitted alternative can be wrong for the explicit construction.
+  # Retain its intended lemma's actual required slot, not just matching forms.
+  required=[s for s in slots if (cases or numbers)
+      and (not cases or s['normalized_features'].get('case')in cases)
+      and (not numbers or s['normalized_features'].get('number')in numbers)]
+  selected=required+[s for s in slots if s not in required][:max(0,4-len(required))]
+  for s in selected:
    body={'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'grammatical_features':le['grammatical_features'],'source_status':le['source_status'],'slot':s}
    out.append(source_record('morphology',le['source_entry_id']+':slot:'+str(s['slot_locator']),body,prov,target))
  return out
@@ -65,13 +79,26 @@ async def make_profile(req,request):
   if not reader:return facet('unavailable',reason='Rich Sloleks index not configured')
   if 'sl'not in interpretation['lookup_languages']:return facet('not_applicable',reason='Slovene inventory is not applied to explicit Italian input')
   if not lexical_word(surface):return facet('not_applicable',reason='Whole phrase is not a single Sloleks entry')
-  try:return facet('matched',await run_in_threadpool(reader.lookup,surface,req.limit))
+  try:
+   discover=(interpretation['query_kind']=='comparison' or bool(interpretation.get('form_choice'))
+       or bool(interpretation.get('explicit_lexemes')))
+   # The existing 256-unit capture bound leaves room for complete slot groups
+   # and dictionary/rule evidence; this is a candidate budget, not a card limit.
+   budget=max(8,32//max(1,len(targets)))
+   lookup=reader.discover if discover and hasattr(reader,'discover')else reader.lookup
+   if discover and hasattr(reader,'discover'):
+    choice=interpretation.get('form_choice')or(interpretation.get('request_plan')or{}).get('form_choice')or{}
+    explicit=choice.get('explicit_lexemes')or interpretation.get('explicit_lexemes')or[]
+    nominations=[x.get('text')for x in explicit]+target.get('lemma_candidates',[])
+    return facet('matched',await run_in_threadpool(lookup,surface,budget,nominations))
+   return facet('matched',await run_in_threadpool(lookup,surface,req.limit))
   except Exception:return facet('unavailable',reason='Sloleks edition unavailable or changed')
  morph=await asyncio.gather(*(morphology_lookup(t)for t in targets));morphdata=[];lookups=[]
  for t,part in zip(targets,morph):
   d=part.get('data');status=d['status']if d else part['status'];morphdata.append({'target':t['text'],'status':status,'result':d,'reason':part.get('reason')})
   if d:
-   records.extend(morphological_records(d,t['text'],interpretation['slot_focus']))
+   choice=interpretation.get('form_choice')or(interpretation.get('request_plan')or{}).get('form_choice')or{}
+   records.extend(morphological_records(d,t['text'],interpretation['slot_focus'],choice.get('construction')))
    exact=[le for le in d['lexemes']if le['matched_by']=='exact_headword']
    t['resource_identity_preference']={'basis':'exact case-preserving headword; alternatives retained, not a frequency decision','source_entry_ids':[le['source_entry_id']for le in exact],'proper_name_primary':bool(exact)and all(le['grammatical_features'].get('type')=='proper'for le in exact)}
    candidates=[x['lemma']for x in d['lexemes']]
@@ -152,7 +179,10 @@ async def make_profile(req,request):
   if identity in seen or type(a)is not int or type(b)is not int:continue
   seen.add(identity);matching=[t for t in targets if t['start']<=a<b<=t['end']]
   if not matching:continue
-  t=matching[0];relation='whole_expression'if a==t['start']and b==t['end']else'component_only';rec={**issue,'matched_text':analysis_text[a:b],'match_relation':relation,'analysis_basis':'established contextual LORIS matcher; original-surface aliases preserved'};loris.append(rec)
+  t=matching[0];relation='whole_expression'if a==t['start']and b==t['end']else'component_only';rec={**issue,'matched_text':analysis_text[a:b],'match_relation':relation,'analysis_basis':'established contextual LORIS matcher; original-surface aliases preserved'}
+  roles=loris_advice_roles(rec)
+  if roles:rec['normalized_advice']=roles
+  loris.append(rec)
   records.append(source_record('loris',issue['rule_id'],rec,{'resource_id':'loris',**analysis.get('provenance',{})},t['text'],relation))
  facets['loris']=facet('matched'if loris else'unavailable'if analysis['status']=='unavailable'or analysis.get('loris_status')=='unavailable'else'not_attempted'if analysis.get('loris_status')=='not_attempted'else'no_match',loris)
  # The same existing local KLIKai record service, not a parallel import stack.
@@ -194,9 +224,10 @@ async def make_profile(req,request):
       part=await morphology_lookup({'text':w['text']});readings=[];source_slots=[]
       for le in (part.get('data')or{}).get('lexemes',[]):
        for matched in le['submitted_analyses']:
-        if not any(s['source_entry_id']==le['source_entry_id']and s['slot']['slot_locator']==matched['slot_locator']for s in source_slots):
+        if not any(morphology_key(s)==morphology_key(le)and s['slot']['slot_locator']==matched['slot_locator']for s in source_slots):
          source_slots.append({'source_entry_id':le['source_entry_id'],'lemma':le['lemma'],'source_status':le['source_status'],'provenance':le['evidence'],'slot':copy.deepcopy(le['slots'][matched['slot_locator']])})
         readings.append({'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'source_entry_id':le['source_entry_id'],'source_status':le['source_status'],
+             'source_occurrence_key':source_occurrence_key(le['evidence']),
             'selection':'primary'if le['lemma']==w['lemma']else'alternative',
             'features':matched['features'],'original_msd':matched['original_msd'],'source_locator':matched['variant_locator'],'slot_locator':matched['slot_locator'],'exact_surface':matched['exact_surface']})
       forms[w['text']]={'status':part['status'],'recorded_readings':readings,'source_slots':source_slots,'candidate_inventory_truncated':bool((part.get('data')or{}).get('truncated'))}
@@ -213,7 +244,7 @@ async def make_profile(req,request):
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
- return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v2-20261018','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
+ return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v3-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
 def httpx_client():
  import httpx
  return httpx.AsyncClient(timeout=5,trust_env=False,follow_redirects=False)

@@ -238,7 +238,7 @@ export function usedBadges(tier) {
 export function safeSourceLink(value) {
   try { const url = new URL(value); if (url.protocol !== 'https:' || url.username || url.password) return null;
     const host = url.hostname.toLowerCase();
-    if (!['fran.si','svetovalnica.zrc-sazu.si','www.fran.si','www.jeziknaklik.it','jeziknaklik.it','viri.cjvt.si','www.clarin.si','clarin.si','www.slori.org','slori.org'].includes(host) && !host.endsWith('.jeziknaklik.it') && !host.endsWith('.zrc-sazu.si')) return null;
+    if (!['fran.si','svetovalnica.zrc-sazu.si','www.fran.si','www.jeziknaklik.it','jeziknaklik.it','viri.cjvt.si','www.clarin.si','clarin.si','www.slori.org','slori.org','www.smejse.it','smejse.it'].includes(host) && !host.endsWith('.jeziknaklik.it') && !host.endsWith('.zrc-sazu.si')) return null;
     return url.href;
   } catch { return null; }
 }

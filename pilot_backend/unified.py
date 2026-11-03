@@ -606,7 +606,7 @@ def dictionary_lookups(hit, query, family, candidate=None):
             or hit.get('score_method') != 'official_reference_exact_headword'
             or not isinstance(hit.get('published_headword'), str) or not hit['published_headword']):
         return []
-    grouped = {}
+    grouped = {};occurrences={}
     if candidate is not None:
         bases={'recorded_morphology_identity':'recorded_morphology_lemma',
                'recorded_phrase_morphology_identity':'recorded_phrase_morphology_lemma'}
@@ -614,6 +614,8 @@ def dictionary_lookups(hit, query, family, candidate=None):
             return []
         for record in candidate['source_records']:
             grouped.setdefault(record['target'], set()).add(record['source_entry_id'])
+            if record.get('source_occurrence_key'):
+                occurrences.setdefault(record['target'],set()).add(record['source_occurrence_key'])
         basis = bases[candidate['basis']]
     else:
         plan = family.get('request_plan') or {}
@@ -625,7 +627,8 @@ def dictionary_lookups(hit, query, family, candidate=None):
                 grouped[target] = set()
         basis = 'original_surface'
     return [{'version': 'recorded-dictionary-lookup-v1', 'target': target, 'query': query,
-             'basis': basis, 'source_entry_ids': sorted(entries)} for target, entries in sorted(grouped.items())]
+             'basis': basis, 'source_entry_ids': sorted(entries),
+             **({'source_occurrence_keys':sorted(occurrences[target])}if target in occurrences else{})} for target, entries in sorted(grouped.items())]
 
 
 def recorded_phrase_lemmas(unit, interpretation, original, context):
@@ -646,6 +649,7 @@ def recorded_phrase_lemmas(unit, interpretation, original, context):
             if (type(start)is int and type(end)is int and fields['start']<=start<end<=fields['end']
                     and source[start:end]==token.get('text')
                     and token.get('upos')in {'NOUN','PROPN','ADJ','VERB','ADV'}):surfaces.add(token['text'])
+    from core.lexical_identity import source_occurrence_key
     result=[]
     for surface,data in fields.get('recorded_forms',{}).items():
         if surface not in surfaces or data.get('status')!='matched':continue
@@ -656,6 +660,8 @@ def recorded_phrase_lemmas(unit, interpretation, original, context):
                     or not isinstance(entry,str)or not entry):continue
             for recorded in data.get('source_slots',[]):
                 slot=recorded.get('slot',{});provenance=recorded.get('provenance',{})
+                occurrence=source_occurrence_key(provenance)
+                if occurrence and 'source_occurrence_key'in reading and reading['source_occurrence_key']!=occurrence:continue
                 if (recorded.get('source_entry_id')!=entry or recorded.get('lemma')!=lemma
                         or provenance.get('source_entry_id')!=entry or provenance.get('resource_id')!='sloleks'
                         or not re.fullmatch(r'[0-9a-f]{64}',str(provenance.get('source_archive_sha256','')))
@@ -668,6 +674,7 @@ def recorded_phrase_lemmas(unit, interpretation, original, context):
                            for v in slot.get('variants',[])):continue
                 result.append((lemma,{'target':target,'surface':surface,'resource_id':'sloleks',
                     'source_entry_id':entry,'captured_unit_id':unit.get('captured_unit_id'),
+                     **({'source_occurrence_key':occurrence}if occurrence else{}),
                     'match_basis':'recorded_phrase_form','slot_locator':reading['slot_locator'],
                     'variant_locator':reading['source_locator']}))
     return result
@@ -680,6 +687,7 @@ def validated_reference_lemmas(tool_capture, family):
     behind an attested form, including alternatives; do not prefer frequency,
     a parser's predicted case, or one homograph over another.
     """
+    from core.lexical_identity import source_occurrence_key
     captures=(tool_capture or {}).get('captures',[])
     if len(captures)!=1 or captures[0].get('operation')!='lexical_profile':return []
     profile=captures[0].get('response',{})
@@ -709,9 +717,12 @@ def validated_reference_lemmas(tool_capture, family):
         key=(_lookup_key(lemma),'recorded_morphology_identity')
         record={'target':target,'resource_id':provenance['resource_id'],'source_entry_id':entry,
                 'captured_unit_id':unit.get('captured_unit_id'),'match_basis':match}
+        occurrence=source_occurrence_key(provenance)
+        if occurrence:record['source_occurrence_key']=occurrence
         value=grouped.setdefault(key,{'query':lemma.strip(),'basis':'recorded_morphology_identity','source_records':[]})
         if record not in value['source_records']:value['source_records'].append(record)
-    return list(grouped.values())
+    primary=set(interpretation.get('selection',{}).get('primary_occurrence_keys',[]))
+    return sorted(grouped.values(),key=lambda row:not any(r.get('source_occurrence_key')in primary for r in row['source_records']))
 
 
 def expand_reference_sources(gateway, family, definitions, tool_capture, found, coverage, detail_pool, pool):

@@ -862,4 +862,7 @@ def plan(text,context,language,analysis,request_plan=None):
  result={'version':VERSION,'query_kind':kind,'original':text,'context':context,'targets':spans[:4],'targets_truncated':len(spans)>4,'requested_facets':requested,'requested_grammar_slots':grammar_slots,'grammar_ambiguities':grammar_ambiguities,'inferred_facets':['loris','morphology','frequency','synonyms','collocations','terminology'],'lookup_languages':langs,'language_basis':'explicit'if language!='und'else'bounded inventory/wording policy, not certain language detection','slot_focus':{'case':case,'number':number,'basis':'grammatical question/context cue; verify against source slot'}if case else None,'interpretation_uncertainty':'multiple resource identities and senses remain separate; no automatic normative verdict','basis':['original surface','question structure','raw analyzer content spans','resource validation follows']}
 
  result['request_plan']=supplied_plan if supplied_plan is not None else portable_request_plan(result,language)
+ if supplied_plan is not None:
+  for key in ('form_choice','usage_context_spans','explicit_lexemes'):
+   if key in supplied_plan:result[key]=copy.deepcopy(supplied_plan[key])
  return result

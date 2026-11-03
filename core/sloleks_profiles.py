@@ -64,3 +64,35 @@ class SloleksProfiles:
    le['submitted_form']=surface;le['matched_by']='exact_headword'if le['lemma']==surface else'folded_headword'if le['lemma'].casefold()==key else'recorded_form'
    le['submitted_analyses']=[{'slot_locator':s['slot_locator'],'features':s['normalized_features'],'original_msd':s['original_msd'],'variant_locator':v['source_locator'],'exact_surface':v['form']==surface}for s in le['slots']for v in s['variants']if v['form'].casefold()==key]
   return {'status':'matched'if lexemes else'no_match','submitted_form':surface,'lexemes':lexemes,'truncated':len(rows)>limit,'next_offset':offset+limit if len(rows)>limit else None,'provenance':self.manifest,'contextual_selection':'not_performed','frequency_semantics':'source-supplied lexeme total separate from surface/readings; no derived totals'}
+
+ def discover(self,surface,max_candidates=32,lemma_candidates=()):
+  """Page the existing form index for task selection, independently of card limits."""
+  result=None;lexemes=[];offset=0
+  # Context is a nomination, not an invented paradigm: require the submitted
+  # spelling in the nominated source entry before adding it to discovery.
+  for lemma in dict.fromkeys(lemma_candidates):
+   if not isinstance(lemma,str)or not lemma.strip():continue
+   for le in self.lookup(lemma,8)['lexemes']:
+    if le['lemma']!=lemma:continue
+    matched=[{'slot_locator':s['slot_locator'],'features':s['normalized_features'],'original_msd':s['original_msd'],'variant_locator':v['source_locator'],'exact_surface':v['form']==surface}for s in le['slots']for v in s['variants']if v['form'].casefold()==surface.casefold()]
+    if not matched:continue
+    le['submitted_form']=surface;le['submitted_analyses']=matched
+    le['matched_by']='exact_headword'if le['lemma']==surface else'folded_headword'if le['lemma'].casefold()==surface.casefold()else'recorded_form'
+    if not any(x['entry_identity']==le['entry_identity']for x in lexemes):lexemes.append(le)
+    if len(lexemes)>=max_candidates:break
+   if len(lexemes)>=max_candidates:break
+  # Paging may revisit a nominated entry; count source occurrences only once.
+  remaining=True
+  while len(lexemes)<max_candidates:
+   page=self.lookup(surface,min(8,max_candidates-len(lexemes)),offset)
+   if result is None:result=page
+   lexemes.extend(le for le in page['lexemes']if not any(x['entry_identity']==le['entry_identity']for x in lexemes))
+   remaining=page['truncated']
+   if not page['truncated']:break
+   offset=page['next_offset']
+  if result is None:result=self.lookup(surface,1);remaining=True
+  result={**result,'lexemes':lexemes,'truncated':remaining,
+          'next_offset':offset if remaining else None,
+          'candidate_discovery':{'policy':'paged-source-forms-v1',
+            'complete':not remaining,'candidate_budget':max_candidates}}
+  return result

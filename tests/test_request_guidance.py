@@ -99,6 +99,38 @@ def test_followup_binding_requires_explicit_owned_parent(tmp_path):
   denied=c.post('/api/pilot/families',headers=other,json={'question':q,'idempotency_key':'other-bound-0001','parent_run_id':rid})
   assert denied.status_code==404
 
+
+def test_feature_only_followup_uses_shared_plan_and_owned_parent_without_chronology(tmp_path,monkeypatch):
+ from test_pilot_unified import core_test_root
+ monkeypatch.syspath_prepend(str(core_test_root()))
+ from tools.zrc_reference.request_interpretation import response
+ class SharedPlan(NoNetwork):
+  def interpret(self,question,context,input_language,locale):
+   return response(question,context,input_language,locale)
+ gateway=SharedPlan();app=app_for(tmp_path,gateway)
+ parent_question='Kakšen je rodilnik ednine pridevnika globok za ženski spol?'
+ question='In v dvojini?'
+ with TestClient(app,base_url=ORIGIN)as c:
+  headers=login(c)
+  parent=c.post('/api/pilot/families',headers=headers,json={'question':parent_question,'input_language':'sl','idempotency_key':'feature-parent-001'}).json()
+  parent_id=parent['family']['short']['run_id']
+  alone=c.post('/api/pilot/families',headers=headers,json={'question':question,'input_language':'sl','idempotency_key':'feature-alone-0001'}).json()
+  bound=c.post('/api/pilot/families',headers=headers,json={'question':question,'input_language':'sl','idempotency_key':'feature-bound-0001','parent_run_id':parent_id,'parent_relation':'followup'})
+  assert bound.status_code==200,bound.text
+  with app.state.store.connect()as db:
+   assert db.execute('SELECT context FROM families WHERE id=?',(alone['family']['answer_family_id'],)).fetchone()[0]==''
+   stored=db.execute('SELECT question,context FROM families WHERE id=?',(bound.json()['family']['answer_family_id'],)).fetchone()
+  assert stored['question']==question and stored['context']==parent_question
+  plan=gateway.interpret(question,stored['context'],'sl','sl')['request_plan']
+  assert plan['morphology_feature_followup']is True
+  assert [t['text']for t in plan['target_spans']]==['globok']
+  assert plan['requested_morphology_features']['gender']=='feminine'
+  assert plan['requested_morphology_features']['number']=='dual'
+  assert all(slot.get('number')!='singular'for slot in plan['requested_grammar_slots'])
+  other=login(c,'unified-other')
+  denied=c.post('/api/pilot/families',headers=other,json={'question':question,'input_language':'sl','idempotency_key':'feature-other-0001','parent_run_id':parent_id,'parent_relation':'followup'})
+  assert denied.status_code==404
+
 @pytest.mark.parametrize('question', [
  'Kje najdem obrazec za samoizjavo?', 'Kje so obrazci za samoizjavo?',
  'Potrebujem pooblastilo.', 'Iščem predlogo za odredbo.',

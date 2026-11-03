@@ -163,7 +163,7 @@ def _profile_matches_request_plan(response, request_plan):
             or interpretation.get('requested_grammar_slots')!=request_plan.get('requested_grammar_slots')
             or interpretation.get('grammar_ambiguities')!=request_plan.get('ambiguities')
             or any(interpretation.get(key)!=request_plan[key]
-                   for key in ('form_choice','usage_context_spans','explicit_lexemes') if key in request_plan)):
+                   for key in ('form_choice','usage_context_spans','explicit_lexemes','requested_morphology_features') if key in request_plan)):
         return False
     for actual,bound in zip(observed,expected):
         if (not isinstance(actual,dict)or not isinstance(bound,dict)

@@ -155,18 +155,16 @@ def structured(record, locale):
     if isinstance(record.get('fields'), dict) and record.get('kind'):
         from .lexical import reader, GRAMMAR
         if record['kind'] == 'morphology':
+            from .grammar_presentation import feature_text
             field = record['fields']; slot = field.get('slot', {})
-            grammar = GRAMMAR['it' if it else 'sl']
-            description = ' · '.join(grammar[str(v)] for v in
-                slot.get('normalized_features', {}).values() if str(v) in grammar)
+            description = feature_text(slot.get('normalized_features', {}), locale)
             forms = ' / '.join(dict.fromkeys(v['form'] for v in slot.get('variants', [])))
             if forms:
                 return [{'heading': field.get('lemma', record.get('target', '')),
                          'text': description + '\n' + forms}]
             if field.get('lemma'):
-                return [{'heading': field['lemma'], 'text': ' · '.join(
-                    grammar[str(v)] for v in field.get('grammatical_features', {}).values()
-                    if str(v) in grammar)}]
+                return [{'heading': field['lemma'], 'text': feature_text(
+                    field.get('grammatical_features', {}), locale)}]
         if record['kind'] == 'loris':
             return structured({'payload':record['fields'].get('payload',{})},locale)
         if record['kind'] == 'terminology':

@@ -26,11 +26,12 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None,single_answers=None):
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None,single_answers=None,request_gateway=None):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
         self.release=release
         self.unified_answers=unified_answers
         self.single_answers=unified_answers if single_answers is None else single_answers
+        self.request_gateway=request_gateway
         self.default_model='auto'if'auto'in self.models else'qwen'if'qwen'in self.models else self.models[0]
         self.comparison_models=tuple(model for model in self.models if model in {'qwen','gemma'})
     def require_generation(self,models):
@@ -117,6 +118,13 @@ class Domain:
         if clarification:return {'status':'clarification_required','clarification':clarification}
         if task in {'terminology',*editorial.SOURCES}and not 2<=len(q)<=500:raise Failure('invalid_request')
         if task=='morphology'and (len(q)>1000 or not 1<=len(q.split())<=32 or any(len(token)>200 for token in q.split())):raise Failure('invalid_request')
+        parent_request_plan=None
+        if (task=='reference'and relation=='followup'and not context.strip()
+                and not request_tasks.unresolved_reference(q)and self.request_gateway is not None):
+            # Shared interpretation only; parent data is still bound below by
+            # the existing owned-run check. Never consult account chronology.
+            parent_request_plan=unified.shared_interpretation(
+                self.request_gateway,q,'',input_language,locale)['request_plan']
         with self.store.tx()as db:
             def action():
                 if task=='reference'and not self.unified_answers:self.require_generation([model])
@@ -129,7 +137,7 @@ class Domain:
                     if relation=='retry' and (prior['state']not in {'failed','cancelled'} or q!=previous['question']or context!=previous['context']):raise Failure('invalid_request')
                     # Only an explicitly supplied, owned run can bind a referent.
                     # Shared account chronology is never consulted.
-                    if not context.strip() and request_tasks.unresolved_reference(q):
+                    if not context.strip() and request_tasks.unresolved_reference(q,request_plan=parent_request_plan):
                         from core.lexical_planner import is_referential_request
                         bound=previous['context']if is_referential_request(previous['question'])else previous['question']
                         if len(bound)<=3000:effective_context=bound

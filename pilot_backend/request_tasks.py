@@ -19,7 +19,9 @@ RESOURCES = {
     'constitution': ('Slovenski prevod italijanske ustave', 'https://www.jeziknaklik.it/publikacije/slovenski-prevod-italijanske-ustave-zdaj-na-voljo-na-spletni-strani-senata/'),
 }
 
-def unresolved_reference(question, context=''):
+def unresolved_reference(question, context='', request_plan=None):
+    if (request_plan or{}).get('morphology_feature_followup')is True:
+        return not context.strip()
     from core.lexical_planner import is_referential_request, bound_context_target
     return is_referential_request(question) and bound_context_target(question,context) is None
 

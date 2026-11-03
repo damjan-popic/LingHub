@@ -863,6 +863,12 @@ def plan(text,context,language,analysis,request_plan=None):
 
  result['request_plan']=supplied_plan if supplied_plan is not None else portable_request_plan(result,language)
  if supplied_plan is not None:
-  for key in ('form_choice','usage_context_spans','explicit_lexemes'):
+  for key in ('form_choice','usage_context_spans','explicit_lexemes','requested_morphology_features'):
    if key in supplied_plan:result[key]=copy.deepcopy(supplied_plan[key])
+  features=supplied_plan.get('requested_morphology_features')or{}
+  if features:
+   focus=dict(result['slot_focus']or{})
+   focus.update(features)
+   focus['basis']='grammatical question/context cue; verify against source slot'
+   result['slot_focus']=focus
  return result

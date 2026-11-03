@@ -7,7 +7,7 @@ import copy,hashlib,json
 from .lexical_identity import morphology_key,source_occurrence_key
 from .loris_roles import loris_advice_roles
 
-VERSION='lexical-focus-v4-20261103'
+VERSION='lexical-focus-v5-20261103'
 
 def editorial(fields):
     key=next((k for k in ('source_status','head_status','status')if fields.get(k)),None)
@@ -30,7 +30,7 @@ def focus_profile(profile):
     """Return a new annotated revision; old saved captures remain untouched."""
     p=copy.deepcopy(profile);plan=p['interpretation'];targets={t['text']:t for t in plan['targets']}
     if plan.get('selection',{}).get('version')==VERSION:return p
-    translation='translation'in plan['requested_facets'];focus={k:v for k,v in (plan.get('slot_focus')or{}).items()if k in {'case','number'}and v}
+    translation='translation'in plan['requested_facets'];focus={k:v for k,v in (plan.get('slot_focus')or{}).items()if k!='basis'and v is not None}
     acronym_targets={t for t in targets if t.isupper()and len(t)>1 and any(u['kind']=='terminology'and any(m.get('term')==t for m in u['fields'].get('matched_forms',[]))for u in p['evidence'])}
     lexemes={}
     for part in p['facets']['morphology'].get('data')or[]:
@@ -38,7 +38,7 @@ def focus_profile(profile):
     alternatives=set(targets);shared=set()
     if len(alternatives)>1 and focus:
         for ident,le in lexemes.items():
-            if any(all(s['normalized_features'].get(k)==v for k,v in focus.items()if k in {'case','number'}and v)
+            if any(all(s['normalized_features'].get(k)==v for k,v in focus.items())
                    and alternatives<={v['form']for v in s['variants']}for s in le['slots']):shared.add(ident)
         # An explicit name spelling and PROPN context resolve folded common nouns.
         if any(t[:1].isupper()for t in targets):
@@ -50,6 +50,7 @@ def focus_profile(profile):
     def explicit_match(le):
         return any(le['lemma']==item.get('text')
             and (not item.get('gender')or le['grammatical_features'].get('gender')==item['gender'])
+            and (not item.get('grammatical_type')or le['grammatical_type']==item['grammatical_type'])
             and (item.get('lexical_kind')!='common_noun'or le['grammatical_features'].get('type')=='common')
             for item in explicit)
     intended={key for key,le in lexemes.items()if explicit_match(le)}
@@ -74,6 +75,9 @@ def focus_profile(profile):
             target=targets.get(part['target'],{});predicted={f.get('upos')for f in target.get('context_features',[])}
             pos={'NOUN':'noun','PROPN':'noun','ADJ':'adjective','ADV':'adverb','VERB':'verb'}
             ids={morphology_key(le)for le in les if le['grammatical_type']in {pos.get(x)for x in predicted}}
+        matching={morphology_key(le)for le in les if morphology_key(le)in ids
+            and focus and any(all(s['normalized_features'].get(k)==v for k,v in focus.items())for s in le['slots'])}
+        if matching:ids=matching
         chosen[part['target']]=({morphology_key(le)for le in les if le['lemma']==part['target']}
             if part['target']in acronym_targets else ids if intended else ids or {morphology_key(le)for le in les})
     primary_ids=set().union(*chosen.values())if chosen else set()

@@ -43,21 +43,26 @@ def source_record(kind,entry_id,body,provenance,target,relation='recorded_target
  if occurrence:item['source_occurrence_key']=occurrence
  item['record_id']='lexical:'+digest(item);return item
 
-def morphological_records(result,target,focus,construction=None):
+def morphological_records(result,target,focus,construction=None,requested_slots=None,full_paradigm=False):
  out=[]
- focus={k:v for k,v in (focus or{}).items()if k in {'case','number'}and v}
+ focus={k:v for k,v in (focus or{}).items()if k!='basis'and v is not None}
  construction=construction or{}
  cases=set(construction.get('case_candidates',[]));numbers=set(construction.get('number_candidates',[]))
  for le in result['lexemes']:
   prov=le['evidence'];head={k:le[k]for k in ['source_entry_id','lemma','grammatical_type','grammatical_features','source_status','frequency_observations','submitted_form','submitted_analyses','matched_by','head_source']}
+  head['paradigm_slot_count']=len(le['slots'])
   out.append(source_record('morphology',le['source_entry_id'],head,prov,target))
   # Keep complete slots; a requested grammatical contrast precedes other slots.
-  slots=sorted(le['slots'],key=lambda s:(not bool(focus and all(s['normalized_features'].get(k)==v for k,v in focus.items()if k in {'case','number'}and v)),not(len({v['form']for v in s['variants']})>1),s['slot_locator']))
+  slots=sorted(le['slots'],key=lambda s:(not bool(focus and all(s['normalized_features'].get(k)==v for k,v in focus.items())),not(len({v['form']for v in s['variants']})>1),s['slot_locator']))
   # A submitted alternative can be wrong for the explicit construction.
   # Retain its intended lemma's actual required slot, not just matching forms.
-  required=[s for s in slots if (cases or numbers)
-      and (not cases or s['normalized_features'].get('case')in cases)
-      and (not numbers or s['normalized_features'].get('number')in numbers)]
+  expand_full=(full_paradigm is True or isinstance(full_paradigm,(set,frozenset,list,tuple))and morphology_key(le)in full_paradigm)
+  required=[s for s in slots if
+      expand_full or(focus and all(s['normalized_features'].get(k)==v for k,v in focus.items()))
+      or ((cases or numbers)and(not cases or s['normalized_features'].get('case')in cases)
+          and(not numbers or s['normalized_features'].get('number')in numbers))
+      or any(all(s['normalized_features'].get(k)==v for k,v in {**focus,**wanted}.items()if v is not None)
+          for wanted in requested_slots or[])]
   selected=required+[s for s in slots if s not in required][:max(0,4-len(required))]
   for s in selected:
    body={'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'grammatical_features':le['grammatical_features'],'source_status':le['source_status'],'slot':s}
@@ -98,7 +103,15 @@ async def make_profile(req,request):
   d=part.get('data');status=d['status']if d else part['status'];morphdata.append({'target':t['text'],'status':status,'result':d,'reason':part.get('reason')})
   if d:
    choice=interpretation.get('form_choice')or(interpretation.get('request_plan')or{}).get('form_choice')or{}
-   records.extend(morphological_records(d,t['text'],interpretation['slot_focus'],choice.get('construction')))
+   explicit=choice.get('explicit_lexemes')or interpretation.get('explicit_lexemes')or[]
+   full=(not interpretation['slot_focus']and not interpretation.get('requested_grammar_slots')
+       and bool({'morphology','inflection','conjugation'}&set(interpretation['requested_facets']))
+       and any(x.get('grammatical_type')for x in explicit))
+   full_occurrences={morphology_key(le)for le in d['lexemes']if full and any(
+       le['lemma']==x.get('text')and le['grammatical_type']==x.get('grammatical_type')
+       and(not x.get('gender')or le['grammatical_features'].get('gender')==x['gender'])
+       for x in explicit)}
+   records.extend(morphological_records(d,t['text'],interpretation['slot_focus'],choice.get('construction'),interpretation.get('requested_grammar_slots'),full_occurrences))
    exact=[le for le in d['lexemes']if le['matched_by']=='exact_headword']
    t['resource_identity_preference']={'basis':'exact case-preserving headword; alternatives retained, not a frequency decision','source_entry_ids':[le['source_entry_id']for le in exact],'proper_name_primary':bool(exact)and all(le['grammatical_features'].get('type')=='proper'for le in exact)}
    candidates=[x['lemma']for x in d['lexemes']]
@@ -244,7 +257,7 @@ async def make_profile(req,request):
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
- return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v3-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
+ return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v4-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
 def httpx_client():
  import httpx
  return httpx.AsyncClient(timeout=5,trust_env=False,follow_redirects=False)

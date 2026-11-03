@@ -3,6 +3,7 @@ from copy import deepcopy
 import re
 from core.lexical_identity import morphology_key,source_occurrence_key
 from core.loris_roles import loris_advice_roles
+from .grammar_presentation import feature_labels,feature_text,pos_label
 
 EXPLICIT_BRIEF=re.compile(r'\b(?:na kratko|kratko prosim|brevemente|in breve|briefly|in short)\b',re.I)
 
@@ -130,13 +131,13 @@ def reader(bundle):
    occurrence=source_occurrence_key(le.get('evidence',{}))
    if occurrence and any(r.get('source_occurrence_key')==occurrence for r in morphology+alternatives):continue
    grammar=le['grammatical_features'];freq=measures(le['frequency_observations'])
-   rows=[];focus={k:v for k,v in (p['interpretation']['slot_focus']or{}).items()if k in {'case','number'}and v}
+   rows=[];focus={k:v for k,v in (p['interpretation']['slot_focus']or{}).items()if k!='basis'and v is not None}
    choice=p['interpretation'].get('form_choice')or(p['interpretation'].get('request_plan')or{}).get('form_choice')or{}
    construction=choice.get('construction')or{}
    cases=set(construction.get('case_candidates',[]));numbers=set(construction.get('number_candidates',[]))
    for s in le['slots']:
     fs=s['normalized_features'];forms=list(dict.fromkeys(v['form']for v in s['variants']))
-    label=' · '.join(labels[str(fs[k])]for k in ('case','number','gender','degree','definiteness','definite','animacy')if str(fs.get(k))in labels)
+    label=feature_text(fs,bundle['locale'])
     memberships=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(index+1),
         'forms':list(dict.fromkeys(le['slots'][m['slot']]['variants'][m['variant']]['form']for m in pat['members']if m['slot']==s['slot_locator']))}
         for index,pat in enumerate(le['patterns'])if any(m['slot']==s['slot_locator']for m in pat['members'])]
@@ -146,8 +147,9 @@ def reader(bundle):
        (all(s['normalized_features'].get(k)==v for k,v in focus.items())if focus else
         (not cases or s['normalized_features'].get('case')in cases)and(not numbers or s['normalized_features'].get('number')in numbers)if cases or numbers else s['slot_locator']in submitted)]
    if not noteworthy:noteworthy=[r for r,s in zip(rows,le['slots'])if len({v['form']for v in s['variants']})>1][:2]
-   title=le['lemma']+' · '+', '.join(labels[v]for v in grammar.values()if v in labels)
-   if decision:title=le['lemma']+' · '+labels.get(le['grammatical_type'],le['grammatical_type'])+(' · '+', '.join(labels[v]for v in grammar.values()if v!='general'and v in labels)if any(v!='general'for v in grammar.values())else'')
+   title=le['lemma']+' · '+pos_label(le['grammatical_type'],bundle['locale'])
+   head_labels=[feature_text({key:value},bundle['locale'])for key,value in grammar.items()]
+   if head_labels:title+=' · '+', '.join(head_labels)
    pattern_details=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(number+1),'text':str(len(pat['members']))+(' forme associate nel paradigma completo.'if it else' povezanih oblik v celotnem pregibanju.')}for number,pat in enumerate(le['patterns'])]
    row={'title':title,'text':(('Frequenza del lessema: 'if it else'Pogostnost leksema: ')+freq if freq else ('Frequenza non registrata.'if it else'Pogostnost ni zapisana.')),'label':'Sloleks 3.1 · '+status_label(le['source_status']),'details':status_details(le['source_status'])+pattern_details,'record_id':le['source_entry_id'],'source_occurrence_key':occurrence,'items':noteworthy[:6],'forms':rows}
    (alternatives if state=='alternative'else morphology).append(row)

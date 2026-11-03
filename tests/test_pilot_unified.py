@@ -418,7 +418,7 @@ def mixed_answer_plan_result():
     return result
 
 
-def run_bounded_answer_plan(result,matches=None):
+def run_bounded_answer_plan(result,matches=None,*,model='qwen'):
     from types import SimpleNamespace
     known={'known','other-known'}|{unified.evidence_id(row)for row in
         [*result.get('evidence',[]),*result.get('citations',[])]}
@@ -427,7 +427,7 @@ def run_bounded_answer_plan(result,matches=None):
             [{'evidence_id':value}for value in sorted(known)if value]),
         'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
     return unified.generate(SimpleNamespace(request=lambda *args:result),
-        dict(body,snapshot_sha256=digest(body)),'short','qwen')
+        dict(body,snapshot_sha256=digest(body)),'short',model)
 
 
 def frozen_match_from_evidence(evidence):
@@ -558,6 +558,85 @@ def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     assert output['generation']['status']=='generated'
     assert output['generation_status']=='deterministic_bounded_answer_plan'
     assert output['display_blocks'][0]['evidence_ids']==['known']
+
+
+@pytest.fixture
+def actual_core_zero_inference_result(tmp_path,monkeypatch):
+    """Run the configured CORE generate path with its native writer asleep."""
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_fulltext_grounded import store as core_store
+    from test_pilot import runtime as core_runtime,GenerateRequest
+    from test_pilot_shared_provider import profiled_runtime
+    from test_bounded_recomposition import (
+        _generation_payload,_recommendation_synthesis_payload)
+
+    store_root=tmp_path/'core-store';store_root.mkdir()
+    runtime=core_runtime.__wrapped__(core_store.__wrapped__(store_root))
+    configured,native,_=profiled_runtime(runtime,tmp_path)
+    payload=_generation_payload(configured,_recommendation_synthesis_payload())
+    native.calls.clear();native.sleeping=True
+    monkeypatch.setattr(configured,'_unpack',lambda bundle:payload)
+    monkeypatch.setattr(configured,'_check_source',lambda current:None)
+    result=configured.generate(GenerateRequest(bundle={},tier='answer',model='auto'))
+    assert result['execution']['inference_performed'] is False
+    assert result['model_identity']['model_id']=='not_invoked'
+    assert result['provider_attempts']==[] and native.calls==[]
+    for client in configured.clients.values():client.post.assert_not_called()
+    return result
+
+
+def test_actual_core_zero_inference_answer_crosses_automatic_web_consumer(
+        actual_core_zero_inference_result):
+    result=actual_core_zero_inference_result
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result),model='auto')
+    assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+    assert output['generation_status']=='deterministic_bounded_answer_plan'
+    assert output['execution']['inference_performed'] is False
+    assert output['model_identity']['model_id']=='not_invoked'
+    assert output['claims'] and output['citations'] and output['evidence']
+    assert output['display_blocks'][0]['evidence_ids']
+
+
+@pytest.mark.parametrize('damage',[
+    'selection','scope','runtime','route_reason','model_id','execution_inference',
+    'identity_inference','missing_inference','not_answer_plan','attempt',
+    'dispatch','missing_accounting','incomplete_accounting','boolean_accounting',
+])
+def test_zero_inference_identity_requires_the_exact_closed_tuple(
+        actual_core_zero_inference_result,damage):
+    result=actual_core_zero_inference_result
+    if damage=='selection':result['execution']['selection']='qwen'
+    elif damage=='scope':result['execution']['provider_scope']='shared'
+    elif damage=='runtime':result['execution']['runtime']='invented'
+    elif damage=='route_reason':result['execution']['route_reason']='invented'
+    elif damage=='model_id':result['model_identity']['model_id']='invented'
+    elif damage=='execution_inference':result['execution']['inference_performed']=True
+    elif damage=='identity_inference':result['model_identity']['inference_performed']=True
+    elif damage=='missing_inference':result['execution'].pop('inference_performed')
+    elif damage=='not_answer_plan':result['generation_status']='generated'
+    elif damage=='attempt':result['provider_attempts']=[{'status':'completed'}]
+    elif damage=='dispatch':result['generation_accounting']['primary_provider_dispatches']=1
+    elif damage=='missing_accounting':result.pop('generation_accounting')
+    elif damage=='incomplete_accounting':result['generation_accounting'].pop('unknown_provider_outcomes')
+    elif damage=='boolean_accounting':result['generation_accounting']['primary_provider_dispatches']=False
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result),model='auto')
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'provider_identity_missing','stage':'provider_identity'}
+
+
+@pytest.mark.parametrize('damage',['citation','block','support'])
+def test_actual_zero_inference_answer_still_checks_frozen_citations_and_graph(
+        actual_core_zero_inference_result,damage):
+    result=actual_core_zero_inference_result
+    matches=frozen_matches_from_result(result)
+    if damage=='citation':result['citations'][0]['source_revision']='f'*64
+    elif damage=='block':result['display_blocks'][0]['text']='Invented advice.'
+    elif damage=='support':result['claims'][0]['support_ids']=['invented']
+    output=run_bounded_answer_plan(result,matches,model='auto')
+    assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
 
 
 def test_real_core_synthesis_and_curated_units_cross_the_web_consumer(monkeypatch):

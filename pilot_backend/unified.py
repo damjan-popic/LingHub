@@ -1196,7 +1196,31 @@ def _generate(gateway, bundle, tier, model, parent=None):
             if not isinstance(execution,dict)or not isinstance(identity,dict):raise Failure('provider_identity_missing',502)
             selection=execution.get('selection');scope=execution.get('provider_scope')
             if model=='auto':
-                if selection!='auto'or scope not in {'shared','own'}or not(identity.get('repository')or identity.get('model_id')):
+                # A configured CORE writer can return one fully supported,
+                # server-rendered unit without invoking inference. Admit only
+                # that explicit identity/accounting tuple; its complete graph
+                # and frozen citations still pass the checks below.
+                accounting=result.get('generation_accounting')
+                zero_accounting_fields={
+                    'primary_provider_dispatches','corrective_provider_dispatches',
+                    'completed_primary_calls','completed_corrective_calls',
+                    'unknown_provider_outcomes'}
+                no_inference=(bounded_answer_plan
+                    and execution.get('inference_performed')is False
+                    and execution.get('runtime')=='deterministic_answer_plan'
+                    and execution.get('route_reason')=='single_required_server_rendered_unit'
+                    and scope=='none'and identity.get('model_id')=='not_invoked'
+                    and identity.get('inference_performed')is False
+                    and result.get('provider_attempts')==[]
+                    and isinstance(accounting,dict)
+                    and set(accounting)==zero_accounting_fields
+                    and all(type(value)is int and value==0 for value in accounting.values()))
+                inference_absent=(scope=='none'or identity.get('model_id')=='not_invoked'
+                    or execution.get('inference_performed')is False
+                    or identity.get('inference_performed')is False)
+                if (selection!='auto'or not(no_inference or
+                        not inference_absent and scope in {'shared','own'}
+                        and(identity.get('repository')or identity.get('model_id')))):
                     raise Failure('provider_identity_missing',502)
             elif selection is not None or scope is not None:
                 if selection!=model or scope!='own':raise Failure('provider_selection_mismatch',502)

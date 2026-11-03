@@ -1,2 +1,2 @@
-// Bound to these application assets; release packaging writes publication metadata.
-export const publicRelease = Object.freeze({version:'0.5.0',date:'2026-10-27'});
+// Immutable publication metadata; stamped by the ordinary release preparation.
+export const publicRelease = Object.freeze({"version":"0.5.1","date":"2026-11-03"});

@@ -19,6 +19,7 @@ class ProfileRequest(BaseModel):
  profile:Literal['klikai_classla_primary_v1','klikai_experimental_v1','linghub_lexical_stable_v1','compare','spacy','classla']='klikai_experimental_v1'
  limit:int=Field(default=4,ge=1,le=8)
  request_plan:dict|None=None
+ source_advice_captures:list[dict]=Field(default_factory=list,max_length=16)
 class LexicalProfile(BaseModel):
  request_schema_version:str
  request_id:str
@@ -68,6 +69,39 @@ def morphological_records(result,target,focus,construction=None,requested_slots=
    body={'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'grammatical_features':le['grammatical_features'],'source_status':le['source_status'],'slot':s}
    out.append(source_record('morphology',le['source_entry_id']+':slot:'+str(s['slot_locator']),body,prov,target))
  return out
+
+async def source_advice_morphology(req,request):
+ """Capture source-nominated forms without adding user targets or a verdict."""
+ if not req.source_advice_captures:return None,[]
+ from tools.zrc_reference.pilot_answer_plan import source_advice_application_requests
+ requests=source_advice_application_requests(req.text,req.context,req.source_advice_captures)
+ if not requests:return facet('not_applicable',[]),[]
+ reader=getattr(request.app.state,'sloleks_profiles',None)
+ if reader is None:return facet('unavailable',[],reason='Rich Sloleks index not configured'),[]
+ parts=[];records=[]
+ for wanted in requests:
+  lemma=wanted['lemma'];features=wanted['features'];basis=wanted['basis']
+  try:
+   result=await run_in_threadpool(reader.discover,lemma,32,(lemma,))
+  except Exception:
+   parts.append({'request':copy.deepcopy(wanted),'application_support':copy.deepcopy(basis),'status':'unavailable','result':None})
+   continue
+  lexemes=[le for le in result['lexemes']if le['lemma']==lemma
+      and le['grammatical_type']==wanted['grammatical_type']
+      and any(all(s['normalized_features'].get(k)==v for k,v in features.items())for s in le['slots'])]
+  parts.append({'request':copy.deepcopy(wanted),'application_support':copy.deepcopy(basis),
+      'status':'matched'if lexemes else'no_match','result':result,
+      'source_occurrence_keys':[source_occurrence_key(le['evidence'])for le in lexemes]})
+  for unit in morphological_records({**result,'lexemes':lexemes},lemma,features):
+   slot=unit['fields'].get('slot')
+   if slot is not None and not all(slot['normalized_features'].get(k)==v for k,v in features.items()):continue
+   unit['application_support']=copy.deepcopy(basis)
+   unit['match_relation']='source_advice_application_support'
+   unit['selection']={'state':'primary','reason':'source_advice_application_support'}
+   unit['captured_unit_id']=unit['record_id']
+   unit['record_id']='lexical:'+digest({k:v for k,v in unit.items()if k!='record_id'})
+   records.append(unit)
+ return facet(aggregate(parts),parts),records
 
 async def make_profile(req,request):
  start=time.monotonic();state=request.app.state
@@ -257,7 +291,14 @@ async def make_profile(req,request):
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
- return focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=req.model_dump(),interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v4-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
+ query=req.model_dump(exclude=set()if 'source_advice_captures'in req.model_fields_set else{'source_advice_captures'})
+ value=focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=query,interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v4-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
+ support,units=await source_advice_morphology(req,request)
+ if support is not None:
+  value['facets']['source_advice_morphology']=support
+  value['coverage']['source_advice_morphology']={'status':support['status'],'attempted':support['status']!='not_applicable','matched':support['status']=='matched'}
+  value['evidence'].extend(units)
+ return value
 def httpx_client():
  import httpx
  return httpx.AsyncClient(timeout=5,trust_env=False,follow_redirects=False)

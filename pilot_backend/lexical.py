@@ -104,7 +104,7 @@ def overview(bundle):
    and alternatives.get('complete')is True and alternatives.get('missing_passage_ids')==[]
    and set(alternatives.get('expected_passage_ids',[]))==set(expected)
    and required<=supplied and not wide.get('source_view_reason'))
- return bool(p and p['interpretation']['query_kind']in {'word','phrase','comparison'}and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])and len({u['kind']for u in p['evidence']if u['kind']!='analysis'and u.get('selection',{}).get('state','primary')=='primary'and u['match_relation']not in {'component_only','alternative_lexical_identity'}})>=2)
+ return bool(p and p['interpretation']['query_kind']in {'word','phrase','comparison'}and not {'translation','orthography'}&set(p['interpretation']['requested_facets'])and len({u['kind']for u in p['evidence']if u['kind']!='analysis'and not u.get('application_support')and u.get('selection',{}).get('state','primary')=='primary'and u['match_relation']not in {'component_only','alternative_lexical_identity'}})>=2)
 
 def reader(bundle):
  p=profile(bundle)
@@ -112,7 +112,7 @@ def reader(bundle):
  it=bundle['locale']=='it';sections=[];alternatives=[];labels=GRAMMAR['it'if it else'sl']
  decision=p['interpretation'].get('selection');by_id={}
  for u in p['evidence']:
-   if u['kind']=='morphology':by_id[morphology_key(u)]=u.get('selection',{})
+   if u['kind']=='morphology'and not u.get('application_support'):by_id[morphology_key(u)]=u.get('selection',{})
  def status_label(raw):
   value=str(raw or '').lower()
   if value in {'manual','ssss-manual'}:return 'revisione manuale'if it else'ročno pregledano'

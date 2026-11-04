@@ -200,7 +200,7 @@ def _authenticated_plan_route(family, request_plan):
     return routing
 
 
-def collect(gateway, family, *, automatic=False):
+def collect(gateway, family, *, automatic=False, source_advice_captures=None):
     question=family.get('original_question',family['question'])
     request_plan=family.get('request_plan')
     # Only a configured opt-in LingHub release advertises the new contract.
@@ -208,9 +208,12 @@ def collect(gateway, family, *, automatic=False):
         capabilities=gateway.request('/v1/capabilities',None,gateway.linghub_url)
         if capabilities.get('lexical_profile',{}).get('available'):
             request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_classla_primary_v1','limit':4,'request_plan':request_plan}
+            if source_advice_captures:
+                request['source_advice_captures']=copy.deepcopy(source_advice_captures)
             before=time.monotonic();response=gateway.request('/v1/lexical/profile',request,gateway.linghub_url)
             if (response.get('request_schema_version')!='linghub.lexical-profile.v1'
                     or response.get('query',{}).get('text')!=question
+                    or source_advice_captures and response.get('query',{}).get('source_advice_captures')!=source_advice_captures
                     or request_plan is not None
                     and not _profile_matches_request_plan(response,request_plan)):
                 raise Failure('invalid_answer',502)

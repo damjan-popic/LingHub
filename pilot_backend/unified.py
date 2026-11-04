@@ -956,6 +956,36 @@ def expand_o_name_declension_rules(
     else:status['status']='ok' if status['returned_count'] else 'no_match'
 
 
+def supplement_source_advice_morphology(gateway,family,tool_capture,found,coverage):
+    """Freeze source-nominated forms through the same authoritative profile."""
+    if (not tool_capture or tool_capture.get('version')!='klikai.lexical-collation.v1'
+            or not getattr(gateway,'lexical_profiles',False)):
+        return tool_capture
+    captures={digest(row['capture']):row['capture'] for row in found
+        if row.get('source_slug')=='cu-slogovni'
+        and isinstance(row.get('capture'),dict)and row['capture'].get('advice_units')}
+    if not captures:return tool_capture
+    status={'family':'source_advice_morphology','source_label':'Sloleks',
+            'status':'unavailable','returned_count':0,'limit':None,'has_more':None}
+    try:
+        capture=collation.collect(gateway,family,automatic=True,
+            source_advice_captures=[captures[key]for key in sorted(captures)])
+        if not capture or capture.get('version')!='klikai.lexical-collation.v1':
+            raise Failure('invalid_answer',502)
+        profile=capture['captures'][0]['response']
+        support=profile.get('facets',{}).get('source_advice_morphology',{})
+        count=sum('application_support'in unit for unit in profile.get('evidence',[]))
+        status.update(status='ok'if count else'unavailable'if support.get('status')=='unavailable'else'no_match',
+            returned_count=count)
+        coverage.append(status)
+        return capture
+    except Exception as error:
+        status.update(status='timeout'if isinstance(error,Failure)and error.code=='source_timeout'else'unavailable',
+            **diagnostic(error,'source_advice_morphology'))
+        coverage.append(status)
+        return tool_capture
+
+
 def freeze(gateway, family, policy):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
@@ -993,6 +1023,8 @@ def freeze(gateway, family, policy):
             gateway,family,definitions,found,coverage,details,pool)
         expand_o_name_declension_rules(
             gateway,family,definitions,found,coverage,details,pool)
+        tool_capture=supplement_source_advice_morphology(
+            gateway,family,tool_capture,found,coverage)
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.

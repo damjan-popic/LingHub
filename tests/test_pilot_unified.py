@@ -550,7 +550,7 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 
 @pytest.mark.parametrize('unit_type',[
     'curated_recommendation','comparison_synthesis','recommendation_synthesis',
-    'grammar_slot'])
+    'grammar_slot','source_advice'])
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type
@@ -713,6 +713,88 @@ def test_real_core_synthesis_and_curated_units_cross_the_web_consumer(monkeypatc
         if unit_type=='recommendation_synthesis':
             assert len(output['citations'])==4
             assert len({row['support_id']for row in output['citations']})==2
+
+
+def test_real_core_handbook_source_advice_crosses_web_consumer(monkeypatch):
+    """Accept CORE's exact handbook advice shape without relaxing its binding."""
+    root=core_test_root()
+    handbook_test=root/'tests/zrc/test_handbook_advice_answer_plan.py'
+    if not handbook_test.is_file():
+        pytest.skip('Pinned CORE predates the source_advice answer unit')
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_handbook_advice_answer_plan import (
+        advice,article_fixture,handbook_item)
+    from tools.zrc_reference.request_interpretation import response as interpret_response
+
+    def core_result(question,item,source):
+        item.update(span=deepcopy(item['span']),source_id=source['source_id'],
+                    source_revision=source['source_revision'])
+        source.update(span=deepcopy(item['span']),title='Slogovni priročnik CU',
+            url='https://www.jeziknaklik.it/',role='documentary_capture',
+            rights_mode='authenticated_pilot',context_eligible=True)
+        request_plan=interpret_response(question,'','sl','sl')['request_plan']
+        payload=_plan_runtime_payload(
+            question,[item],[source],request_plan=request_plan)
+        runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+        unit=next(row for row in registry.units
+                  if row['unit_type']=='source_advice')
+        result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
+            'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+            'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+        return result
+
+    def frozen_documentary_matches(result):
+        matches=[]
+        for evidence in result['evidence']:
+            identity=unified.evidence_id(evidence)
+            match={'evidence_id':identity,
+                'source_slug':evidence['source_slug'],'capture_sha256':'c'*64,
+                'source':{'locator':deepcopy(evidence['locator'])}}
+            view=dict(evidence,citation_id=identity)
+            match['_citation_binding']=unified.frozen_citation_binding(match,view)
+            assert match['_citation_binding'] is not None
+            matches.append(match)
+        return matches
+
+    quote=('monitoring je v strokovnem okolju ustaljen termin; v nestrokovnem '
+           'besedilu priročnik predlaga spremljanje')
+    text='Uvod. '+quote+'. Druga nepovezana vsebina.'
+    monitoring_item,monitoring_source=handbook_item(
+        text,key='monitoring',external_id='cu-slogovni:2021:section:1',
+        advice=[advice(text,quote,item_id='monitoring',
+            summary=('Priročnik predlaga spremljanje v nestrokovnem besedilu, '
+                     'monitoring pa ohranja v strokovni rabi.'),
+            role='contextual_lexical_recommendation',force='context_dependent')])
+    monitoring_item['advice_units'][0]['source_anchor']=(
+        '§1, guideline 4, table entry monitoring')
+    monitoring_result=core_result(
+        'Ali naj monitoring vedno zamenjam s spremljanjem?',
+        monitoring_item,monitoring_source)
+
+    issue_question='Kako zapisati articolo 3, comma 243?'
+    issue_item,issue_source,_=article_fixture(question=issue_question)
+    issue_result=core_result(issue_question,issue_item,issue_source)
+
+    for result,expected in ((monitoring_result,'nestrokovnem'),
+                            (issue_result,'Lokalna uredniška opomba')):
+        output=run_bounded_answer_plan(result,frozen_documentary_matches(result))
+        assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+        assert output['generation_status']=='deterministic_bounded_answer_plan'
+        assert output['display_blocks'][0]['unit_type']=='source_advice'
+        assert expected in output['answer_md']
+        assert output['display_blocks'][0]['evidence_ids']
+
+    forged=deepcopy(monitoring_result)
+    forged['citations'][0]['char_end']+=1
+    rejected=run_bounded_answer_plan(
+        forged,frozen_documentary_matches(monitoring_result))
+    assert {key:rejected['generation'][key] for key in
+            ('status','error_code','stage')}=={
+        'status':'failed','error_code':'unknown_citation',
+        'stage':'citation_validation'}
+    assert rejected['evidence']==[]
 
 
 def test_real_core_marko_homograph_grammar_unit_crosses_the_web_consumer(monkeypatch):

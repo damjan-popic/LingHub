@@ -85,7 +85,12 @@ def freeze(gateway,family,policy):
         observation=asyncio.run(check(target['text'],client_config))
         status=observation['status']
     explanation=None;explanation_status='not_requested'
-    if task.get('explain') and status=='ok':
+    ambiguous_edit=(reused_parent is not None and len((observation or {}).get('edits',[]))>1
+        and bool(re.search(r'\b(?:vejic[ao]|virgola)\b',question,re.I))
+        and not re.search(r'\b(?:vse|obe|vsak\w*|both|all|tutte|entrambe|pred|za|before|after)\b',question,re.I))
+    if ambiguous_edit:
+        explanation_status='edit_required'
+    elif task.get('explain') and status=='ok':
         # This is the existing source-grounded path. Its selected supports and
         # citations remain separate from the checker observation.
         try:
@@ -205,12 +210,16 @@ def answer(gateway,bundle,tier,model,parent=None):
               if proposal['edits'] else 'Per questo esempio non ho al momento una spiegazione collegata a una fonte adeguata.') if italian else (
               'Za predlagano spremembo trenutno nimam razlage, vezane na ustrezni vir.'
               if proposal['edits'] else 'Za ta primer trenutno nimam razlage, vezane na ustrezni vir.')
+    if explanation_status=='edit_required':
+        text=('Nella proposta salvata ci sono più modifiche. Di quale virgola desiderate una spiegazione? Indicate la parola immediatamente prima o dopo.'
+              if italian else 'V shranjenem predlogu je več sprememb. Za katero vejico želite razlago? Navedite besedo tik pred njo ali za njo.')
     if result is None:
         result={'status':'source_only','answer_kind':'tool_prediction','answer_support':'automated_prediction',
             'generation_status':'not_generated','answer_md':text,'short_answer':text,
             'display_blocks':[{'block_id':'comma-notice','text':text}], 'blocks':[{'block_id':'comma-notice','text':text}],
             'evidence':[],'source_badges':[],'claims':[],'citations':[],'limitations':[],
-            'execution':writer_execution,'model_identity':{'model_id':'not_invoked'},
+            'execution':writer_execution,'model_identity':{'model_id':
+                'unknown' if writer_execution.get('inference_performed') is None else 'not_invoked'},
             'synthesis_mode':'automated_tool_prediction'}
     if explained is not None and result.get('answer_kind')=='tool_prediction':
         # An unsupported explanation can still have used the writer. Preserve

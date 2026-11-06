@@ -178,3 +178,54 @@ def test_unchanged_prediction_has_a_local_limit_without_inventing_a_change(tmp_p
   assert answer['comma_proposal']['proposed_text']=='Teče kot veter.'
   assert answer['answer_md'].startswith('Za ta primer')
   assert 'spremembo' not in answer['answer_md'] and 'poseg' not in answer['answer_md']
+
+
+@pytest.mark.parametrize('stage',['freeze','generate'])
+def test_valid_proposal_survives_a_local_explanation_failure(tmp_path,monkeypatch,stage):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ from pilot_backend.security import Failure
+ def fail(*args,**kwargs):raise Failure('source_unavailable' if stage=='freeze' else 'provider_timeout',503)
+ if stage=='freeze':monkeypatch.setattr(unified,'freeze',fail)
+ else:
+  monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+  monkeypatch.setattr(unified,'generate',fail)
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client);_,current=ask(app,client,headers,True)
+  answer=current['short'];proposal=answer['comma_proposal']
+  assert proposal['status']=='ok' and proposal['proposed_text']=='Ko pridem domov, bom poklical.'
+  assert proposal['edits'][0]['start']==15 and proposal['explanation_status']=='unavailable'
+  assert answer['answer_kind']=='tool_prediction' and calls==['Ko pridem domov bom poklical.']
+  with app.state.store.connect()as db:
+   raw=json.loads(db.execute('SELECT result FROM runs WHERE id=?',(answer['run_id'],)).fetchone()[0])
+  if stage=='generate':
+   assert raw['execution']['inference_performed'] is None
+   assert raw['model_identity']['model_id']=='unknown'
+  else:assert raw['execution']['inference_performed'] is False
+
+def test_generic_why_with_multiple_saved_edits_asks_which_without_resending(tmp_path,monkeypatch):
+ actual_check=comma_checker.check
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only','execution':{'inference_performed':False}})
+ async def two_edits(text,config):
+  calls.append(text)
+  config=comma_checker.CommaCheckerConfig(key_file=tmp_path/'key',transport=httpx.MockTransport(
+      lambda request:httpx.Response(200,json=checker_response(text,'Ko, pridem domov, bom poklical.'))))
+  return await actual_check(text,config)
+ monkeypatch.setattr(comma_checker,'check',two_edits)
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client);_,parent=ask(app,client,headers,True)
+  assert len(parent['short']['comma_proposal']['edits'])==2
+  def unexpected(*args,**kwargs):raise AssertionError('Ambiguous WHY must not guess a source explanation')
+  monkeypatch.setattr(unified,'freeze',unexpected)
+  created=client.post('/api/pilot/families',headers=headers,json={'question':'Zakaj si tu dodal vejico?',
+      'idempotency_key':'multi-edit-owned-why','parent_run_id':parent['short']['run_id'],'parent_relation':'followup'})
+  assert created.status_code==200
+  fid=created.json()['family']['answer_family_id'];job=app.state.jobs.claim('cpu');app.state.jobs.execute(job)
+  answer=client.get('/api/pilot/families/'+fid).json()['short']
+  assert answer['comma_proposal']['status']=='ok' and len(answer['comma_proposal']['edits'])==2
+  assert answer['comma_proposal']['explanation_status']=='edit_required'
+  assert 'Za katero vejico' in answer['answer_md']
+  assert answer['tool_execution']['attempted'] is False and len(calls)==1

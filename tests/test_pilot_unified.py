@@ -767,6 +767,55 @@ def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeyp
     assert run_bounded_answer_plan(duplicate,matches)['generation']['error_code']=='unknown_citation'
 
 
+@pytest.mark.parametrize('damage',[None,'source_revision','duplicate'])
+def test_real_core_coordination_application_crosses_web_with_distinct_support_spans(
+        monkeypatch,damage):
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'apps/api'))
+    monkeypatch.syspath_prepend(str(root/'tests'))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_coordination_punctuation import QUESTION,selected_fixture
+    from tools.zrc_reference.request_interpretation import response as interpret_response
+
+    evidence,passages,_=selected_fixture()
+    payload=_plan_runtime_payload(QUESTION,evidence,passages,
+        request_plan=interpret_response(QUESTION,'','sl','sl')['request_plan'])
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    unit=next(row for row in registry.units
+        if row['unit_type']=='construction_application'
+        and row['payload'].get('construction')=='coordination_punctuation')
+    result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
+        'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    citations=result['citations']
+    assert len(citations)>len({row['support_id']for row in citations})
+    assert len(citations)==len({(row['support_id'],row['evidence_id'],
+        row['char_start'],row['char_end'])for row in citations})
+    matches=[]
+    for row in result['evidence']:
+        identity=unified.evidence_id(row)
+        match={'evidence_id':identity,'source_slug':row['source_slug'],
+            'capture_sha256':'c'*64,'source':{'locator':deepcopy(row['locator'])}}
+        match['_citation_binding']=unified.frozen_citation_binding(
+            match,dict(row,citation_id=identity))
+        assert match['_citation_binding'] is not None
+        matches.append(match)
+    if damage=='source_revision':
+        result['citations'][0]['source_revision']='f'*64
+    elif damage=='duplicate':
+        result['citations'].append(deepcopy(result['citations'][0]))
+    output=run_bounded_answer_plan(result,matches)
+    if damage is None:
+        assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+        assert output['display_blocks'][0]['unit_type']=='construction_application'
+        assert len(output['citations'])==len(citations)
+    else:
+        assert {key:output['generation'][key]for key in ('status','error_code','stage')}=={
+            'status':'failed','error_code':'unknown_citation','stage':'citation_validation'}
+
+
 def test_real_core_handbook_source_advice_crosses_web_consumer(monkeypatch):
     """Accept CORE's exact handbook advice shape without relaxing its binding."""
     root=core_test_root()

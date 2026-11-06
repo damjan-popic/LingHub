@@ -28,7 +28,7 @@ NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
     'terminology_equivalence','comparison_synthesis','recommendation_synthesis',
     'curated_recommendation','bounded_attestation','exact_source_excerpt','grammar_slot',
-    'source_advice'})
+    'source_advice','reviewed_answer'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
     'text','claim_id','support_ids'})
 ANSWER_PLAN_CLAIM_FIELDS = frozenset({'claim_id','text','support_ids','fact_ids','section',

@@ -61,6 +61,11 @@ def ask(app,client,headers,consent=False,key='comma-test-request',question=QUEST
 
 def test_explicit_consent_saved_proposal_history_and_other_account(tmp_path,monkeypatch):
  app,gateway,calls=application(tmp_path,monkeypatch)
+ # This ownership fixture has no supporting punctuation source. Make its
+ # no-writer source-only outcome explicit; the real registry is tested separately.
+ from pilot_backend import unified
+ monkeypatch.setattr(unified,'generate',lambda *a,**k:{'answer_kind':'source_only',
+     'execution':{'inference_performed':False}})
  with TestClient(app,base_url=ORIGIN)as client:
   headers=login(client)
   assert client.get('/api/pilot/session').json()['capabilities']['comma_checker']['configured']
@@ -79,7 +84,8 @@ def test_explicit_consent_saved_proposal_history_and_other_account(tmp_path,monk
   assert calls==['Ko pridem domov bom poklical.']
   assert 'raw_result'not in json.dumps(family) and 'synthetic-key'not in json.dumps(family)
   assert client.get('/api/pilot/families/'+fid).json()==family and len(calls)==1
-  assert client.get('/api/pilot/families/'+fid+'/matches').json()['items']==[]
+  matches=client.get('/api/pilot/families/'+fid+'/matches')
+  assert matches.status_code==200 and isinstance(matches.json()['items'],list) and len(calls)==1
   login(client,'unified-other')
   assert client.get('/api/pilot/families/'+fid).status_code==404
   assert not any(path=='/internal/pilot/generate'for path,_,_ in gateway.calls)

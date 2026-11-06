@@ -147,6 +147,25 @@ def _candidates(receipt, target, text, source_quotes):
             return []
         return [{'start': left, 'end': right, 'basis': 'owned_source_application',
                  'construction': application.get('kind'), 'references': list(dict.fromkeys(outputs))}]
+    if payload.get('construction') == 'finite_subordinate_clause_boundary':
+        span=payload.get('input_span',{}); boundary=payload.get('boundary',{})
+        if (payload.get('input_text')!=text or payload.get('input_sha256')!=_sha(text)
+                or span.get('scope')!=target['scope'] or span.get('start')!=target['start']
+                or span.get('end')!=target['end'] or span.get('text_sha256')!=_sha(text)
+                or type(boundary.get('insert_at')) is not int
+                or not 0<=boundary['insert_at']<=len(text)
+                or not isinstance(payload.get('output_text'),str)):
+            return []
+        parts=payload.get('source_record',{}).get('parts',[])
+        quotes=[(index,identity) for index,identity,quote in source_quotes
+                if any(part.get('binding',{}).get('text_sha256')==_sha(quote)
+                       for part in parts)]
+        if not quotes:return []
+        key=len(_punctuation(text[:boundary['insert_at']])[0])
+        return [{'start':0,'end':len(text),'basis':'syntax_bound_source_application',
+            'construction':payload['construction'],'references':[payload['output_text']],
+            'boundary_keys':{key},'citation_indexes':[i for i,_ in quotes],
+            'evidence_ids':list(dict.fromkeys(identity for _,identity in quotes))}]
     if payload.get('construction') != 'coordination_punctuation':
         return []
     examples = payload.get('examples')
@@ -198,7 +217,7 @@ def _application(candidate, text, edits, graph):
     application = dict(graph, target_start=left, target_end=right, target_sha256=_sha(original),
         basis=candidate['basis'], construction=candidate['construction'],
         reference_texts=deepcopy(candidate['references']),
-        relation=_relation(new_counts, candidate['references']))
+        relation=_relation(new_counts, candidate['references'],candidate.get('boundary_keys')))
     links, shift = [], 0
     changed = {key for key in set(old_counts) | set(new_counts) if old_counts[key] != new_counts[key]}
     for index, edit in local:
@@ -208,6 +227,7 @@ def _application(candidate, text, edits, graph):
         keys |= {key for pos, key in new_positions.items()
                  if proposed_start <= pos < proposed_start+len(edit['replacement'])}
         keys &= changed
+        if candidate.get('boundary_keys') is not None:keys &= candidate['boundary_keys']
         if keys:
             links.append(dict(graph, edit_index=index, edit_start=left+start, edit_end=left+end,
                 relation=_relation(new_counts, candidate['references'], keys)))

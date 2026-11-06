@@ -31,7 +31,7 @@ function harness(handler){
   const context={state,$,submission:{clear(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,familyRequest:0,
     beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,historyCreatedDate,
     textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:(tag,text,attrs={})=>{const n=new Node();n.tag=tag;n.textContent=text??'';n.attrs=attrs;return n;},clear:n=>n.replaceChildren(),
-    resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
+    renderCommaSuggestion(){},commaCheckerControls(){},resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
     ordinaryFamilyView,modelText:()=>'',renderGenerationNotice(){},syncMatches(){},renderLexical(){},renderText(){},sourceButtons(){},
     jobState:t=>t?.state,tierBlocks:()=>[],acceptedStates:new Set(['complete']),pendingStates:new Set(['pending']),isCpuTask:()=>false,
     sourceExplorer:{render(){}},unwrapFamily:x=>x.family||x,keyFor:()=> 'synthetic-key',pollJob(){},taskControls(){},showClarification(){},

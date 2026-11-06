@@ -174,3 +174,75 @@ def test_real_core_coordination_registry_and_citations_supply_the_application(mo
     assert direct and len(direct)<len(unit['bindings'])
     assert all(row['source_key']=='sp2001'for row in direct)
     assert all(EXAMPLE in ' '.join(row['snippet'].split())for row in direct)
+
+
+def finite_boundary(original, expected, position):
+    explained,receipts=graph(example='Vejica loči nadredni in odvisni stavek.')
+    binding=receipts[0]['bindings'][0]
+    receipts[0]['payload']={'construction':'finite_subordinate_clause_boundary',
+        'input_text':original,'input_sha256':hashlib.sha256(original.encode()).hexdigest(),
+        'input_span':dict(task(original)['target'],text_sha256=hashlib.sha256(original.encode()).hexdigest()),
+        'boundary':{'insert_at':position},'output_text':expected,
+        'source_record':{'parts':[{'binding':binding}]}}
+    return explained,receipts
+
+def test_general_clause_application_links_only_the_independently_identified_boundary():
+    original='Če ne pride ne grem domov.'
+    expected='Če ne pride, ne grem domov.'
+    explained,receipts=finite_boundary(original,expected,original.index(' ne grem'))
+    value=proposal(original,'Če, ne pride, ne grem domov.')
+    result=connect(value,task(original),explained,receipts)
+    assert result['status']=='applied'
+    assert result['links'][0]['edit_index']==1
+    assert result['links'][0]['relation']=='supports_proposal'
+    assert result['unexplained_edit_indexes']==[0]
+    assert result['applications'][0]['basis']=='syntax_bound_source_application'
+
+def test_general_clause_application_disagrees_with_removing_the_required_comma():
+    original='Če ne pride, ne grem domov.'
+    explained,receipts=finite_boundary(original,original,original.index(','))
+    result=connect(proposal(original,original.replace(',','')),task(original),explained,receipts)
+    assert result['links'][0]['relation']=='disagrees_with_proposal'
+
+def test_general_clause_receipt_for_a_different_target_does_not_certify_edits():
+    original='Če ne pride ne grem domov.'
+    explained,receipts=finite_boundary(original,original.replace(' ne grem',', ne grem'),11)
+    receipts[0]['payload']['input_span']['start']+=1
+    result=connect(proposal(original,original.replace(' ne grem',', ne grem')),task(original),explained,receipts)
+    assert not result['links'] and result['status']=='related_guidance'
+
+
+def test_actual_classla_observation_through_core_registry_renderer_and_web_links(monkeypatch):
+    configured=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
+    if not configured:pytest.skip('Cross-repository fixture requires pinned CORE')
+    root=Path(configured)
+    for path in [root,root/'apps/api',root/'tests',root/'tests/zrc']:
+        monkeypatch.syspath_prepend(str(path))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_clause_punctuation import attach,classla_observation
+    from tools.zrc_reference.request_interpretation import response as interpretation
+    question,context,evidence,passages=attach(classla_observation(0))
+    for row in evidence+passages:
+        if row.get('tool_kind')=='syntax':row['span']={'char_start':0,'char_end':len(row['text']),
+            'offset_basis':'canonical_record_json_unicode_codepoints'}
+        if row.get('tool_kind')=='syntax':row.update(title='Jezikovna analiza',url='https://www.jeziknaklik.it/',
+            tool_scope='Automatic prediction; not normative evidence.',tool_provenance=classla_observation(0)['analysis']['model'])
+    plan=interpretation(question,context,'sl','sl')['request_plan']
+    payload=_plan_runtime_payload(question,evidence,passages,request_plan=plan)
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    unit=next(row for row in registry.units if row.get('payload',{}).get('construction')
+              =='finite_subordinate_clause_boundary')
+    assert unit['unit_id'] in registry.required_unit_ids
+    explained=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[
+        {'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    original=plan['comma_check']['target']['text']
+    result=connect(proposal(original,'Ko dobimo odgovor, vam sporočimo.'),
+        plan['comma_check'],explained,explained['applied_unit_receipts'])
+    assert result['status']=='applied' and result['unexplained_edit_indexes']==[]
+    link,=result['links'];assert link['edit_start']==17 and link['relation']=='supports_proposal'
+    direct=[explained['citations'][index] for index in link['citation_indexes']]
+    assert direct and all(row['source_key']=='sp2001' for row in direct)
+    assert all('Ta vejica se stavi ne glede' in ' '.join(row['snippet'].split()) for row in direct)
+    assert any(row['source_key']=='linguistic-analysis' for row in explained['citations'])
+    assert 'Ko dobimo odgovor' in explained['answer_md']

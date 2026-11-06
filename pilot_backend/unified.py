@@ -550,6 +550,27 @@ def collect_tools(gateway, family):
     status={'family':'linghub_tools','source_label':'LingHub','status':'unavailable',
             'returned_count':0,'limit':None,'has_more':None}
     try:
+        task=(family.get('request_plan')or{}).get('comma_check') or {}
+        config=getattr(gateway,'comma_checker',None)
+        if (task.get('status')=='ready' and task.get('explain') is True
+                and isinstance(config,dict) and config.get('enabled') is True):
+            from core.syntax_analysis import collect as collect_syntax
+            target=task['target']; original=family.get('original_question',family['question'])
+            origin=original if target.get('scope')=='question' else family.get('context','')
+            if origin[target['start']:target['end']]!=target['text']:
+                raise ValueError('Syntax target differs from interpreted original')
+            observed=collect_syntax(target['text'],config)
+            if observed.get('status')!='ok':
+                return None,dict(status,status='unavailable',tool_outcome='unavailable',reason=observed.get('reason','syntax_unavailable'))
+            observed['target_scope']=deepcopy(target)
+            cap={'operation':'syntax','request':{'text':target['text']},'response':observed,
+                 'response_sha256':digest(observed),'duration_ms':round((time.monotonic()-started)*1000,3)}
+            capture={'version':'klikai.syntax-collation.v1',
+                'plan':{'status':'ready','routing_kind':'comma_explanation_syntax','focus':target['text']},
+                'captures':[cap],'capture_set_sha256':digest([cap])}
+            return capture,dict(status,status='not_documentary',capture_count=1,
+                evidence_type='tool_result',routing_kind='comma_explanation_syntax',
+                normative_conclusion='not_established',tool_outcome='matched')
         capture=collation.collect(gateway,family,automatic=True)
         if capture is None:return None,dict(status,status='not_documentary',tool_outcome='not_invoked',reason='no_applicable_lookup_route')
         if capture['plan']['status']!='ready':

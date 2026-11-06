@@ -108,10 +108,9 @@ def test_both_authoritative_heading_queries_run_despite_a_surface_hit(interprete
 
 
 @pytest.mark.parametrize('question',[
-    'Preveri vejice: Ko pridem domov bom poklical.',
     'Ali pred kot vedno pišemo vejico?',
 ])
-def test_plain_checks_and_general_rule_questions_do_not_expand(interpreted,monkeypatch,question):
+def test_abstract_rule_question_does_not_run_sentence_expansion(interpreted,monkeypatch,question):
     family=interpreted(question);before=deepcopy(family)
     comma=family['request_plan'].get('comma_check')
     assert comma is None or not comma.get('reference_queries')

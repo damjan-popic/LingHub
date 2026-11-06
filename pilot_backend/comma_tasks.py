@@ -32,7 +32,7 @@ def candidate(question,context=''):
     # Queue nomination only. CORE owns target interpretation and decides
     # whether this is actually a check; this never authorizes a provider call.
     return bool(re.search(r'\b(?:vejic\w*|virgol\w*)\b',question,re.I)
-        and (re.search(r'\b(?:prever\w*|preglej\w*|poprav\w*|postav\w*|vstav\w*|dodaj\w*|odstran\w*|kje|kam|controll\w*|corregg\w*|dove)\b',question,re.I)
+        and (re.search(r'\b(?:prever\w*|preglej\w*|poprav\w*|postav\w*|vstav\w*|dodaj\w*|odstran\w*|kje|kam|manjka\w*|odveč\w*|potrebn\w*|controll\w*|corregg\w*|dove)\b',question,re.I)
              or any(mark in question for mark in ('»','«','“','"'))
              or bool(context.strip() and explanation_followup(question))))
 
@@ -125,7 +125,8 @@ def reader_execution(value):
     if not isinstance(value,dict):return None
     allowed={'provider','provider_label','attempted','acknowledged','response_received',
         'inference_performed','neural_prediction_received','status','writer_inference_performed',
-        'reported_model_version','reported_api_version','observation_reused','source_run_id'}
+        'reported_model_version','reported_api_version','observation_reused','source_run_id',
+        'syntax_inference_performed'}
     result={k:deepcopy(v) for k,v in value.items() if k in allowed}
     for native,public in [('invocation_attempted','attempted'),('invocation_acknowledged','acknowledged')]:
         if native in value:result[public]=value[native]
@@ -155,6 +156,9 @@ def answer(gateway,bundle,tier,model,parent=None):
     if bundle.get('reused_parent_run_id'):
         execution.update(attempted=False,acknowledged=False,response_received=False,
             neural_prediction_received=False,observation_reused=True,source_run_id=bundle['reused_parent_run_id'])
+    syntax=((bundle.get('explanation')or{}).get('analysis')or{}).get('captures',[])
+    syntax=[row.get('response',{}) for row in syntax if row.get('operation')=='syntax']
+    if syntax:execution['syntax_inference_performed']=syntax[0].get('execution',{}).get('inference_performed')
     proposal['label']=LABEL
     proposal['target_scope']={k:target[k]for k in ('scope','start','end')}if target else None
     explanation_status=bundle['explanation_status']

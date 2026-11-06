@@ -725,7 +725,7 @@ def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeyp
     from test_reviewed_answer_bank_plan import captured
     from tools.zrc_reference.request_interpretation import response as interpret_response
     question='Kakšno je pravilo za zapis številk in črk?'
-    item,source,_=captured(question)
+    item,source,capture= captured(question)
     payload=_plan_runtime_payload(question,[item],[source],
         request_plan=interpret_response(question,'','sl','sl')['request_plan'])
     runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
@@ -733,7 +733,23 @@ def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeyp
     result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
         'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
         'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    # Match the actual freeze route: it adds the full source drawer to a
+    # current-answer passage before WEB seals its citation tuple.
+    from tools.zrc_reference import pilot_unified_evidence as core_unified
+    from tools.zrc_reference.common import value_hash
+    captured_row={'capture_kind':'resource_record','capture':capture,
+        'capture_sha256':value_hash(capture),'source_slug':'zadrege',
+        'external_id':capture['resource_id'],'rights_mode':'owned','context_eligible':True,
+        'title':capture['title']}
     matches=frozen_matches_from_result(result)
+    for match in matches:
+        view=core_unified.source_details(result['evidence'][0],{'matches':[captured_row]})
+        assert 'Zgodovinska raba' in view['original_json']['original_text']
+        assert 'Zgodovinska raba'not in view['snippet']
+        match['capture_sha256']=captured_row['capture_sha256']
+        match['source']['locator']=deepcopy(view['locator'])
+        match['_citation_binding']=unified.frozen_citation_binding(match,view)
+        assert match['_citation_binding'] is not None
     output=run_bounded_answer_plan(result,matches)
     assert output['generation']['status']=='generated',json.dumps(output,indent=2)
     assert output['display_blocks'][0]['unit_type']=='reviewed_answer'

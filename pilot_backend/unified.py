@@ -553,7 +553,7 @@ def collect_source(gateway, family, definition, detail_pool=None, *, query_overr
         coverage['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
 
 
-def collect_tools(gateway, family):
+def collect_tools(gateway, family, *, comma_observation=None):
     """Freeze requested operations or an applicable automatic LORIS rule check."""
     started=time.monotonic()
     status={'family':'linghub_tools','source_label':'LingHub','status':'unavailable',
@@ -572,6 +572,19 @@ def collect_tools(gateway, family):
             if observed.get('status')!='ok':
                 return None,dict(status,status='unavailable',tool_outcome='unavailable',reason=observed.get('reason','syntax_unavailable'))
             observed['target_scope']=deepcopy(target)
+            if isinstance(comma_observation,dict) and comma_observation.get('input_text')==target['text']:
+                from core.comma_checker import public_proposal
+                proposal=public_proposal(comma_observation)
+                proposed=proposal.get('proposed_text')
+                if (proposal.get('status')=='ok' and isinstance(proposed,str)
+                        and proposed!=target['text']
+                        and proposed.replace(',','')==target['text'].replace(',','')):
+                    # A separate contextual hypothesis, never a replacement
+                    # for the original parse or independent proof of an edit.
+                    observed['punctuation_context']={
+                        'basis':'comma_only_candidate',
+                        'original_input_sha256':observed['input_sha256'],
+                        'observation':collect_syntax(proposed,config)}
             cap={'operation':'syntax','request':{'text':target['text']},'response':observed,
                  'response_sha256':digest(observed),'duration_ms':round((time.monotonic()-started)*1000,3)}
             capture={'version':'klikai.syntax-collation.v1',
@@ -1079,7 +1092,7 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         return tool_capture
 
 
-def freeze(gateway, family, policy,*,interpretation=None):
+def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
     family = deepcopy(family)
@@ -1111,7 +1124,8 @@ def freeze(gateway, family, policy,*,interpretation=None):
             'query':original,'query_variants':[],'original_question':original,
             'request_plan':deepcopy(family['request_plan'])})
     with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as details, ThreadPoolExecutor(max_workers=8) as pool:
-        tool_future=pool.submit(collect_tools,gateway,family)
+        tool_future=(pool.submit(collect_tools,gateway,family) if comma_observation is None else
+                     pool.submit(collect_tools,gateway,family,comma_observation=comma_observation))
         futures = ([] if comma_source is not None else
             [pool.submit(collect_source, gateway, family, row, details) for row in definitions])
         for future in as_completed(futures):

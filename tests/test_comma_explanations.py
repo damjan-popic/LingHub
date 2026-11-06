@@ -212,6 +212,60 @@ def test_general_clause_receipt_for_a_different_target_does_not_certify_edits():
     assert not result['links'] and result['status']=='related_guidance'
 
 
+def test_contextual_reading_is_conditional_in_both_application_and_edit_link():
+    original='Ker je mraz zakurimo.'; expected='Ker je mraz, zakurimo.'
+    explained,receipts=finite_boundary(original,expected,11)
+    receipts[0]['payload']['analysis_basis']='comma_context'
+    result=connect(proposal(original,expected),task(original),explained,receipts)
+    assert result['applications'][0]['relation']=='conditional_support'
+    assert result['applications'][0]['basis']=='punctuation_context_source_application'
+    assert result['links'][0]['relation']=='conditional_support'
+    assert reader(result)['links'][0]['relation']=='conditional_support'
+
+
+@pytest.mark.parametrize(('original','proposed','basis','expected_relation'),[
+    ('Če ne pride ne grem.','Če ne pride, ne grem.','original','supports_proposal'),
+    ('Če ne pride ne grem.','Če ne pride ne, grem.','original','disagrees_with_proposal'),
+    ('Ker je mraz zakurimo.','Ker je mraz, zakurimo.','comma_context','conditional_support'),
+    ('Če je hladno oblečem jopico.','Če je hladno, oblečem jopico.','comma_context','conditional_support'),
+])
+def test_real_predicate_registry_renderer_and_web_keep_the_reading_basis(monkeypatch,original,proposed,basis,expected_relation):
+    configured=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
+    if not configured:pytest.skip('Cross-repository fixture requires pinned CORE')
+    root=Path(configured)
+    for path in [root,root/'apps/api',root/'tests',root/'tests/zrc']:
+        monkeypatch.syspath_prepend(str(path))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_clause_punctuation import attach
+    from test_clause_predicate_groups import contextual
+    from tools.zrc_reference.request_interpretation import response as interpretation
+    question,context,evidence,passages=attach(contextual(original,proposed))
+    for row in evidence+passages:
+        if row.get('tool_kind')=='syntax':
+            row['span']={'char_start':0,'char_end':len(row['text']),
+                'offset_basis':'canonical_record_json_unicode_codepoints'}
+            row.update(title='Jezikovna analiza',url='https://www.jeziknaklik.it/',
+                tool_scope='Automatic prediction; candidate is conditional, not normative evidence.',
+                tool_provenance=row['original_json']['analysis']['model'])
+    plan=interpretation(question,context,'sl','sl')['request_plan']
+    payload=_plan_runtime_payload(question,evidence,passages,request_plan=plan)
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    unit=next(row for row in registry.units if row.get('payload',{}).get('construction')
+        =='finite_subordinate_clause_boundary')
+    assert unit['payload']['analysis_basis']==basis and unit['unit_id'] in registry.required_unit_ids
+    explained=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[
+        {'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    result=connect(proposal(original,proposed),plan['comma_check'],explained,explained['applied_unit_receipts'])
+    assert result['applications'][0]['relation']==expected_relation
+    if expected_relation!='disagrees_with_proposal':
+        assert result['links'][0]['relation']==expected_relation
+        direct=[explained['citations'][i]for i in result['links'][0]['citation_indexes']]
+        assert direct and all(row['source_key']=='sp2001'for row in direct)
+    assert any(row['source_key']=='linguistic-analysis'for row in explained['citations'])
+    assert ('V predlaganem zapisu'in explained['answer_md'])==(basis=='comma_context')
+
+
 def test_actual_classla_observation_through_core_registry_renderer_and_web_links(monkeypatch):
     configured=os.environ.get('KLIKAI_PINNED_CORE_ROOT')
     if not configured:pytest.skip('Cross-repository fixture requires pinned CORE')

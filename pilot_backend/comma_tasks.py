@@ -94,7 +94,8 @@ def freeze(gateway,family,policy):
         # This is the existing source-grounded path. Its selected supports and
         # citations remain separate from the checker observation.
         try:
-            explanation=unified.freeze(gateway,family,policy,interpretation=interpreted)['bundle']
+            explanation=unified.freeze(gateway,family,policy,interpretation=interpreted,
+                comma_observation=observation)['bundle']
             explanation_status='frozen'
         except Failure:
             explanation_status='unavailable'
@@ -131,7 +132,7 @@ def reader_execution(value):
     allowed={'provider','provider_label','attempted','acknowledged','response_received',
         'inference_performed','neural_prediction_received','status','writer_inference_performed',
         'reported_model_version','reported_api_version','observation_reused','source_run_id',
-        'syntax_inference_performed'}
+        'syntax_inference_performed','syntax_context_inference_performed'}
     result={k:deepcopy(v) for k,v in value.items() if k in allowed}
     for native,public in [('invocation_attempted','attempted'),('invocation_acknowledged','acknowledged')]:
         if native in value:result[public]=value[native]
@@ -163,7 +164,11 @@ def answer(gateway,bundle,tier,model,parent=None):
             neural_prediction_received=False,observation_reused=True,source_run_id=bundle['reused_parent_run_id'])
     syntax=((bundle.get('explanation')or{}).get('analysis')or{}).get('captures',[])
     syntax=[row.get('response',{}) for row in syntax if row.get('operation')=='syntax']
-    if syntax:execution['syntax_inference_performed']=syntax[0].get('execution',{}).get('inference_performed')
+    if syntax:
+        execution['syntax_inference_performed']=syntax[0].get('execution',{}).get('inference_performed')
+        contextual=syntax[0].get('punctuation_context',{}).get('observation')
+        if isinstance(contextual,dict):
+            execution['syntax_context_inference_performed']=contextual.get('execution',{}).get('inference_performed')
     proposal['label']=LABEL
     proposal['target_scope']={k:target[k]for k in ('scope','start','end')}if target else None
     explanation_status=bundle['explanation_status']

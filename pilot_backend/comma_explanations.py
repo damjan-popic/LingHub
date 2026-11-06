@@ -162,7 +162,10 @@ def _candidates(receipt, target, text, source_quotes):
                        for part in parts)]
         if not quotes:return []
         key=len(_punctuation(text[:boundary['insert_at']])[0])
-        return [{'start':0,'end':len(text),'basis':'syntax_bound_source_application',
+        conditional=payload.get('analysis_basis')=='comma_context'
+        return [{'start':0,'end':len(text),
+            'basis':'punctuation_context_source_application' if conditional else 'syntax_bound_source_application',
+            'conditional_reading':conditional,
             'construction':payload['construction'],'references':[payload['output_text']],
             'boundary_keys':{key},'citation_indexes':[i for i,_ in quotes],
             'evidence_ids':list(dict.fromkeys(identity for _,identity in quotes))}]
@@ -214,10 +217,13 @@ def _application(candidate, text, edits, graph):
     new_basis, new_positions, new_counts = _punctuation(proposed)
     if basis != new_basis:
         return None, []
+    def relation(keys):
+        value=_relation(new_counts,candidate['references'],keys)
+        return 'conditional_support' if value=='supports_proposal' and candidate.get('conditional_reading') else value
     application = dict(graph, target_start=left, target_end=right, target_sha256=_sha(original),
         basis=candidate['basis'], construction=candidate['construction'],
         reference_texts=deepcopy(candidate['references']),
-        relation=_relation(new_counts, candidate['references'],candidate.get('boundary_keys')))
+        relation=relation(candidate.get('boundary_keys')))
     links, shift = [], 0
     changed = {key for key in set(old_counts) | set(new_counts) if old_counts[key] != new_counts[key]}
     for index, edit in local:
@@ -230,7 +236,7 @@ def _application(candidate, text, edits, graph):
         if candidate.get('boundary_keys') is not None:keys &= candidate['boundary_keys']
         if keys:
             links.append(dict(graph, edit_index=index, edit_start=left+start, edit_end=left+end,
-                relation=_relation(new_counts, candidate['references'], keys)))
+                relation=relation(keys)))
         shift += len(edit['replacement'])-(end-start)
     return application, links
 

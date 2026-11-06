@@ -253,3 +253,9 @@ def test_reused_interpretation_must_match_complete_request_binding(interpreted,f
         saved['request_plan_sha256']=digest(saved['request_plan'])
     with pytest.raises(Failure):unified.freeze(gateway,family,{},interpretation=saved)
     assert len(gateway.calls)==before
+
+
+def test_mixed_orthography_and_inflection_keeps_the_normal_source_path(interpreted):
+    family=interpreted('Preveri vejice in razloži sklanjanje imena Luka: Ko pride Luka mu povej.')
+    assert set(family['request_plan']['requested_facets'])=={'orthography','inflection'}
+    assert unified.literal_comma_reference_source(family,RegistryGateway().rows) is None

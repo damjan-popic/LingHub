@@ -89,7 +89,7 @@ export function renderCommaProposal(root, proposal, {element,translate,copyText,
   if (view.original) root.append(e('h4',t('comma_original')),
     e('div',view.original,{class:'comma-text comma-original'}));
   if (view.status !== 'ok') {
-    root.append(e('p',t('comma_status_'+(statuses.has(view.status) ? view.status : 'unknown')),
+    root.append(e('p',t('comma_status_'+(statuses.has(view.status) ? view.status : 'unknown'),{limit:proposal.application_limit_characters||3000}),
       {class:'qualified-note',role:'status'}));
     return;
   }

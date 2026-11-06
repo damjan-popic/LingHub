@@ -24,12 +24,17 @@ def capability(config):
         'disclosure_sl':DISCLOSURE_SL,'disclosure_it':DISCLOSURE_IT,'terms_url':TERMS}
 
 
+def explanation_followup(question):
+    return bool(re.search(r'\b(?:vejic\w*|virgol\w*)\b',question,re.I)and re.search(r'\b(?:zakaj|pojasn\w*|razlo[zž]\w*|perch[eé]|spiega\w*)\b',question,re.I))
+
+
 def candidate(question,context=''):
     # Queue nomination only. CORE owns target interpretation and decides
     # whether this is actually a check; this never authorizes a provider call.
     return bool(re.search(r'\b(?:vejic\w*|virgol\w*)\b',question,re.I)
         and (re.search(r'\b(?:prever\w*|preglej\w*|poprav\w*|postav\w*|vstav\w*|dodaj\w*|odstran\w*|kje|kam|controll\w*|corregg\w*|dove)\b',question,re.I)
-             or any(mark in question for mark in ('»','«','“','"'))))
+             or any(mark in question for mark in ('»','«','“','"'))
+             or bool(context.strip() and explanation_followup(question))))
 
 
 def _options(family):
@@ -61,13 +66,20 @@ def freeze(gateway,family,policy):
                 or not 0<=target['start']<target['end']<=len(origin)
                 or origin[target['start']:target['end']]!=target.get('text')):
             raise Failure('invalid_request',422)
-    status=task['status'];observation=None
-    consent=_options(family).get('comma_checker_consent') is True
-    if status=='ready' and len(target['text'])>config.get('max_chars',3000):
+    status=task['status'];observation=None;reused_parent=None
+    options=_options(family)
+    consent=options.get('comma_checker_consent') is True
+    if task.get('mode')=='explain_existing':
+        parent=options.get('comma_parent')
+        if not isinstance(parent,dict)or not isinstance(parent.get('observation'),dict):return None
+        observation=deepcopy(parent['observation'])
+        if target is None or observation.get('input_text')!=target['text']:raise Failure('invalid_request',422)
+        reused_parent=parent['run_id'];status=observation['status']
+    if status=='ready' and reused_parent is None and len(target['text'])>config.get('max_chars',3000):
         status='too_long'
-    if status=='ready' and not consent:
+    if status=='ready' and reused_parent is None and not consent:
         status='consent_required'
-    if status=='ready':
+    if status=='ready' and reused_parent is None:
         from core.comma_checker import check
         client_config={k:config[k] for k in ('endpoint','key_file','timeout_seconds','max_chars') if k in config}
         observation=asyncio.run(check(target['text'],client_config))
@@ -84,7 +96,8 @@ def freeze(gateway,family,policy):
     elif task.get('explain'):
         explanation_status='unavailable'
     body={'contract':CONTRACT,'question':question,'locale':family.get('locale','sl'),
-        'task':deepcopy(task),'status':status,'observation':observation,
+        'task':deepcopy(task),'status':status,'observation':observation,'reused_parent_run_id':reused_parent,
+        'application_limit_characters':config.get('max_chars',3000),
         'consent':{'accepted':consent,'disclosure_sha256':digest(capability(config)),
                    'terms_url':TERMS},'explanation':explanation,
         'explanation_status':explanation_status}
@@ -112,7 +125,7 @@ def reader_execution(value):
     if not isinstance(value,dict):return None
     allowed={'provider','provider_label','attempted','acknowledged','response_received',
         'inference_performed','neural_prediction_received','status','writer_inference_performed',
-        'reported_model_version','reported_api_version'}
+        'reported_model_version','reported_api_version','observation_reused','source_run_id'}
     result={k:deepcopy(v) for k,v in value.items() if k in allowed}
     for native,public in [('invocation_attempted','attempted'),('invocation_acknowledged','acknowledged')]:
         if native in value:result[public]=value[native]
@@ -130,7 +143,8 @@ def answer(gateway,bundle,tier,model,parent=None):
     proposal={'label':LABEL,'status':bundle['status'],'original_text':original,
         'proposed_text':None,'edits':[],'offset_convention':'unicode_codepoint_half_open',
         'checked_extent':{'start':0,'end':0,'complete':False,'offset_convention':'unicode_codepoint_half_open'},
-        'provider_label':'CJVT Vejice','reported_model_version':None,'reported_confidence':None}
+        'provider_label':'CJVT Vejice','reported_model_version':None,'reported_confidence':None,
+        'application_limit_characters':bundle.get('application_limit_characters',3000)}
     if observation is not None:
         from core.comma_checker import public_proposal
         proposal.update(public_proposal(observation))
@@ -138,6 +152,9 @@ def answer(gateway,bundle,tier,model,parent=None):
             edit['kind']='remove'if edit['replacement'].count(',')<edit.get('original','').count(',')else'insert'
         proposal['offset_convention']='unicode_codepoint_half_open'
         execution.update(reader_execution(observation.get('execution',{})) or {})
+    if bundle.get('reused_parent_run_id'):
+        execution.update(attempted=False,acknowledged=False,response_received=False,
+            neural_prediction_received=False,observation_reused=True,source_run_id=bundle['reused_parent_run_id'])
     proposal['label']=LABEL
     proposal['target_scope']={k:target[k]for k in ('scope','start','end')}if target else None
     explanation_status=bundle['explanation_status']
@@ -174,7 +191,8 @@ def answer(gateway,bundle,tier,model,parent=None):
     text=messages.get(bundle['status'],
         'La proposta di questo controllo non può essere applicata. Il testo originale rimane conservato.'if italian else
         'Predloga tega preverjanja ni mogoče uporabiti. Izvirno besedilo ostaja ohranjeno.')
-    if task.get('explain') and explanation_status in {'unsupported','unavailable'}:
+    if bundle['status']!='ok':text=''  # The saved proposal panel owns its local status notice.
+    if task.get('explain') and bundle['status']=='ok'and explanation_status in {'unsupported','unavailable'}:
         text+=(' Per questa modifica non ho al momento una spiegazione collegata adeguatamente alle fonti conservate.'if italian else
                ' Za konkretni poseg trenutno nimam ustrezno vezane razlage iz ohranjenih virov.')
     if result is None:

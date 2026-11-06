@@ -132,24 +132,33 @@ class Domain:
         with self.store.tx()as db:
             def action():
                 if task=='reference'and not self.unified_answers:self.require_generation([model])
-                parent=payload.get('parent_run_id');effective_context=context
+                parent=payload.get('parent_run_id');effective_context=context;comma_parent=None
                 if parent:
                     if not isinstance(parent,str):raise Failure('invalid_request')
                     prior=self.run(db,parent,owner)
                     previous=self.owned(db,'families',prior['family_id'],owner)
                     if task!='reference'or previous['task']!='reference':raise Failure('invalid_request')
+                    if relation=='followup'and not context.strip()and comma_tasks.explanation_followup(q):
+                        saved=json.loads(prior['result']or'{}')
+                        observation=(saved.get('deterministic_result')or{}).get('comma_observation')
+                        proposal=saved.get('comma_proposal')or{}
+                        if isinstance(observation,dict)and observation.get('status')=='ok'and proposal.get('original_text')==observation.get('input_text'):
+                            comma_parent={'run_id':prior['id'],'observation':observation}
+                            effective_context=proposal['original_text']
                     if relation=='retry' and (prior['state']not in {'failed','cancelled'} or q!=previous['question']or context!=previous['context']):raise Failure('invalid_request')
                     # Only an explicitly supplied, owned run can bind a referent.
                     # Shared account chronology is never consulted.
-                    if not context.strip() and request_tasks.unresolved_reference(q,request_plan=parent_request_plan):
+                    if not context.strip() and comma_parent is None and request_tasks.unresolved_reference(q,request_plan=parent_request_plan):
                         from core.lexical_planner import is_referential_request
                         bound=previous['context']if is_referential_request(previous['question'])else previous['question']
                         if len(bound)<=3000:effective_context=bound
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
-                if 'comma_checker_consent'in payload:
-                    db.execute('INSERT INTO family_request_options VALUES(?,?)',(fid,canonical({'comma_checker_consent':payload['comma_checker_consent']})))
+                options={}
+                if 'comma_checker_consent'in payload:options['comma_checker_consent']=payload['comma_checker_consent']
+                if comma_parent is not None:options['comma_parent']=comma_parent
+                if options:db.execute('INSERT INTO family_request_options VALUES(?,?)',(fid,canonical(options)))
                 if self.single_answers and task=='reference':db.execute("INSERT INTO family_answer_modes VALUES(?,'single')",(fid,))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')

@@ -440,7 +440,7 @@
   "comma_partial": "Pregled ne zajema celotnega izbranega besedila.",
   "comma_status_consent_required": "Besedilo še ni bilo poslano orodju. Za ta pregled označite dovoljenje ob vprašanju in ga ponovno oddajte.",
   "comma_status_target_required": "Dodajte besedilo, v katerem želite preveriti vejice.",
-  "comma_status_too_long": "Izbrano besedilo je predolgo za ta pregled. Izberite krajše celotno besedilo; nič ni bilo tiho odrezano.",
+  "comma_status_too_long": "Besedilo presega trenutno omejitev {limit} znakov za to preverjanje. Ni bilo skrajšano ali poslano.",
   "comma_status_unavailable": "Orodje za vejice trenutno ni na voljo. Izvirnik ostaja nespremenjen.",
   "comma_status_timeout": "Orodje za vejice ni vrnilo rezultata v predvidenem času. Izvirnik ostaja nespremenjen.",
   "comma_status_alignment_failed": "Predloga ni mogoče zanesljivo povezati z izvirnim besedilom. Izvirnik ostaja nespremenjen.",

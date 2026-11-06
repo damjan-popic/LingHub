@@ -101,3 +101,34 @@ def test_general_rule_does_not_call_checker(tmp_path,monkeypatch):
  family={'question':'Ali pred kot vedno pišemo vejico?','context':'','locale':'sl','input_language':'und'}
  assert comma_tasks.freeze(gateway,family,{}) is None
  assert calls==[]
+
+
+def test_owned_why_followup_reuses_prediction_without_another_checker_call(tmp_path,monkeypatch):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only',
+   'execution':{'provider_scope':'none','inference_performed':False},'provider_attempts':[]})
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client)
+  _,parent=ask(app,client,headers,True)
+  parent_run=parent['short']['run_id']
+  r=client.post('/api/pilot/families',headers=headers,json={
+   'question':'Zakaj si tu dodal vejico?','idempotency_key':'comma-owned-why-001',
+   'parent_run_id':parent_run,'parent_relation':'followup','comma_checker_consent':False})
+  assert r.status_code==200,r.text
+  fid=r.json()['family']['answer_family_id']
+  job=app.state.jobs.claim('cpu');assert job
+  app.state.jobs.execute(job)
+  current=client.get('/api/pilot/families/'+fid).json()
+  assert current['short']['comma_proposal']['proposed_text']=='Ko pridem domov, bom poklical.'
+  assert current['short']['tool_execution']['observation_reused'] is True
+  assert current['short']['tool_execution']['attempted'] is False
+  assert current['context']=='Ko pridem domov bom poklical.'
+  assert calls==['Ko pridem domov bom poklical.']
+  login(client,'unified-other')
+  r=client.post('/api/pilot/families',headers=login(client,'unified-other'),json={
+   'question':'Zakaj si tu dodal vejico?','idempotency_key':'comma-other-why-001',
+   'parent_run_id':parent_run,'parent_relation':'followup'})
+  assert r.status_code==404
+  assert len(calls)==1

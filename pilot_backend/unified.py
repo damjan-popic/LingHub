@@ -956,6 +956,38 @@ def expand_o_name_declension_rules(
     else:status['status']='ok' if status['returned_count'] else 'no_match'
 
 
+def expand_request_reference_rules(gateway,family,definitions,found,coverage,detail_pool,pool):
+    """Complete a bounded, authenticated rule lookup after surface discovery."""
+    task=(family.get('request_plan')or{}).get('comma_check')or{}
+    queries=task.get('reference_queries')if task.get('explain')is True else None
+    if not isinstance(queries,list):return
+    statuses={row['family']:row for row in coverage}
+    enabled={row['slug']:row for row in definitions if row.get('adapter_key')=='official_reference_jsonl'}
+    jobs=[];seen=set()
+    for lookup in queries[:2]:
+        if not isinstance(lookup,dict)or set(lookup)!={'source_slug','query'}:continue
+        slug,query=lookup['source_slug'],lookup['query']
+        if (not isinstance(query,str)or not 2<=len(query)<=120
+                or slug not in enabled or slug not in statuses or (slug,query)in seen):continue
+        seen.add((slug,query))
+        jobs.append((slug,query,pool.submit(collect_source,gateway,family,enabled[slug],
+            detail_pool,query_override=query)))
+    for slug,query,future in jobs:
+        matches,extra=future.result();found.extend(matches);status=statuses[slug]
+        status.setdefault('reference_scope_lookups',[]).append({'query':query,
+            'status':extra['status'],'returned_count':extra['returned_count']})
+        status['query_variants']=list(dict.fromkeys([*status.get('query_variants',[]),
+            *extra.get('query_variants',[])]))
+        status['limit']+=extra['limit']
+        status['returned_count']=len({(row['external_id'],row['capture_kind'],row['capture_sha256'])
+            for row in found if row['source_slug']==slug})
+        status['search_ms']+=extra['search_ms'];status['elapsed_ms']+=extra['elapsed_ms']
+        failed={'partial','timeout','unavailable','unsupported'}
+        if status['status']in failed or extra['status']in failed:
+            status['status']='partial'if status['returned_count']else'unavailable'
+        else:status['status']='ok'if status['returned_count']else'no_match'
+
+
 def supplement_source_advice_morphology(gateway,family,tool_capture,found,coverage):
     """Freeze source-nominated forms through the same authoritative profile."""
     if (not tool_capture or tool_capture.get('version')!='klikai.lexical-collation.v1'
@@ -1019,6 +1051,7 @@ def freeze(gateway, family, policy):
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
         expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
+        expand_request_reference_rules(gateway,family,definitions,found,coverage,details,pool)
         expand_same_preposition_legend(
             gateway,family,definitions,found,coverage,details,pool)
         expand_o_name_declension_rules(

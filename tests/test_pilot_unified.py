@@ -550,7 +550,7 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 
 @pytest.mark.parametrize('unit_type',[
     'curated_recommendation','comparison_synthesis','recommendation_synthesis',
-    'grammar_slot','source_advice'])
+    'grammar_slot','source_advice','reviewed_answer'])
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type
@@ -713,6 +713,34 @@ def test_real_core_synthesis_and_curated_units_cross_the_web_consumer(monkeypatc
         if unit_type=='recommendation_synthesis':
             assert len(output['citations'])==4
             assert len({row['support_id']for row in output['citations']})==2
+
+
+def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeypatch):
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'apps/api'))
+    monkeypatch.syspath_prepend(str(root/'tests'))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
+    from test_reviewed_answer_bank_plan import captured
+    from tools.zrc_reference.request_interpretation import response as interpret_response
+    question='Kakšno je pravilo za zapis številk in črk?'
+    item,source,_=captured(question)
+    payload=_plan_runtime_payload(question,[item],[source],
+        request_plan=interpret_response(question,'','sl','sl')['request_plan'])
+    runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
+    unit=next(row for row in registry.units if row['unit_type']=='reviewed_answer')
+    result=runtime._process_fresh_answer_plan({'answer_language':'sl','blocks':[{
+        'block_id':'B1','unit_id':unit['unit_id'],'paragraph_id':'P1'}],
+        'no_sufficient_evidence':False},registry,payload=payload,tier='answer')
+    matches=frozen_matches_from_result(result)
+    output=run_bounded_answer_plan(result,matches)
+    assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+    assert output['display_blocks'][0]['unit_type']=='reviewed_answer'
+    assert output['citations'] and 'Dodatna razlaga s pogojem.' in output['answer_md']
+    changed=deepcopy(result);changed['citations'][0]['source_revision']='f'*64
+    broken=run_bounded_answer_plan(changed,matches)
+    assert broken['generation']['error_code']=='unknown_citation'
 
 
 def test_real_core_handbook_source_advice_crosses_web_consumer(monkeypatch):

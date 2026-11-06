@@ -138,3 +138,28 @@ def test_owned_why_followup_reuses_prediction_without_another_checker_call(tmp_p
    'parent_run_id':parent_run,'parent_relation':'followup'})
   assert r.status_code==404
   assert len(calls)==1
+
+
+def test_explanation_uses_existing_answer_allowance_and_preserves_unsuccessful_writer_attempt(tmp_path,monkeypatch):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ tiers=[]
+ monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ def generate(gateway,bundle,tier,*args):
+  tiers.append(tier)
+  return {'answer_kind':'source_only','execution':{'inference_performed':True,'provider_scope':'shared'},
+      'provider_attempts':[{'status':'completed','model':'synthetic-writer'}],
+      'usage':{'prompt_tokens':12,'completion_tokens':3},'model_identity':{'model_id':'synthetic-writer'}}
+ monkeypatch.setattr(unified,'generate',generate)
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client);fid,current=ask(app,client,headers,True)
+  assert tiers==['answer']
+  with app.state.store.connect()as db:
+   run=db.execute('SELECT result FROM runs WHERE id=?',(current['short']['run_id'],)).fetchone()
+  result=json.loads(run['result'])
+  assert result['answer_kind']=='tool_prediction'
+  assert result['tool_execution']['writer_inference_performed'] is True
+  assert result['provider_attempts']==[{'status':'completed','model':'synthetic-writer'}]
+  assert result['model_identity']['model_id']=='synthetic-writer'
+  assert result['usage']['completion_tokens']==3
+  assert result['deterministic_result']['source_explanation_result']['execution']['inference_performed'] is True

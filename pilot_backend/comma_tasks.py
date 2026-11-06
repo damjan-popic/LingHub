@@ -168,7 +168,11 @@ def answer(gateway,bundle,tier,model,parent=None):
     if bundle.get('explanation'):
         from . import unified
         try:
-            explained=unified.generate(gateway,bundle['explanation'],tier,model,parent)
+            # A clause explanation needs both the whole syntax observation and
+            # governing source. Reuse the ordinary answer allowance; the
+            # lexical short input can drop one half before registry building.
+            explained=unified.generate(gateway,bundle['explanation'],
+                'answer' if tier=='short' else tier,model,parent)
             writer_execution=deepcopy(explained.get('execution',{}))
             if 'inference_performed'not in writer_execution:
                 writer_execution['inference_performed']=(True if any(row.get('status')=='completed'for row in explained.get('provider_attempts',[]))else None)
@@ -206,6 +210,11 @@ def answer(gateway,bundle,tier,model,parent=None):
             'evidence':[],'source_badges':[],'claims':[],'citations':[],'limitations':[],
             'execution':writer_execution,'model_identity':{'model_id':'not_invoked'},
             'synthesis_mode':'automated_tool_prediction'}
+    if explained is not None and result.get('answer_kind')=='tool_prediction':
+        # An unsupported explanation can still have used the writer. Preserve
+        # that attempt and its identity instead of inheriting not_invoked.
+        for key in ('provider_attempts','usage','model_identity'):
+            if key in explained:result[key]=deepcopy(explained[key])
     execution['writer_inference_performed']=writer_execution.get('inference_performed')
     connection=None
     if bundle.get('explanation') and result.get('answer_kind')=='generated':
@@ -220,7 +229,8 @@ def answer(gateway,bundle,tier,model,parent=None):
     result.update(comma_proposal=reader_proposal(proposal),tool_execution=reader_execution(execution),
         deterministic_result={'comma_observation':deepcopy(observation),'task':deepcopy(task),
             'consent':deepcopy(bundle['consent']),'explanation_connection':connection,
-            'applied_unit_receipts':deepcopy(result.get('applied_unit_receipts',[]))})
+            'applied_unit_receipts':deepcopy(result.get('applied_unit_receipts',[])),
+            'source_explanation_result':deepcopy(explained) if result.get('answer_kind')=='tool_prediction' else None})
     result.setdefault('diagnostics',{})['comma_checker']=reader_execution(execution)
     result['diagnostics'].setdefault('writer',{'status':'not_invoked'if writer_execution.get('inference_performed')is False else'unknown','reason':'dedicated_comma_tool_with_separate_explanation'})
     return result

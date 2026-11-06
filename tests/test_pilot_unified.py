@@ -715,7 +715,8 @@ def test_real_core_synthesis_and_curated_units_cross_the_web_consumer(monkeypatc
             assert len({row['support_id']for row in output['citations']})==2
 
 
-def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeypatch):
+@pytest.mark.parametrize('kind',['ordinary','class'])
+def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeypatch,kind):
     root=core_test_root()
     monkeypatch.syspath_prepend(str(root))
     monkeypatch.syspath_prepend(str(root/'apps/api'))
@@ -723,9 +724,11 @@ def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeyp
     monkeypatch.syspath_prepend(str(root/'tests/zrc'))
     from test_bounded_recomposition import _plan_runtime,_plan_runtime_payload
     from test_reviewed_answer_bank_plan import captured
+    from reviewed_answer_bank_fixture import class_row
     from tools.zrc_reference.request_interpretation import response as interpret_response
-    question='Kakšno je pravilo za zapis številk in črk?'
-    item,source,capture= captured(question)
+    question=('Kateri samostalniki podaljšujejo osnovo z n pri sklanjanju?'
+              if kind=='class'else'Kakšno je pravilo za zapis številk in črk?')
+    item,source,capture=captured(question,class_row()if kind=='class'else None)
     payload=_plan_runtime_payload(question,[item],[source],
         request_plan=interpret_response(question,'','sl','sl')['request_plan'])
     runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')
@@ -753,10 +756,15 @@ def test_real_core_reviewed_answer_crosses_web_with_exact_citation_graph(monkeyp
     output=run_bounded_answer_plan(result,matches)
     assert output['generation']['status']=='generated',json.dumps(output,indent=2)
     assert output['display_blocks'][0]['unit_type']=='reviewed_answer'
-    assert output['citations'] and 'Dodatna razlaga s pogojem.' in output['answer_md']
+    assert output['citations']
+    assert ('Francelj'if kind=='class'else'Dodatna razlaga s pogojem.')in output['answer_md']
+    if kind=='class':
+        assert len(result['citations'])>len({row['support_id']for row in result['citations']})
     changed=deepcopy(result);changed['citations'][0]['source_revision']='f'*64
     broken=run_bounded_answer_plan(changed,matches)
     assert broken['generation']['error_code']=='unknown_citation'
+    duplicate=deepcopy(result);duplicate['citations'].append(deepcopy(duplicate['citations'][0]))
+    assert run_bounded_answer_plan(duplicate,matches)['generation']['error_code']=='unknown_citation'
 
 
 def test_real_core_handbook_source_advice_crosses_web_consumer(monkeypatch):

@@ -1456,7 +1456,7 @@ def _generate(gateway, bundle, tier, model, parent=None):
                     if (not ids or len(citation_spans)!=len(bound)
                             or (len(set(support_ids))!=len(support_ids)
                                 and block['unit_type']not in {
-                                    'comparison_synthesis','recommendation_synthesis'})
+                                    'comparison_synthesis','recommendation_synthesis','reviewed_answer'})
                             or set(support_ids)!=set(block['support_ids'])
                             or any(row['block_id']!=block['block_id']
                                    or row['unit_id']!=block['unit_id'] for row in bound)

@@ -6,6 +6,8 @@ def method(result):
     if not isinstance(result,dict):return 'unknown'
     if result.get('answer_kind')in {'capability_unavailable','unavailable'}:return 'capability_unavailable'
     if result.get('status')=='failed':return 'failed'
+    if isinstance(result.get('comma_proposal'),dict):
+        return 'source_grounded_tool_prediction'if result.get('answer_kind')=='generated'else'automated_tool_prediction'
     mode=result.get('synthesis_mode')
     if mode in MODES:return mode
     kind=result.get('answer_kind')

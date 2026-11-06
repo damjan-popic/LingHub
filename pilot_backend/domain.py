@@ -3,7 +3,7 @@ from __future__ import annotations
 import json,secrets
 from .store import canonical,digest,stamp,uid
 from .security import Failure
-from . import collation, editorial, unified, request_tasks
+from . import collation, editorial, unified, request_tasks, comma_tasks
 from .classification import method
 from . import human_feedback, answer_mode, presentation
 from .adoption import historical_record
@@ -83,7 +83,10 @@ class Domain:
         stored=db.execute('SELECT task,question,context,locale FROM families WHERE id=?',(family,)).fetchone()
         task=stored['task']
         guidance=self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
-        job_model='cpu'if guidance or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
+        comma_candidate=(self.unified_answers and task=='reference'
+            and comma_tasks.capability(getattr(self.request_gateway,'comma_checker',None))['configured']
+            and comma_tasks.candidate(stored['question'],stored['context']))
+        job_model='cpu'if guidance or comma_candidate or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         human_feedback.accepted(db,rid,owner,automated=automated,release=self.release)
         return {'run_id':rid,'job_id':jid}
@@ -95,7 +98,8 @@ class Domain:
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
     def create_family(self,owner,payload):
-        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id','parent_relation'})
+        fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id','parent_relation','comma_checker_consent'})
+        if 'comma_checker_consent'in payload and type(payload['comma_checker_consent'])is not bool:raise Failure('invalid_request')
         relation=payload.get('parent_relation')
         if relation is not None and (relation not in ('retry','followup') or not isinstance(payload.get('parent_run_id'),str) or not payload['parent_run_id']):raise Failure('invalid_request')
         if 'parent_run_id'in payload and (not isinstance(payload['parent_run_id'],str) or not payload['parent_run_id']):raise Failure('invalid_request')
@@ -144,6 +148,8 @@ class Domain:
                 self.admit(db,owner);fid=uid();policy=self.select_policy(db,owner)if task=='reference'else self.store.meta('active_policy',db=db)
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
+                if 'comma_checker_consent'in payload:
+                    db.execute('INSERT INTO family_request_options VALUES(?,?)',(fid,canonical({'comma_checker_consent':payload['comma_checker_consent']})))
                 if self.single_answers and task=='reference':db.execute("INSERT INTO family_answer_modes VALUES(?,'single')",(fid,))
                 if focus:db.execute('INSERT INTO family_focus VALUES(?,?)',(fid,focus))
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')
@@ -177,7 +183,7 @@ class Domain:
         if r['result'] or r['state'] in {'failed','cancelled'}:
             locale=db.execute('SELECT locale FROM families WHERE id=?',(r['family_id'],)).fetchone()[0]
             result=human_feedback.visible_result(r,locale)
-            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress','decision_sources'):
+            for k in ('status','short_answer','answer_md','source_badges','evidence','blocks','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','synthesis_mode','validation','quality_actions','citations','deterministic_result','clarification_code','capability','answer_method','retrieval','generation','progress','decision_sources','comma_proposal','tool_execution'):
                 if blind and k in {'retrieval','generation','progress'}:continue
                 if k in result:out[k]=result[k]
             if not blind:
@@ -212,11 +218,13 @@ class Domain:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'context':f['context'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             out['matches_available']=bundle.get('contract')==unified.CONTRACT or (bundle.get('contract')==request_tasks.CONTRACT and bool(bundle['decision']['resources']))
+            if bundle.get('contract')==comma_tasks.CONTRACT and isinstance(bundle.get('explanation'),dict):
+                out['matches_available']=bundle['explanation'].get('contract')==unified.CONTRACT
             if bundle.get('contract')==unified.CONTRACT:
                 from .lexical import reader
                 lexical=reader(bundle)
                 if lexical:out['lexical_profile']=lexical
-            out['unified_answers']=out['matches_available']or(self.unified_answers and f['task']=='reference'and not f['bundle'])
+            out['unified_answers']=bundle.get('contract')==comma_tasks.CONTRACT or out['matches_available']or(self.unified_answers and f['task']=='reference'and not f['bundle'])
             focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()
             if focus:out['focus']=focus[0]
             original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(fid,)).fetchone()
@@ -233,6 +241,10 @@ class Domain:
             f=self.owned(db,'families',fid,owner)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
             if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.matches(bundle,offset,limit,source,summary)
+            if bundle.get('contract')==comma_tasks.CONTRACT:
+                comma_tasks.checked(bundle)
+                if bundle.get('explanation'):bundle=bundle['explanation']
+                else:return {'sources':[],'returned_count':0,'count_scope':'returned_unique_records','usage_final':True}if summary else {'items':[],'offset':offset,'limit':limit,'returned_count':0,'next_offset':None,'usage_final':True,'count_scope':'returned_unique_records','corpus_total':None,'source_slug':source}
             if bundle.get('contract')!=unified.CONTRACT:raise Failure('not_found',404)
             latest={}
             for row in db.execute("SELECT tier,result FROM runs WHERE family_id=?AND assignment_id IS NULL ORDER BY revision",(fid,)):

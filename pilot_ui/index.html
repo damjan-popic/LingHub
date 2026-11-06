@@ -32,6 +32,12 @@
   <div id="app-view" hidden>
     <p id="beta-notice" class="beta-notice" hidden><span data-i18n="beta_notice"></span></p>
     <form id="question-form" class="composer"><label for="question" data-i18n="composer_label"></label><textarea id="question" name="question" rows="3" maxlength="5000" required spellcheck="false" data-i18n-placeholder="composer_placeholder"></textarea>
+      <section id="comma-checker-control" class="comma-checker-control" hidden aria-labelledby="comma-checker-title">
+        <h3 id="comma-checker-title" data-i18n="comma_checker_optional"></h3>
+        <p id="comma-checker-disclosure" class="small muted"></p>
+        <label class="comma-consent"><input id="comma-checker-consent" type="checkbox"><span id="comma-checker-consent-label"></span></label>
+        <a id="comma-checker-terms" class="small" target="_blank" rel="noopener noreferrer" data-i18n="comma_checker_terms" hidden></a>
+      </section>
       <div class="composer-toolbar"><div class="composer-controls"><button type="button" class="plain options-button" id="options-toggle" aria-expanded="false" aria-controls="options" data-i18n="more_options"></button></div><button class="primary" id="ask-button" type="submit"><span data-i18n="ask"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button></div>
       <p id="deterministic-task-note" class="small muted" data-i18n="deterministic_task_note" hidden></p>
 
@@ -45,7 +51,9 @@
     <p id="followup-context" class="qualified-note" hidden></p>
     <div id="job-state" class="job-status" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="job-message"></span><span id="job-elapsed" class="small muted"></span><button class="plain" type="button" id="cancel-job" data-i18n="cancel"></button><button class="plain" type="button" id="retry-job" data-i18n="retry" hidden></button></div>
     <section id="empty-state" class="empty-state"><div class="conversation-mark" aria-hidden="true">?</div><p data-i18n="start_hint"></p></section>
-    <section id="answer-card" class="answer-card" hidden aria-labelledby="short-heading"><div class="answer-heading"><h1 id="short-heading"><span class="dot" aria-hidden="true"></span><span data-i18n="short_heading"></span></h1><button type="button" id="copy-answer" class="plain" data-i18n="copy"></button></div><p id="revision-notice" class="qualified-note" data-i18n="revision_notice" hidden></p><p id="answer-model" class="small muted"></p><p id="generation-notice" class="qualified-note" hidden></p><div id="short-answer" class="answer-prose" lang="sl"></div><div id="short-sources" class="source-row"></div><div id="short-feedback" class="feedback-bar"></div>
+    <section id="answer-card" class="answer-card" hidden aria-labelledby="short-heading"><div class="answer-heading"><h1 id="short-heading"><span class="dot" aria-hidden="true"></span><span data-i18n="short_heading"></span></h1><button type="button" id="copy-answer" class="plain" data-i18n="copy"></button></div><p id="revision-notice" class="qualified-note" data-i18n="revision_notice" hidden></p><p id="answer-model" class="small muted"></p><p id="generation-notice" class="qualified-note" hidden></p>
+      <div id="comma-proposal" class="comma-proposal" hidden></div>
+      <div id="short-answer" class="answer-prose" lang="sl"></div><div id="short-sources" class="source-row"></div><div id="short-feedback" class="feedback-bar"></div>
       <div class="answer-actions"><button type="button" class="plain" id="followup-button" data-i18n="followup_question" hidden></button><button type="button" class="plain" id="retry-answer" data-i18n="retry_answer" hidden></button><button type="button" class="expand-button" id="expand-button" aria-expanded="false" aria-controls="long-section"><span data-i18n="expand_long"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button type="button" class="plain" id="compare-button" data-i18n="compare"></button></div>
       <div id="locale-note" class="locale-note" hidden><span data-i18n="expanded_language"></span> <button class="plain" id="translate-answer" type="button" data-i18n="answer_in_selected_language"></button></div>
       <section id="long-section" class="long-section" hidden><h2 data-i18n="long_heading"></h2><p class="small muted" data-i18n="expanded_basis"></p><div id="long-status" class="status" role="status"></div><p id="long-model" class="small muted"></p><div id="long-answer" class="answer-prose"></div><div id="long-sources" class="source-row"></div><div id="long-feedback" class="feedback-bar"></div></section>

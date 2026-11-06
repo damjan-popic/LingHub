@@ -227,6 +227,11 @@ def tester_view(value, owner, secret):
     if isinstance(value,list):return [tester_view(v,owner,secret)for v in value]
     if not isinstance(value,dict):return value
     out={k:tester_view(v,owner,secret)for k,v in value.items()if k in SAFE}
+    from .comma_tasks import reader_proposal,reader_execution
+    proposal=reader_proposal(value.get('comma_proposal'))
+    if proposal is not None:out['comma_proposal']=proposal
+    tool=reader_execution(value.get('tool_execution'))
+    if tool is not None:out['tool_execution']=tool
     if isinstance(value.get('source_binding'),ServerSourceBinding):
         out['source_binding']=str(value['source_binding'])
     if isinstance(value.get('lexical_profile'),dict):

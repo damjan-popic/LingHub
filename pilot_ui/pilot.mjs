@@ -1,5 +1,6 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {publicRelease} from './public-release.mjs';
+import {commaConsentFields,commaTermsLink,commaExplanationHeading,renderCommaProposal} from './comma-proposal.mjs';
 import {noAnswerFeedback,canOpenCurrentOriginal,ordinaryFamilyView} from './core.mjs';
 import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks,historyCreatedDate} from './interface-details.mjs';
 import {createSourceExplorer,recordUsed,citedEvidenceIds} from './source-explorer.mjs';
@@ -11,6 +12,7 @@ const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{}
 let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0, familyRequest=0;
 let registry = {sources:[]};
 let signInResume = null;
+let commaDisclosureIdentity = '';
 const loginDraftKey = 'klikai-login-draft:'+base;
 const submission=submissionJournal({getItem:key=>sessionStorage.getItem(key),setItem:(key,value)=>sessionStorage.setItem(key,value),removeItem:key=>sessionStorage.removeItem(key)},'klikai:'+base);
 const beta = () => state.capabilities.project_beta === true;
@@ -34,11 +36,11 @@ function setLocale(locale,push=true) {
   document.querySelectorAll('[data-locale]').forEach(n=>{const active=n.dataset.locale===state.locale;n.href=localePath(base,n.dataset.locale)+location.search;n.toggleAttribute('aria-current',false);if(active)n.setAttribute('aria-current','page');});
   if(!state.answerLocaleExplicit)$('answer-locale').value=state.locale;
   if(state.clarification)clarificationText();
-  modelControls();capacityControls();
+  modelControls();capacityControls();commaCheckerControls();
   $('locale-note').hidden=!state.family||state.family.locale===state.locale;
   $('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
   if(state.family){if(acceptedStates.has(jobState(state.family.short)))renderText(state.family.short,'short',$('short-answer'));if(state.longOpen&&acceptedStates.has(jobState(state.family.long)))renderText(state.family.long,'long',$('long-answer'));$('answer-model').textContent=modelText(state.family.short);$('long-model').textContent=modelText(state.family.long);renderFeedback(state.family.short,'short',$('short-feedback'));if(state.longOpen)renderFeedback(state.family.long,'long',$('long-feedback'));}
-  renderGenerationNotice();renderMatches();renderSourceLegend();renderWaitMessage();
+  renderGenerationNotice();renderMatches();renderSourceLegend();renderWaitMessage();renderCommaSuggestion(state.family?.short);
   if(beta()){applyBetaPresentation();sourceExplorer.render();}
   if(push)setURL();
 }
@@ -61,7 +63,7 @@ function resetPrivate() {
   sourceRequest++;resetMatches();clearFeedbackContext();
   state.boot++;for(const cancel of state.polling.values())cancel();state.polling.clear();state.user=null;state.csrf=null;state.family=null;state.comparison=null;state.selection=null;state.feedback.clear();state.feedbackEvents.clear();state.followup=null;state.submitting=false;state.feedbackDrafts.clear();state.delivered.clear();state.requestKeys.clear();state.job=null;state.longOpen=false;
   $('app-view').hidden=true;$('account-button').hidden=true;$('beta-logout').hidden=true;$('password-view').hidden=true;clear($('short-answer'));clear($('long-answer'));clear($('short-sources'));clear($('long-sources'));clear($('short-feedback'));clear($('long-feedback'));clear($('history-list'));clear($('admin-content'));clear($('source-content'));clear($('side-a-answer'));clear($('side-b-answer'));$('question').value='';document.querySelectorAll('dialog[open]').forEach(d=>d.close());setURL();
-  clearClarification();$('focus').value='';$('model').value='auto';state.answerLocaleExplicit=false;state.capabilities={};$('capacity-state').hidden=true;renderSourceLegend();
+  clearClarification();$('focus').value='';$('model').value='auto';state.answerLocaleExplicit=false;state.capabilities={};$('capacity-state').hidden=true;renderSourceLegend();commaCheckerControls(true);renderCommaSuggestion();
 }
 function authenticated(session) {
   state.csrf=session.csrf_token;state.user=session.user;state.capabilities=session.capabilities||{};$('login-view').hidden=true;$('account-button').hidden=false;$('account-name').textContent=session.user.username;
@@ -69,7 +71,7 @@ function authenticated(session) {
   document.querySelectorAll('[data-admin-tab]').forEach(b=>b.hidden=session.user.role==='reviewer'&&b.dataset.adminTab!=='feedback');
   const tasks=state.capabilities.tasks;if(Array.isArray(tasks))for(const option of $('task').options)option.hidden=option.disabled=!tasks.some(x=>(typeof x==='string'?x:x.id)===option.value);
   if($('task').selectedOptions[0]?.disabled)$('task').value='reference';
-  applyBetaPresentation();modelControls();taskControls();
+  applyBetaPresentation();modelControls();taskControls();commaCheckerControls(true);
 }
 function applyBetaPresentation(){
   document.documentElement.classList.toggle('project-beta',beta());
@@ -100,7 +102,27 @@ function modelControls(){
 }
 function taskControls(){const task=$('task').value,cpu=isCpuTask(task),check=['text_check','morphology'].includes(task),note=['jezikovna_urgenca','jezikovna_posta'].includes(task)?'editorial_task_note':'deterministic_task_note';$('model').disabled=cpu;$('model').hidden=cpu;document.querySelector('label[for="model"]').hidden=cpu;$('deterministic-task-note').hidden=!cpu;$('deterministic-task-note').dataset.i18n=note;textStatus('deterministic-task-note',note);$('text-language-control').hidden=!(check||task==='reference');$('input-language').required=false;modelControls();capacityControls();}
 function capacityControls(){if(beta()){$('capacity-state').hidden=true;return;}const generation=state.capabilities.generation,model=generation?.models?.[$('model').value];$('capacity-state').hidden=$('task').value!=='reference'||!model||model.available===true;if(!$('capacity-state').hidden)textStatus('capacity-message',$('model').value==='auto'?'generation_waiting_capacity':'selected_model_unavailable');}
-async function refreshCapabilities(){state.capabilities={...state.capabilities,...await api('/capabilities')};applyBetaPresentation();modelControls();capacityControls();}
+function commaCheckerControls(reset=false){
+  const checker=state.capabilities.comma_checker,configured=checker?.configured===true;
+  const identity=configured?JSON.stringify([checker.provider_label,checker.disclosure_sl,checker.disclosure_it,checker.terms_url]):'';
+  if(reset||identity!==commaDisclosureIdentity||!configured)$('comma-checker-consent').checked=false;
+  commaDisclosureIdentity=identity;$('comma-checker-control').hidden=!configured;
+  $('comma-checker-disclosure').textContent=configured?(checker['disclosure_'+state.locale]||''):'';
+  $('comma-checker-consent-label').textContent=t('comma_checker_consent_label',{provider:checker?.provider_label||'CJVT Vejice'});
+  const terms=safeSourceLink(checker?.terms_url)||commaTermsLink(checker?.terms_url);$('comma-checker-terms').hidden=!configured||!terms;
+  if(terms)$('comma-checker-terms').href=terms;else $('comma-checker-terms').removeAttribute('href');
+}
+function focusCommaExplanation(tier,link){
+  if(tier?.run_id!==state.family?.short?.run_id)return;
+  const target=[...$('short-answer').querySelectorAll('[data-block-id]')].find(node=>
+    node.dataset.blockId===link.block_id&&node.dataset.runId===tier.run_id);
+  if(!target)return;
+  target.setAttribute('tabindex','-1');target.classList.add('comma-explanation-target');
+  target.addEventListener('blur',()=>target.classList.remove('comma-explanation-target'),{once:true});
+  target.scrollIntoView({block:'center'});target.focus({preventScroll:true});
+}
+function renderCommaSuggestion(tier){renderCommaProposal($('comma-proposal'),tier?.comma_proposal,{element:el,translate:t,copyText:text=>navigator.clipboard.writeText(text),blocks:tierBlocks(tier),citations:tier?.citations||[],openExplanation:link=>focusCommaExplanation(tier,link)});}
+async function refreshCapabilities(){state.capabilities={...state.capabilities,...await api('/capabilities')};applyBetaPresentation();modelControls();capacityControls();commaCheckerControls();}
 function clearClarification(){state.clarification=null;$('clarification').hidden=true;$('focus-control').hidden=true;$('ask-button').querySelector('span').dataset.i18n='ask';$('ask-button').querySelector('span').textContent=t('ask');}
 function clarificationText(){textStatus('clarification-message',state.clarification?.code==='input_language_required'?'input_language_required':'focus_required');$('ask-button').querySelector('span').dataset.i18n='continue_question';$('ask-button').querySelector('span').textContent=t('continue_question');}
 function showClarification(value){clearFeedbackContext();resetMatches();state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');if(beta()){$('text-language-control').hidden=!value.fields.includes('input_language');}else if(value.fields.includes('input_language')){$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');}clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
@@ -140,7 +162,9 @@ function sourceButtons(tier,kind,node,reference={}) {
 }
 function renderText(tier,kind,node,reference={}) {
   clear(node);node.lang=state.family?.locale||state.locale;if((tier?.source_tier||kind)==='long'&&tier?.correction?.required)node.append(el('p',t('long_correction_notice'),{class:'qualified-note','data-i18n':'long_correction_notice',role:'status'}));const blocks=tierBlocks(tier,kind);
-  if(!blocks.length){node.append(el('p',t(['no_hit','no_answer'].includes(jobState(tier))?'no_hit':jobState(tier)==='rejected'?'answer_guard_failed':jobState(tier)==='cancelled'?'cancelled':jobState(tier)==='failed'?'request_failed':'source_unavailable')));return;}
+  if(!blocks.length){if(tier?.comma_proposal&&typeof tier.comma_proposal==='object')return;node.append(el('p',t(['no_hit','no_answer'].includes(jobState(tier))?'no_hit':jobState(tier)==='rejected'?'answer_guard_failed':jobState(tier)==='cancelled'?'cancelled':jobState(tier)==='failed'?'request_failed':'source_unavailable')));return;}
+  const commaHeading=commaExplanationHeading(tier?.comma_proposal,tier?.citations);
+  if(commaHeading)node.append(el('h3',t(commaHeading),{class:'comma-explanation-heading'}));
   const citationButton=part=>{const button=el('button',part.text,{type:'button',class:'citation','aria-label':t('source_number',{number:part.number})});button.addEventListener('click',()=>openSource(tier,evidenceId(part.evidence),kind,reference));return button;};
   for(const group of paragraphGroups(blocks)){
     const p=el('p',null);if(group.id)p.dataset.paragraphId=group.id;
@@ -254,7 +278,7 @@ function renderFamily(family) {
   if(['clarification','clarification_required'].includes(family.short?.answer_kind)){const language=family.short?.clarification_code==='input_language_required';showClarification({code:language?'input_language_required':'focus_required',fields:[language?'input_language':'focus']});return;}
   clearClarification();
   state.family=family;$('answer-model').textContent=modelText(family.short);$('long-model').textContent=modelText(family.long);$('answer-card').hidden=false;$('empty-state').hidden=true;$('new-question').hidden=false;$('revision-notice').hidden=!family.revised&&!family.short?.supersedes_run_id;$('locale-note').hidden=family.locale===state.locale;
-  renderGenerationNotice();syncMatches(family);renderLexical(family);$('copy-answer').hidden=!acceptedStates.has(jobState(family.short))||!tierBlocks(family.short).length;
+  renderGenerationNotice();syncMatches(family);renderLexical(family);renderCommaSuggestion(family.short);$('copy-answer').hidden=!acceptedStates.has(jobState(family.short))||!tierBlocks(family.short).length;
   if(acceptedStates.has(jobState(family.short))||['rejected','failed','cancelled'].includes(jobState(family.short))){renderText(family.short,'short',$('short-answer'));sourceButtons(family.short,'short',$('short-sources'));renderFeedback(family.short,'short',$('short-feedback'));acknowledgeDelivery(family.short,'short');}else{clear($('short-answer'));clear($('short-sources'));clear($('short-feedback'));}
   $('expand-button').disabled=!acceptedStates.has(jobState(family.short))||isCpuTask(family.task)||jobState(family.short)==='no_hit'||(family.short?.historical_evidence&&!family.long);$('compare-button').disabled=$('expand-button').disabled||Boolean(family.short?.historical_evidence)||state.capabilities.comparisons===false;$('compare-button').hidden=state.capabilities.comparisons===false;
   $('long-section').hidden=true;$('expand-button').hidden=true;$('expand-button').setAttribute('aria-expanded','false');$('expand-button').querySelector('span').textContent=t(state.longOpen?'collapse_long':'expand_long');
@@ -267,7 +291,7 @@ function renderFamily(family) {
   $('retry-answer').hidden=!beta()||!['failed','cancelled'].includes(jobState(family.short));
   setURL();
 }
-async function loadFamily(id) {const request=++familyRequest,boot=state.boot;if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));if(request!==familyRequest||boot!==state.boot)return null;$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=false;renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
+async function loadFamily(id) {$('comma-checker-consent').checked=false;const request=++familyRequest,boot=state.boot;if(id!==familyId()){clearFeedbackContext();state.followup=null;$('followup-context').hidden=true;}const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));if(request!==familyRequest||boot!==state.boot)return null;$('question').value=data.question;$('focus').value=data.focus||'';$('task').value=data.task;$('input-language').value=['sl','it'].includes(data.input_language)?data.input_language:'';taskControls();state.longOpen=false;renderFamily(data);for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
 async function loadFeedback(){const boot=state.boot;const data=await api('/feedback');if(boot!==state.boot)return;for(const f of data.feedback||data.items||data||[])if(f.run_id)state.feedback.set(f.run_id,f);state.feedbackEvents.clear();}
 function setJob(job,tier) {
   const waitStarted=state.job?.job_id===job.job_id?state.job.waitStarted:performance.now();state.job={...job,tier,waitStarted};
@@ -307,7 +331,7 @@ async function submitQuestion(button,overrides={}) {
   const question=overrides.question||$('question').value;if(!question.trim()){textStatus('global-status','question_required');$('question').focus();return;}
   state.submitting=true;
   try{await action(button,async()=>{
-    familyRequest++;textStatus('global-status','');clearFeedbackContext();resetMatches();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
+    familyRequest++;textStatus('global-status','');clearFeedbackContext();resetMatches();renderCommaSuggestion();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL();
     const locale=overrides.locale||$('answer-locale').value;
     let payload={question,locale,interface_locale:state.locale,input_language:['text_check','morphology','reference'].includes($('task').value)&&['sl','it'].includes($('input-language').value)?$('input-language').value:'und',model:overrides.model||$('model').value,task:$('task').value};
     if(beta()){delete payload.model;payload.task='reference';}
@@ -315,15 +339,17 @@ async function submitQuestion(button,overrides={}) {
     if(state.followup){payload.parent_run_id=state.followup.run_id;payload.parent_relation='followup';}
     if(overrides.parent_run_id){payload.parent_run_id=overrides.parent_run_id;payload.parent_relation=overrides.parent_relation;}
     if(overrides.context)payload.context=overrides.context;
+    Object.assign(payload,commaConsentFields(state.capabilities,$('comma-checker-consent').checked));
     payload=submission.prepare(state.user.id,payload,()=>crypto.randomUUID());
     textStatus('job-message','checking_request');$('job-state').hidden=false;$('empty-state').hidden=true;
     try{
-      const result=await api('/families',{method:'POST',body:payload});submission.clear();state.followup=null;$('followup-context').hidden=true;
+      const result=await api('/families',{method:'POST',body:payload});submission.clear();$('comma-checker-consent').checked=false;state.followup=null;$('followup-context').hidden=true;
       if(result.status==='clarification_required'){showClarification(result.clarification);return;}
       renderFamily(unwrapFamily(result));const job=result.job;const id=job?.job_id||job?.id||state.family?.short?.job_id;if(id)pollJob(id,familyId(),'short');else $('job-state').hidden=true;
     }catch(error){
       $('job-state').hidden=true;
       if(error.code==='input_language_required'){showClarification({code:error.code,fields:['input_language']});return;}
+      if(error.code==='comma_checker_consent_required'){submission.clear();commaCheckerControls();textStatus('global-status','comma_checker_consent_required');$('comma-checker-consent').focus();return;}
       if(error.code==='generation_waiting_capacity'){clearClarification();$('capacity-state').hidden=beta();textStatus(beta()?'global-status':'capacity-message','generation_waiting_capacity');return;}
       if(error.status&&error.status<500&&error.status!==401)submission.clear();
       throw error;
@@ -451,14 +477,14 @@ function bind() {
   $('beta-logout').addEventListener('click',()=>$('logout-button').click());
   $('logout-button').addEventListener('click',event=>action(event.currentTarget,async()=>{await api('/logout',{method:'POST'});submission.clear();resetPrivate();await bootstrap();}));
   $('question-form').addEventListener('submit',event=>{event.preventDefault();submitQuestion(event.submitter);});$('question').addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();$('question-form').requestSubmit($('ask-button'));}});
-  $('question').addEventListener('input',()=>{$('focus').value='';clearClarification();});
+  $('question').addEventListener('input',()=>{$('comma-checker-consent').checked=false;$('focus').value='';clearClarification();});
   $('task').addEventListener('change',()=>{clearClarification();taskControls();});$('model').addEventListener('change',()=>{modelControls();capacityControls();});$('answer-locale').addEventListener('change',()=>{state.answerLocaleExplicit=true;});taskControls();
   $('capacity-models').addEventListener('click',()=>{$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');$('model').focus();});$('capacity-sources').addEventListener('click',()=>{$('task').value='source_search';clearClarification();taskControls();$('ask-button').focus();});
   $('capacity-tools').addEventListener('click',()=>{$('task').value='terminology';clearClarification();taskControls();$('question').focus();});
   $('matches-source').addEventListener('change',renderMatches);$('matches-more').addEventListener('click',()=>loadMatches(familyId(),true));
   $('options-toggle').addEventListener('click',()=>{const open=$('options').hidden;$('options').hidden=!open;$('options-toggle').setAttribute('aria-expanded',String(open));});$('history-toggle').addEventListener('click',toggleHistory);
-  $('new-question').addEventListener('click',()=>{submission.clear();state.followup=null;$('followup-context').hidden=true;$('ask-button').disabled=false;clearFeedbackContext();resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;$('question').value='';$('focus').value='';clearClarification();setURL();$('question').focus();});
-  $('followup-button').addEventListener('click',()=>{state.followup={run_id:state.family.short.run_id,question:state.family.question};$('followup-context').hidden=false;$('followup-context').textContent=t('followup_context',{question:state.family.question});$('question').value='';$('question').focus();});
+  $('new-question').addEventListener('click',()=>{submission.clear();$('comma-checker-consent').checked=false;renderCommaSuggestion();state.followup=null;$('followup-context').hidden=true;$('ask-button').disabled=false;clearFeedbackContext();resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;$('question').value='';$('focus').value='';clearClarification();setURL();$('question').focus();});
+  $('followup-button').addEventListener('click',()=>{$('comma-checker-consent').checked=false;state.followup={run_id:state.family.short.run_id,question:state.family.question};$('followup-context').hidden=false;$('followup-context').textContent=t('followup_context',{question:state.family.question});$('question').value='';$('question').focus();});
   $('retry-answer').addEventListener('click',event=>{submission.clear();submitQuestion(event.currentTarget,{question:state.family.question,context:state.family.context,parent_run_id:state.family.short.run_id,parent_relation:'retry'});});
   $('testing-help').addEventListener('click',()=>showDialog('testing-guide'));
   $('expand-button').addEventListener('click',event=>expand(event.currentTarget));$('translate-answer').addEventListener('click',event=>submitQuestion(event.currentTarget,{question:state.family.question,locale:state.locale,model:state.family.model}));

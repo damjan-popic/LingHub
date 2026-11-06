@@ -24,7 +24,7 @@ def render_result(value):
     if not isinstance(value,dict):raise Failure('invalid_answer',502)
     status=value.get('status')
     if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
-    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress','decision_sources'}
+    allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress','decision_sources','comma_proposal','tool_execution'}
     out={k:v for k,v in value.items()if k in allowed}
     from .human_feedback import provider_diagnostics
     out.update(provider_diagnostics(value))
@@ -53,7 +53,8 @@ def render_result(value):
         if len({b['block_id']for b in blocks})!=len(blocks):raise Failure('invalid_answer',502)
     else:blocks=[{'block_id':'answer','text':out['answer_md']or out['short_answer']}]
     out['blocks']=blocks
-    return out,digest(blocks)
+    display=digest({'blocks':blocks,'comma_proposal':out['comma_proposal']})if isinstance(out.get('comma_proposal'),dict)else digest(blocks)
+    return out,display
 
 class Jobs:
     def __init__(self,store,adapter,workers=2,release=None):
@@ -115,6 +116,8 @@ class Jobs:
                 if focus:f['focus']=focus[0]
                 original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',(f['id'],)).fetchone()
                 if original:f['original_question']=original[0]
+                options=db.execute('SELECT options FROM family_request_options WHERE family_id=?',(f['id'],)).fetchone()
+                if options:f['request_options']=json.loads(options[0])
                 generation_tier=answer_mode.source_tier(db,r)
             is_unified=f['task']=='reference'and getattr(self.adapter,'unified_answers',False)
             if is_unified:

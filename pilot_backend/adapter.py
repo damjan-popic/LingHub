@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,urlencode,quote
 import httpx
 from .security import Failure
-from . import terminology, collation, morphology, editorial, unified, request_tasks
+from . import terminology, collation, morphology, editorial, unified, request_tasks, comma_tasks
 
 
 def private_url(url):
@@ -12,7 +12,7 @@ def private_url(url):
     return url.rstrip('/')
 
 class Gateway:
-    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None,unified_answers=False,lexical_profiles=False):
+    def __init__(self,url,token,linghub_url=None,klikai_url=None,editorial_full_records=False,editorial_operator_policy_id=None,unified_answers=False,lexical_profiles=False,comma_checker=None):
         self.url=private_url(url);self.token=token;self.linghub_url=private_url(linghub_url)if linghub_url else None;self.klikai_url=private_url(klikai_url)if klikai_url else None
         if type(editorial_full_records)is not bool:raise ValueError('Editorial full-record capability must be boolean')
         if type(unified_answers)is not bool:raise ValueError('Unified answers capability must be boolean')
@@ -20,6 +20,7 @@ class Gateway:
         self.unified_answers=unified_answers
         if type(lexical_profiles)is not bool:raise ValueError("Lexical opt-in must be boolean")
         self.lexical_profiles=lexical_profiles
+        self.comma_checker=comma_checker
         if editorial_operator_policy_id is not None and (editorial_operator_policy_id!=editorial.OPERATOR_POLICY_ID or not editorial_full_records or not self.klikai_url):raise ValueError('Invalid local editorial operator policy')
         self.editorial_operator_policy_id=editorial_operator_policy_id
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
@@ -136,6 +137,8 @@ class Gateway:
             'input_language':input_language,'locale':locale})
     def freeze(self,family,policy):
         if family['task']=='reference'and self.unified_answers:
+            prediction=comma_tasks.freeze(self,family,policy)
+            if prediction is not None:return prediction
             guidance=request_tasks.freeze(family,self)
             if guidance is not None:return guidance
             return unified.freeze(self,family,policy)
@@ -182,6 +185,7 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('contract')==comma_tasks.CONTRACT:return comma_tasks.answer(self,bundle,tier,model,parent)
         if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.answer(bundle,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.generate(self,bundle,tier,model,parent)
         if bundle.get('task')=='editorial_search':return editorial.answer(bundle,tier)
@@ -198,6 +202,7 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('contract')==comma_tasks.CONTRACT:return comma_tasks.source(self,bundle,evidence_id)
         if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.source(bundle,evidence_id,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.source(bundle,evidence_id)
         if bundle.get('task')=='editorial_search':return editorial.source(bundle,evidence_id,tier)
@@ -205,6 +210,9 @@ class Gateway:
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
         return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
     def current_original(self,bundle,evidence_id):
+        if bundle.get('contract')==comma_tasks.CONTRACT:
+            comma_tasks.checked(bundle)
+            bundle=bundle.get('explanation')or{}
         return unified.current_original(self,bundle,evidence_id)
 
 

@@ -44,9 +44,9 @@ def interpreted(monkeypatch):
     root=Path(configured)
     monkeypatch.syspath_prepend(str(root))
     from tools.zrc_reference.request_interpretation import response
-    def family(question=QUESTION):
-        plan=response(question,'','sl','sl')['request_plan']
-        return {'question':question,'original_question':question,'context':'',
+    def family(question=QUESTION,context=''):
+        plan=response(question,context,'sl','sl')['request_plan']
+        return {'question':question,'original_question':question,'context':context,
                 'locale':'sl','input_language':'sl','task':'reference','request_plan':plan}
     return family
 
@@ -259,3 +259,9 @@ def test_mixed_orthography_and_inflection_keeps_the_normal_source_path(interpret
     family=interpreted('Preveri vejice in razloži sklanjanje imena Luka: Ko pride Luka mu povej.')
     assert set(family['request_plan']['requested_facets'])=={'orthography','inflection'}
     assert unified.literal_comma_reference_source(family,RegistryGateway().rows) is None
+
+
+def test_explanation_facet_does_not_turn_an_owned_why_into_a_different_source_task(interpreted):
+    family=interpreted('Zakaj si tu dodal vejico?',context='Ker je mraz zakurimo.')
+    assert set(family['request_plan']['requested_facets'])=={'orthography','explanation'}
+    assert unified.literal_comma_reference_source(family,RegistryGateway().rows)['slug']=='sp2001'

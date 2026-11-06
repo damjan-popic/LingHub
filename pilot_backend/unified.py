@@ -1003,7 +1003,8 @@ def literal_comma_reference_source(family,definitions):
     """Use the interpreted local rule headings for the supplied-text task only."""
     plan=family.get('request_plan')or{};task=plan.get('comma_check')or{}
     if (family.get('task')=='source_search' or plan.get('requested_source')
-            or set(plan.get('requested_facets',[]))!={'orthography'}
+            or 'orthography' not in plan.get('requested_facets',[])
+            or set(plan.get('requested_facets',[]))-{'orthography','explanation'}
             or plan.get('translation_language') is not None
             or task.get('status')!='ready' or task.get('explain')is not True):
         return None

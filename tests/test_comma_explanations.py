@@ -227,6 +227,9 @@ def test_actual_classla_observation_through_core_registry_renderer_and_web_links
             'offset_basis':'canonical_record_json_unicode_codepoints'}
         if row.get('tool_kind')=='syntax':row.update(title='Jezikovna analiza',url='https://www.jeziknaklik.it/',
             tool_scope='Automatic prediction; not normative evidence.',tool_provenance=classla_observation(0)['analysis']['model'])
+    for row in evidence:
+        if row.get('tool_kind')=='syntax':
+            for key in ('original_json','source_id','source_revision'):row.pop(key,None)
     plan=interpretation(question,context,'sl','sl')['request_plan']
     payload=_plan_runtime_payload(question,evidence,passages,request_plan=plan)
     runtime=_plan_runtime();registry=runtime._answer_registry(payload,'answer')

@@ -228,6 +228,7 @@ def test_contextual_reading_is_conditional_in_both_application_and_edit_link():
     ('Če ne pride ne grem.','Če ne pride ne, grem.','original','disagrees_with_proposal'),
     ('Ker je mraz zakurimo.','Ker je mraz, zakurimo.','comma_context','conditional_support'),
     ('Če je hladno oblečem jopico.','Če je hladno, oblečem jopico.','comma_context','conditional_support'),
+    ('Ker dežuje otroci ostajajo doma.','Ker dežuje, otroci ostajajo doma.','comma_context','conditional_support'),
 ])
 def test_real_predicate_registry_renderer_and_web_keep_the_reading_basis(monkeypatch,original,proposed,basis,expected_relation):
     configured=os.environ.get('KLIKAI_PINNED_CORE_ROOT')

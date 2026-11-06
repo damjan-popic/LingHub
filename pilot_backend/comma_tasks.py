@@ -123,7 +123,8 @@ def reader_proposal(value):
     allowed={'label','status','original_text','proposed_text','edits','offset_convention',
         'checked_extent','target_scope','provider_label','reported_model_version',
         'reported_api_version','reported_confidence','explanation_status','message',
-        'tool_execution','application_limit_characters','truncated','explanation_links','unexplained_edit_indexes'}
+        'tool_execution','application_limit_characters','truncated','explanation_links','unexplained_edit_indexes',
+        'explanation_disagreement'}
     return {k:deepcopy(v) for k,v in value.items() if k in allowed}
 
 
@@ -241,6 +242,8 @@ def answer(gateway,bundle,tier,model,parent=None):
             explanation_status=visible['status']
             proposal['explanation_links']=visible['links']
             proposal['unexplained_edit_indexes']=visible['unexplained_edit_indexes']
+            proposal['explanation_disagreement']=any(row.get('relation')=='disagrees_with_proposal'
+                for row in visible['applications'])
     proposal['explanation_status']=explanation_status
     result.update(comma_proposal=reader_proposal(proposal),tool_execution=reader_execution(execution),
         deterministic_result={'comma_observation':deepcopy(observation),'task':deepcopy(task),

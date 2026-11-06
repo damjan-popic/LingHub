@@ -428,6 +428,7 @@
   "comma_link_supports_proposal": "Razlaga spremembe {number}",
   "comma_link_disagrees_with_proposal": "Vir predlaga drugače za spremembo {number}",
   "comma_link_conditional_support": "Pogoji za spremembo {number}",
+  "comma_explanation_disagreement": "Predlog preverjevalnika se ne ujema s spodnjo razlago. Upoštevajte mejo med deloma povedi, navedeno v razlagi.",
   "comma_partial_explanation": "Povezave z razlago veljajo za označene spremembe.",
   "comma_original": "Izvirnik",
   "comma_proposed": "Predlog",

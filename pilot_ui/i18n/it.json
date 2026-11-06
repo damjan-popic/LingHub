@@ -428,6 +428,7 @@
   "comma_link_supports_proposal": "Spiegazione della modifica {number}",
   "comma_link_disagrees_with_proposal": "La fonte propone una soluzione diversa per la modifica {number}",
   "comma_link_conditional_support": "Condizioni per la modifica {number}",
+  "comma_explanation_disagreement": "La proposta del correttore non coincide con la spiegazione seguente. Seguite il confine tra le parti della frase indicato nella spiegazione.",
   "comma_partial_explanation": "I collegamenti alla spiegazione valgono per le modifiche indicate.",
   "comma_original": "Originale",
   "comma_proposed": "Proposta",

@@ -95,6 +95,8 @@ export function renderCommaProposal(root, proposal, {element,translate,copyText,
   }
   root.append(e('p',t('comma_prediction_notice'),{class:'small muted'}),
     e('h4',t('comma_proposed')),e('div',view.proposed,{class:'comma-text comma-proposed'}));
+  if (proposal.explanation_disagreement === true)
+    root.append(e('p',t('comma_explanation_disagreement'),{class:'qualified-note',role:'status'}));
   if (view.partial) root.append(e('p',t('comma_partial'),{class:'qualified-note'}));
   if (view.changed) {
     root.append(e('h4',t('comma_changes')),

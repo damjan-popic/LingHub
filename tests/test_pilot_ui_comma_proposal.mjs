@@ -19,6 +19,17 @@ const proposal=(original,proposed,edits=[])=>({status:'ok',original_text:origina
   checked_extent:{start:0,end:Array.from(original).length,complete:true},
   tool_execution:{neural_prediction_received:true,model_version:null}});
 
+test('disagreement stays visible even when the proposed edit misses the required boundary',()=>{
+  const saved=proposal('Če ne pride ne grem.','Če ne pride ne, grem.',[
+    {start:14,end:14,replacement:',',kind:'insert'}]);
+  saved.explanation_disagreement=true;saved.explanation_links=[];
+  const before=JSON.stringify(saved),root=element('section');
+  renderCommaProposal(root,saved,{element,translate:t,copyText:async()=>{}});
+  assert(text(root).includes(messages.comma_explanation_disagreement));
+  assert.equal(JSON.stringify(saved),before);
+  assert(text(root).includes(saved.original_text)&&text(root).includes(saved.proposed_text));
+});
+
 test('consent is explicit, defaults false and adds no field when the feature is absent',()=>{
   const enabled={comma_checker:{configured:true}};
   assert.deepEqual(commaConsentFields({},true),{});

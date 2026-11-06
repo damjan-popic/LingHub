@@ -112,7 +112,7 @@ def test_general_rule_does_not_call_checker(tmp_path,monkeypatch):
 def test_owned_why_followup_reuses_prediction_without_another_checker_call(tmp_path,monkeypatch):
  app,gateway,calls=application(tmp_path,monkeypatch)
  from pilot_backend import unified
- monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'freeze',lambda *args,**kwargs:{'bundle':{'contract':'fixture-explanation'}})
  monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only',
    'execution':{'provider_scope':'none','inference_performed':False},'provider_attempts':[]})
  with TestClient(app,base_url=ORIGIN)as client:
@@ -144,7 +144,7 @@ def test_explanation_uses_existing_answer_allowance_and_preserves_unsuccessful_w
  app,gateway,calls=application(tmp_path,monkeypatch)
  from pilot_backend import unified
  tiers=[]
- monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'freeze',lambda *args,**kwargs:{'bundle':{'contract':'fixture-explanation'}})
  def generate(gateway,bundle,tier,*args):
   tiers.append(tier)
   return {'answer_kind':'source_only','execution':{'inference_performed':True,'provider_scope':'shared'},
@@ -168,7 +168,7 @@ def test_explanation_uses_existing_answer_allowance_and_preserves_unsuccessful_w
 def test_unchanged_prediction_has_a_local_limit_without_inventing_a_change(tmp_path,monkeypatch):
  app,gateway,calls=application(tmp_path,monkeypatch)
  from pilot_backend import unified
- monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'freeze',lambda *args,**kwargs:{'bundle':{'contract':'fixture-explanation'}})
  monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only',
      'execution':{'inference_performed':False}})
  with TestClient(app,base_url=ORIGIN)as client:
@@ -188,7 +188,7 @@ def test_valid_proposal_survives_a_local_explanation_failure(tmp_path,monkeypatc
  def fail(*args,**kwargs):raise Failure('source_unavailable' if stage=='freeze' else 'provider_timeout',503)
  if stage=='freeze':monkeypatch.setattr(unified,'freeze',fail)
  else:
-  monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+  monkeypatch.setattr(unified,'freeze',lambda *args,**kwargs:{'bundle':{'contract':'fixture-explanation'}})
   monkeypatch.setattr(unified,'generate',fail)
  with TestClient(app,base_url=ORIGIN)as client:
   headers=login(client);_,current=ask(app,client,headers,True)
@@ -207,7 +207,7 @@ def test_generic_why_with_multiple_saved_edits_asks_which_without_resending(tmp_
  actual_check=comma_checker.check
  app,gateway,calls=application(tmp_path,monkeypatch)
  from pilot_backend import unified
- monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'freeze',lambda *args,**kwargs:{'bundle':{'contract':'fixture-explanation'}})
  monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only','execution':{'inference_performed':False}})
  async def two_edits(text,config):
   calls.append(text)

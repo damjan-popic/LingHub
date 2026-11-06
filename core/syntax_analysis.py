@@ -1,4 +1,4 @@
-"""Request-local syntax observation; no service, source authority or implicit call.
+"""Request-local observation from the existing bounded CLASSLA language worker.
 
 The caller chooses an explanation request and its exact target. Original
 question/context scope stays with that caller; offsets here address only text.
@@ -6,14 +6,15 @@ question/context scope stays with that caller; offsets here address only text.
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
-from pathlib import Path
-import subprocess
 import time
+from urllib.parse import urlsplit
+
+import httpx
 from .syntax_worker import MODEL_PACKAGE, MODEL_VERSION, MODEL_HASHES, RESOURCES_SHA256
 
 MAX_CHARACTERS = 3000
-TIMEOUT_SECONDS = 45
+TIMEOUT_SECONDS = 30
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 OFFSET_CONVENTION = 'unicode_codepoint_half_open'
 
 
@@ -51,15 +52,16 @@ def _analysis(value, text):
     return value
 
 
-def collect(text, config):
-    """Load the fixed local parser once, only when explicitly called by a task."""
+def collect(text, config, *, transport=None):
+    """Observe one selected text; no retries, subprocess fallback or implicit call."""
     started = time.monotonic()
     observation = {'schema': 'linghub.syntax-observation.v1', 'status': 'invalid_input',
                    'input_text': text if isinstance(text, str) else None,
                    'input_sha256': None, 'analysis': None,
                    'observed_at': datetime.now(timezone.utc).isoformat(),
                    'execution': {'attempted': False, 'process_started': False,
-                                 'response_received': False, 'inference_performed': None}}
+                                 'response_received': False, 'inference_performed': None,
+                                 'transport': 'existing_classla_worker'}}
 
     def finish(status, reason=None):
         observation.update(status=status, reason=reason,
@@ -75,37 +77,44 @@ def collect(text, config):
     observation['input_sha256'] = hashlib.sha256(encoded).hexdigest()
     if len(text) > MAX_CHARACTERS:
         return finish('too_long', 'selected_text_limit')
-    python = config.get('syntax_python') if isinstance(config, dict) else None
-    if not isinstance(python, str) or not Path(python).is_absolute() or not os.access(python, os.X_OK):
-        return finish('unavailable', 'syntax_python_unavailable')
-    resources = config.get('syntax_resources')
-    if not isinstance(resources, str) or not Path(resources).is_absolute() or not Path(resources).is_dir():
-        return finish('unavailable', 'syntax_resources_unavailable')
-    worker = Path(__file__).with_name('syntax_worker.py')
-    # Isolated Python ignores inherited PYTHONPATH and disables bytecode writes.
-    argv = [python, '-I', '-B', str(worker), '--resources', resources]
-    env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR')
-           if key in os.environ}
-    env.update(CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', BLIS_NUM_THREADS='2')
+    url = config.get('syntax_url') if isinstance(config, dict) else None
+    try:
+        parsed = urlsplit(url) if isinstance(url, str) else None
+        if (parsed is None or parsed.scheme != 'http'
+                or parsed.hostname not in {'127.0.0.1', 'localhost', '::1'}
+                or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment or parsed.path not in {'', '/'}
+                or not parsed.port):
+            raise ValueError('syntax_url')
+    except ValueError:
+        return finish('unavailable', 'syntax_worker_unconfigured')
+    endpoint = url.rstrip('/') + '/syntax'
     observation['execution']['attempted'] = True
     try:
-        result = subprocess.run(argv, input=json.dumps({'text': text}, ensure_ascii=False).encode('utf-8'),
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT_SECONDS,
-                                env=env, check=False)
-        observation['execution']['process_started'] = True
-        observation['execution']['returncode'] = result.returncode
-        if result.returncode:
-            return finish('unavailable', 'syntax_worker_failed')
-        observation['execution']['response_received'] = True
-        if len(result.stdout) > 4 * 1024 * 1024:
-            return finish('malformed_response', 'syntax_response_bound')
-        observation['analysis'] = _analysis(json.loads(result.stdout), text)
+        with httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=2), trust_env=False,
+                          follow_redirects=False, transport=transport) as client:
+            with client.stream('POST', endpoint, json={'text': text}) as response:
+                observation['execution'].update(response_received=True, http_status=response.status_code)
+                if response.status_code == 504:
+                    return finish('timeout', 'syntax_timeout')
+                if response.status_code != 200:
+                    return finish('unavailable', 'syntax_worker_unavailable')
+                payload = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(payload) + len(chunk) > MAX_RESPONSE_BYTES:
+                        return finish('malformed_response', 'syntax_response_bound')
+                    payload.extend(chunk)
+                    if time.monotonic() - started > TIMEOUT_SECONDS:
+                        return finish('timeout', 'syntax_timeout')
+        value = json.loads(payload)
+        if not isinstance(value, dict) or value.get('status') != 'ok':
+            raise ValueError('syntax_response_status')
+        observation['analysis'] = _analysis(value.get('analysis'), text)
         observation['execution']['inference_performed'] = True
         return finish('ok')
-    except subprocess.TimeoutExpired:
-        observation['execution']['process_started'] = True
+    except httpx.TimeoutException:
         return finish('timeout', 'syntax_timeout')
-    except OSError:
-        return finish('unavailable', 'syntax_process_unavailable')
+    except httpx.HTTPError:
+        return finish('unavailable', 'syntax_worker_unavailable')
     except (ValueError, TypeError, KeyError):
         return finish('malformed_response', 'syntax_response_invalid')

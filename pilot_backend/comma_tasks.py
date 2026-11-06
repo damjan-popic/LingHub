@@ -94,7 +94,7 @@ def freeze(gateway,family,policy):
         # This is the existing source-grounded path. Its selected supports and
         # citations remain separate from the checker observation.
         try:
-            explanation=unified.freeze(gateway,family,policy)['bundle']
+            explanation=unified.freeze(gateway,family,policy,interpretation=interpreted)['bundle']
             explanation_status='frozen'
         except Failure:
             explanation_status='unavailable'

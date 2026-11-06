@@ -49,6 +49,19 @@ def records(doc, text):
     return words
 
 
+def analysis_result(doc, text, model):
+    words = records(doc, text)
+    return {'schema': 'linghub.syntax-analysis.v1', 'text': text,
+            'offset_convention': OFFSET_CONVENTION, 'head_convention': 'one_based_0_root',
+            'tokens': words, 'words': words, 'model': model}
+
+
+def model_metadata(torch_version, processors):
+    return {'package': MODEL_PACKAGE, 'package_version': MODEL_VERSION,
+            'torch_version': torch_version, 'pipeline': list(processors),
+            'resource_sha256': dict(MODEL_HASHES), 'resources_manifest_sha256': RESOURCES_SHA256}
+
+
 def analyze(text, resources):
     if importlib.metadata.version(MODEL_PACKAGE) != MODEL_VERSION:
         raise RuntimeError('model_version_mismatch')
@@ -87,13 +100,7 @@ def analyze(text, resources):
     classla.resources.common.request_file = offline
     pipeline = classla.Pipeline(lang='sl', dir=str(root), type='standard',
         processors='tokenize,pos,lemma,depparse', use_gpu=False, logging_level='ERROR')
-    words = records(pipeline(text), text)
-    return {'schema': 'linghub.syntax-analysis.v1', 'text': text,
-            'offset_convention': OFFSET_CONVENTION, 'head_convention': 'one_based_0_root',
-            'tokens': words, 'words': words,
-            'model': {'package': MODEL_PACKAGE, 'package_version': MODEL_VERSION,
-                      'torch_version': torch.__version__, 'pipeline': list(pipeline.processors),
-                      'resource_sha256': MODEL_HASHES, 'resources_manifest_sha256': RESOURCES_SHA256}}
+    return analysis_result(pipeline(text), text, model_metadata(torch.__version__, pipeline.processors))
 
 
 def main():

@@ -160,7 +160,7 @@ def citation_failure(reason):
     return error
 
 
-def shared_interpretation(gateway,question,context,input_language,locale):
+def shared_interpretation(gateway,question,context,input_language,locale,*,existing=None):
     """Fetch and validate the one authenticated request interpretation.
 
     This runs before any source or tool request.  WEB may enrich the returned
@@ -170,8 +170,17 @@ def shared_interpretation(gateway,question,context,input_language,locale):
         'input_language':input_language,'locale':locale}
     input_identity={'contract':'klikai.request-interpretation.input.v1',**request}
     try:
-        response=(gateway.interpret(**request)if hasattr(gateway,'interpret')else
-                  gateway.request('/internal/pilot/interpret',request))
+        if existing is not None:
+            if not isinstance(existing,dict)or set(existing)!={
+                    'request_plan','interpretation_input_sha256','request_plan_sha256'}:
+                raise ValueError('Existing interpretation envelope differs')
+            response={'contract':'klikai.request-interpretation.v1',
+                'input_sha256':existing['interpretation_input_sha256'],
+                'request_plan':existing['request_plan'],
+                'request_plan_sha256':existing['request_plan_sha256']}
+        else:
+            response=(gateway.interpret(**request)if hasattr(gateway,'interpret')else
+                      gateway.request('/internal/pilot/interpret',request))
         if (not isinstance(response,dict)or set(response)!={
                 'contract','input_sha256','request_plan','request_plan_sha256'}
                 or response.get('contract')!='klikai.request-interpretation.v1'
@@ -977,7 +986,25 @@ def expand_o_name_declension_rules(
     else:status['status']='ok' if status['returned_count'] else 'no_match'
 
 
-def expand_request_reference_rules(gateway,family,definitions,found,coverage,detail_pool,pool):
+def literal_comma_reference_source(family,definitions):
+    """Use the interpreted local rule headings for the supplied-text task only."""
+    plan=family.get('request_plan')or{};task=plan.get('comma_check')or{}
+    if (family.get('task')=='source_search' or plan.get('requested_source')
+            or task.get('status')!='ready' or task.get('explain')is not True):
+        return None
+    queries=task.get('reference_queries')
+    if (not isinstance(queries,list) or len(queries)!=2
+            or any(not isinstance(row,dict) or set(row)!={'source_slug','query'}
+                or row['source_slug']!='sp2001' or not isinstance(row['query'],str)
+                or not 2<=len(row['query'])<=120 for row in queries)
+            or len({row['query']for row in queries})!=2):
+        return None
+    return next((row for row in definitions if row.get('slug')=='sp2001'
+        and row.get('adapter_key')=='official_reference_jsonl'),None)
+
+
+def expand_request_reference_rules(gateway,family,definitions,found,coverage,detail_pool,pool,
+                                   *,exact_heading_only=False):
     """Complete a bounded, authenticated rule lookup after surface discovery."""
     task=(family.get('request_plan')or{}).get('comma_check')or{}
     queries=task.get('reference_queries')if task.get('explain')is True else None
@@ -994,9 +1021,20 @@ def expand_request_reference_rules(gateway,family,definitions,found,coverage,det
         jobs.append((slug,query,pool.submit(collect_source,gateway,family,enabled[slug],
             detail_pool,query_override=query)))
     for slug,query,future in jobs:
-        matches,extra=future.result();found.extend(matches);status=statuses[slug]
+        matches,extra=future.result();status=statuses[slug]
+        discovered=extra['returned_count']
+        if exact_heading_only:
+            matches=[row for row in matches if query in ' '.join(
+                (row.get('capture',{}).get('original_text')or'').split())]
+            extra=deepcopy(extra)
+            extra['returned_count']=len(matches)
+            if extra['status']in {'ok','no_match'}:
+                extra['status']='ok'if matches else'no_match'
+        found.extend(matches)
         status.setdefault('reference_scope_lookups',[]).append({'query':query,
-            'status':extra['status'],'returned_count':extra['returned_count']})
+            'status':extra['status'],'returned_count':extra['returned_count'],
+            **({'discovered_count':discovered,'selection':'exact_requested_heading'}
+               if exact_heading_only else{})})
         status['query_variants']=list(dict.fromkeys([*status.get('query_variants',[]),
             *extra.get('query_variants',[])]))
         status['limit']+=extra['limit']
@@ -1039,7 +1077,7 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         return tool_capture
 
 
-def freeze(gateway, family, policy):
+def freeze(gateway, family, policy,*,interpretation=None):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
     family = deepcopy(family)
@@ -1047,7 +1085,7 @@ def freeze(gateway, family, policy):
     context=family.get('context','')
     input_language=family.get('input_language','und')
     interpretation=shared_interpretation(
-        gateway,original,context,input_language,family['locale'])
+        gateway,original,context,input_language,family['locale'],existing=interpretation)
     family['request_plan']=interpretation['request_plan']
     started = time.monotonic()
     stage_started = started
@@ -1062,23 +1100,35 @@ def freeze(gateway, family, policy):
         coverage.append({'family': 'configured_sources', 'status': 'timeout' if isinstance(error,Failure)and error.code == 'source_timeout' else 'unavailable', 'returned_count': 0, 'limit': None, 'has_more': None, **diagnostic(error,'source_registry')})
     timings['registry_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
+    comma_source=literal_comma_reference_source(family,definitions)
+    if comma_source is not None:
+        coverage.append({'family':comma_source['slug'],'source_label':comma_source['display_name'],
+            'adapter':comma_source['adapter_key'],'status':'no_match','returned_count':0,
+            'limit':0,'has_more':None,'elapsed_ms':0.0,'search_ms':0.0,'detail_ms':0.0,
+            'detail_requests':0,'detail_reused':0,'details':[],
+            'query':original,'query_variants':[],'original_question':original,
+            'request_plan':deepcopy(family['request_plan'])})
     with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as details, ThreadPoolExecutor(max_workers=8) as pool:
         tool_future=pool.submit(collect_tools,gateway,family)
-        futures = [pool.submit(collect_source, gateway, family, row, details) for row in definitions]
+        futures = ([] if comma_source is not None else
+            [pool.submit(collect_source, gateway, family, row, details) for row in definitions])
         for future in as_completed(futures):
             matches, status = future.result()
             found.extend(matches)
             coverage.append(status)
         tool_capture,tool_status=tool_future.result()
         if tool_status is not None:coverage.append(tool_status)
-        expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
-        expand_request_reference_rules(gateway,family,definitions,found,coverage,details,pool)
-        expand_same_preposition_legend(
-            gateway,family,definitions,found,coverage,details,pool)
-        expand_o_name_declension_rules(
-            gateway,family,definitions,found,coverage,details,pool)
-        tool_capture=supplement_source_advice_morphology(
-            gateway,family,tool_capture,found,coverage)
+        if comma_source is None:
+            expand_reference_sources(gateway,family,definitions,tool_capture,found,coverage,details,pool)
+        expand_request_reference_rules(gateway,family,definitions,found,coverage,details,pool,
+            exact_heading_only=comma_source is not None)
+        if comma_source is None:
+            expand_same_preposition_legend(
+                gateway,family,definitions,found,coverage,details,pool)
+            expand_o_name_declension_rules(
+                gateway,family,definitions,found,coverage,details,pool)
+            tool_capture=supplement_source_advice_morphology(
+                gateway,family,tool_capture,found,coverage)
     timings['source_collection_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     stage_started = time.monotonic()
     # Same wording across collections/senses is never a duplicate identity.
@@ -1161,7 +1211,8 @@ def freeze(gateway, family, policy):
     statuses = {row['status'] for row in coverage}
     retrieval = {'status': 'partial' if statuses & {'partial', 'timeout', 'unavailable', 'unsupported'} else 'complete',
                  'coverage': coverage, 'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
-                 'returned_count': len(found), 'timings': timings}
+                 'returned_count': len(found), 'timings': timings,
+                 'route':'bounded_local_reference_headings'if comma_source is not None else'normal_registry'}
     if not found and retrieval['status'] == 'partial':retrieval['status'] = 'unavailable'
     body = {'analysis':tool_capture,'contract': CONTRACT, 'task': 'reference', 'query': family['question'], 'locale': family['locale'],
             'matches': found, 'retrieval': retrieval, 'gateway_bundle': child}

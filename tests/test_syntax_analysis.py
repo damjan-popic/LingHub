@@ -1,15 +1,15 @@
-"""Fixed local parser transport and exact selected-text bindings; no model calls."""
+"""Existing-worker transport and exact selected-text bindings; no model calls."""
 from copy import deepcopy
 import json
-from pathlib import Path
 from types import SimpleNamespace
-import subprocess
-import sys
 
+import httpx
 import pytest
 
 from core import syntax_analysis as syntax
 from core.syntax_worker import records
+
+CONFIG = {'syntax_url': 'http://127.0.0.1:18316'}
 
 
 def analysis():
@@ -23,52 +23,76 @@ def analysis():
         'resources_manifest_sha256':syntax.RESOURCES_SHA256}}
 
 
-def test_one_cpu_isolated_process_uses_only_selected_text_and_retains_native_analysis(monkeypatch,tmp_path):
+def test_one_loopback_request_uses_only_selected_text_and_retains_native_analysis(monkeypatch):
     calls=[]
-    def run(argv,**kwargs):
-        calls.append((argv,kwargs))
-        return SimpleNamespace(returncode=0,stdout=json.dumps(analysis()).encode())
-    monkeypatch.setattr(syntax.subprocess,'run',run)
-    monkeypatch.setenv('SYNTHETIC_SECRET','not-for-child')
-    result=syntax.collect('Teče',{'syntax_python':sys.executable,'syntax_resources':str(tmp_path)})
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200,json={'status':'ok','analysis':analysis()})
+    monkeypatch.setenv('HTTP_PROXY','http://must-not-be-used.invalid:8080')
+    result=syntax.collect('Teče',CONFIG,transport=httpx.MockTransport(handler))
     assert result['status']=='ok' and result['analysis']==analysis()
     assert result['execution']['inference_performed'] is True and len(calls)==1
-    argv,kwargs=calls[0]
-    assert argv==[sys.executable,'-I','-B',str(Path(syntax.__file__).with_name('syntax_worker.py')),
-        '--resources',str(tmp_path)]
-    assert json.loads(kwargs['input'])=={'text':'Teče'}
-    assert kwargs['timeout']==45 and kwargs['env']['CUDA_VISIBLE_DEVICES']==''
-    assert 'SYNTHETIC_SECRET' not in kwargs['env'] and 'PYTHONPATH' not in kwargs['env']
+    assert result['execution']['process_started'] is False
+    assert result['execution']['transport']=='existing_classla_worker'
+    assert str(calls[0].url)=='http://127.0.0.1:18316/syntax'
+    assert json.loads(calls[0].content)=={'text':'Teče'}
+    assert calls[0].extensions['timeout']['read']==30
+    assert calls[0].extensions['timeout']['connect']==2
 
 
 @pytest.mark.parametrize(('text','config','status'),[
     ('',{},'invalid_input'),('a'*3001,{},'too_long'),('Teče',{},'unavailable'),
-    ('Teče',{'syntax_python':'relative/python'},'unavailable')])
-def test_limits_and_missing_host_config_fail_locally_without_starting_a_process(monkeypatch,text,config,status):
-    monkeypatch.setattr(syntax.subprocess,'run',lambda *a,**k:pytest.fail('No child may start'))
-    assert syntax.collect(text,config)['status']==status
+    ('Teče',{'syntax_url':'https://127.0.0.1:18316'},'unavailable'),
+    ('Teče',{'syntax_url':'http://other.example:18316'},'unavailable'),
+    ('Teče',{'syntax_url':'http://user:secret@127.0.0.1:18316'},'unavailable'),
+    ('Teče',{'syntax_url':'http://127.0.0.1:18316/other'},'unavailable'),
+    ('Teče',{'syntax_url':'http://127.0.0.1:18316/?x=1'},'unavailable'),
+    ('Teče',{'syntax_url':'http://127.0.0.1:bad'},'unavailable')])
+def test_limits_and_missing_host_config_fail_locally_without_dispatch(text,config,status):
+    transport=httpx.MockTransport(lambda request:pytest.fail('No request may start'))
+    result=syntax.collect(text,config,transport=transport)
+    assert result['status']==status and not result['execution']['attempted']
 
 
-def test_timeout_is_request_local_and_does_not_retry(monkeypatch,tmp_path):
+@pytest.mark.parametrize(('error','status'),[
+    (httpx.ReadTimeout('private details'),'timeout'),
+    (httpx.ConnectError('private details'),'unavailable')])
+def test_transport_failure_is_request_local_and_does_not_retry(error,status):
     calls=[]
-    def run(argv,**kwargs):
-        calls.append(argv);raise subprocess.TimeoutExpired(argv,45)
-    monkeypatch.setattr(syntax.subprocess,'run',run)
-    result=syntax.collect('Teče',{'syntax_python':sys.executable,'syntax_resources':str(tmp_path)})
-    assert result['status']=='timeout' and len(calls)==1 and result['analysis'] is None
+    def handler(request):
+        calls.append(request);raise error
+    result=syntax.collect('Teče',CONFIG,transport=httpx.MockTransport(handler))
+    assert result['status']==status and len(calls)==1 and result['analysis'] is None
+    assert 'private details' not in json.dumps(result)
+
+
+@pytest.mark.parametrize(('code','status'),[(302,'unavailable'),(503,'unavailable'),(504,'timeout')])
+def test_redirect_busy_and_worker_timeout_do_not_retry_or_fall_back(code,status):
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(code,headers={'Location':'http://other.example/'})
+    result=syntax.collect('Teče',CONFIG,transport=httpx.MockTransport(handler))
+    assert result['status']==status and len(calls)==1 and result['analysis'] is None
 
 
 @pytest.mark.parametrize('damage',['text','offset','head','model'])
-def test_response_must_match_exact_input_offsets_heads_and_fixed_model(monkeypatch,tmp_path,damage):
+def test_response_must_match_exact_input_offsets_heads_and_fixed_model(damage):
     value=deepcopy(analysis())
     if damage=='text':value['text']='Different'
     elif damage=='offset':value['words'][0]['start']=1
     elif damage=='head':value['words'][0]['head_id']=2
     elif damage=='model':value['model']['package_version']='other'
-    monkeypatch.setattr(syntax.subprocess,'run',lambda *a,**k:SimpleNamespace(
-        returncode=0,stdout=json.dumps(value).encode()))
-    result=syntax.collect('Teče',{'syntax_python':sys.executable,'syntax_resources':str(tmp_path)})
+    result=syntax.collect('Teče',CONFIG,transport=httpx.MockTransport(lambda request:
+        httpx.Response(200,json={'status':'ok','analysis':value})))
     assert result['status']=='malformed_response' and result['analysis'] is None
+
+
+def test_malformed_or_oversize_response_never_becomes_an_analysis():
+    for content in [b'{',b'x'*(syntax.MAX_RESPONSE_BYTES+1)]:
+        result=syntax.collect('Teče',CONFIG,transport=httpx.MockTransport(lambda request:
+            httpx.Response(200,content=content)))
+        assert result['status']=='malformed_response' and result['analysis'] is None
 
 
 def test_classla_serialization_preserves_repetitions_and_rejects_expanded_word_offsets():

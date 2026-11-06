@@ -3,11 +3,13 @@ from concurrent.futures import Future
 from copy import deepcopy
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from pilot_backend import unified
 from pilot_backend.store import digest
+from pilot_backend.security import Failure
 
 
 QUESTION='Preveri vejice in pojasni: Pozimi in kadar je mraz moramo zakuriti.'
@@ -134,3 +136,120 @@ def test_no_lookup_via_disabled_nonofficial_or_uncollected_source(
     prior=deepcopy((found,status));details=object();calls=collector(monkeypatch,details)
     unified.expand_request_reference_rules(gateway,family,definitions,found,status,details,ImmediatePool())
     assert calls==[]and (found,status)==prior
+
+
+class FreezeGateway:
+    """Record real orchestration HTTP contracts without source/model dispatch."""
+    klikai_url='http://127.0.0.1:8000'
+    lexical_profiles=False
+    editorial_full_records=False
+    def __init__(self,family,*,heading_present=True):
+        self.family=deepcopy(family);self.calls=[];self.heading_present=heading_present
+        self.rows=[{'slug':'sp2001','display_name':'Slovenski pravopis 2001',
+            'adapter_key':'official_reference_jsonl','rights_mode':'open','source_type':'owned',
+            'is_active':True}]+[{'slug':'other-'+str(i),'display_name':'Other '+str(i),
+                'adapter_key':'official_reference_jsonl','rights_mode':'open','source_type':'owned',
+                'is_active':True}for i in range(16)]
+    def request(self,path,payload,base=None):
+        self.calls.append((path,deepcopy(payload),base))
+        if path=='/internal/pilot/interpret':
+            return {'contract':'klikai.request-interpretation.v1',
+                'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',**payload}),
+                'request_plan':deepcopy(self.family['request_plan']),
+                'request_plan_sha256':digest(self.family['request_plan'])}
+        if path=='/api/sources':return {'sources':deepcopy(self.rows)}
+        params=parse_qs(urlsplit(path).query)
+        if urlsplit(path).path=='/api/search':
+            query=params['q'][0];slug=params['sources'][0]
+            assert params['limit']==['10']
+            hits=[]
+            for rank in range(10):
+                text=((query.replace(' ','\n',1)+'\n\nComplete retained rule.')
+                    if slug=='sp2001'and query in HEADINGS and rank==3 and self.heading_present
+                    else 'An unrelated retained dictionary or publication entry.')
+                hits.append({'source_slug':slug,'resource_id':slug+':'+str(rank)+':'+str(HEADINGS.index(query)if query in HEADINGS else 2),
+                    'title':'Retained original '+str(rank),'rights_mode':'open',
+                    'snippet':text[:100],'original_text':text,'score':10-rank,
+                    'normative_status':'current_reference','source_revision':'a'*64,
+                    'source_status':'Current reference','release_id':'unchanged-reference',
+                    'chunk_kind':'official_reference'})
+            return {'query':query,'sources':[slug],'count':10,'hits':hits}
+        if path=='/internal/pilot/freeze':
+            matches=[]
+            for incoming in payload['unified_evidence']['matches']:
+                row=deepcopy(incoming);capture=row.pop('capture')
+                assert row['capture_sha256']==digest(capture)
+                row['evidence_id']='unified:'+digest(capture)
+                row['source']={'title':row['title'],'source_label':row['source_label'],
+                    'excerpt':capture['original_text'],'bibliography':{},'url':None}
+                matches.append(row)
+            return {'bundle':{'fixture_only':True},'matches':matches,'retrieval':[]}
+        raise AssertionError('Unexpected HTTP request '+path)
+
+
+def no_tool(monkeypatch):
+    monkeypatch.setattr(unified,'collect_tools',lambda *args:
+        (None,{'family':'linghub_tools','status':'not_documentary','returned_count':0,
+               'limit':None,'has_more':None}))
+
+
+def test_literal_freeze_uses_two_local_heading_searches_and_reuses_authenticated_interpretation(
+        interpreted,monkeypatch):
+    family=interpreted();before=deepcopy(family);gateway=FreezeGateway(family);no_tool(monkeypatch)
+    interpretation=unified.shared_interpretation(gateway,QUESTION,'','sl','sl')
+    result=unified.freeze(gateway,family,{},interpretation=interpretation)
+    paths=[path for path,_,_ in gateway.calls]
+    assert paths.count('/internal/pilot/interpret')==1
+    assert paths.count('/api/sources')==1 and paths.count('/internal/pilot/freeze')==1
+    searches=[parse_qs(urlsplit(path).query)for path in paths if path.startswith('/api/search?')]
+    assert len(searches)==2 and {row['q'][0]for row in searches}==set(HEADINGS)
+    assert all(row['sources']==['sp2001']and row['limit']==['10']for row in searches)
+    frozen=next(payload for path,payload,_ in gateway.calls if path=='/internal/pilot/freeze')
+    assert len(frozen['unified_evidence']['matches'])==2
+    assert all(row['capture']['resource_id'].startswith('sp2001:3:')
+        for row in frozen['unified_evidence']['matches']) # match deliberately ranked fourth
+    assert frozen['question']==QUESTION and frozen['context']==''
+    assert frozen['request_plan']==before['request_plan']and family==before
+    bundle=result['bundle'];assert bundle['retrieval']['route']=='bounded_local_reference_headings'
+    status=next(row for row in bundle['retrieval']['coverage']if row['family']=='sp2001')
+    assert status['returned_count']==2 and status['limit']==20
+    assert len(status['reference_scope_lookups'])==2
+    assert all(row['discovered_count']==10 and row['returned_count']==1
+        and row['selection']=='exact_requested_heading'for row in status['reference_scope_lookups'])
+    assert set(bundle['retrieval']['timings'])=={
+        'registry_ms','source_collection_ms','evidence_preparation_ms','gateway_freeze_ms'}
+
+
+def test_no_exact_heading_is_not_replaced_by_an_unrelated_high_ranked_hit(interpreted,monkeypatch):
+    family=interpreted();gateway=FreezeGateway(family,heading_present=False);no_tool(monkeypatch)
+    result=unified.freeze(gateway,family,{})
+    frozen=next(payload for path,payload,_ in gateway.calls if path=='/internal/pilot/freeze')
+    assert frozen['unified_evidence']['matches']==[]
+    status=next(row for row in result['bundle']['retrieval']['coverage']if row['family']=='sp2001')
+    assert status['status']=='no_match'and status['returned_count']==0
+    assert all(row['discovered_count']==10 for row in status['reference_scope_lookups'])
+
+
+@pytest.mark.parametrize('override',['explicit_source','source_search','ordinary_question'])
+def test_explicit_source_search_and_other_questions_keep_normal_registry_route(
+        interpreted,monkeypatch,override):
+    family=interpreted('Ali pred kot vedno pišemo vejico?'if override=='ordinary_question'else QUESTION)
+    if override=='explicit_source':family['request_plan']['requested_source']='sp2001'
+    if override=='source_search':family['task']='source_search'
+    gateway=FreezeGateway(family);no_tool(monkeypatch)
+    result=unified.freeze(gateway,family,{})
+    searches=[parse_qs(urlsplit(path).query)for path,_,_ in gateway.calls if path.startswith('/api/search?')]
+    assert {row['sources'][0]for row in searches}=={row['slug']for row in gateway.rows}
+    assert result['bundle']['retrieval']['route']=='normal_registry'
+
+
+@pytest.mark.parametrize('field',['original','context','source_language','response_language','digest'])
+def test_reused_interpretation_must_match_complete_request_binding(interpreted,field):
+    family=interpreted();gateway=FreezeGateway(family)
+    saved=unified.shared_interpretation(gateway,QUESTION,'','sl','sl');before=len(gateway.calls)
+    if field=='digest':saved['request_plan_sha256']='0'*64
+    else:
+        saved['request_plan'][field]='altered'
+        saved['request_plan_sha256']=digest(saved['request_plan'])
+    with pytest.raises(Failure):unified.freeze(gateway,family,{},interpretation=saved)
+    assert len(gateway.calls)==before

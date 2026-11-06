@@ -7,6 +7,7 @@ from urllib.parse import urlsplit,parse_qs,urlencode
 from fastapi import FastAPI,Request
 from fastapi.responses import JSONResponse,HTMLResponse,FileResponse,RedirectResponse,Response
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from .store import Store,canonical,digest,stamp
 from .security import Auth,Failure
 from .domain import Domain,text
@@ -70,6 +71,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         yield
         if start_workers:jobs.close()
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
+    app.add_middleware(GZipMiddleware,minimum_size=1024,compresslevel=5)
     from .linghub_api import install as install_linghub_api
     install_linghub_api(app,config)
     app.state.store=store;app.state.auth=auth;app.state.domain=domain;app.state.jobs=jobs;app.state.config=config

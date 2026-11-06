@@ -201,8 +201,10 @@ def answer(gateway,bundle,tier,model,parent=None):
         'Predloga tega preverjanja ni mogoče uporabiti. Izvirno besedilo ostaja ohranjeno.')
     if bundle['status']!='ok':text=''  # The saved proposal panel owns its local status notice.
     if task.get('explain') and bundle['status']=='ok'and explanation_status in {'unsupported','unavailable'}:
-        text+=(' Per questa modifica non ho al momento una spiegazione collegata adeguatamente alle fonti conservate.'if italian else
-               ' Za konkretni poseg trenutno nimam ustrezno vezane razlage iz ohranjenih virov.')
+        text=('Per questa modifica non ho al momento una spiegazione collegata a una fonte adeguata.'
+              if proposal['edits'] else 'Per questo esempio non ho al momento una spiegazione collegata a una fonte adeguata.') if italian else (
+              'Za predlagano spremembo trenutno nimam razlage, vezane na ustrezni vir.'
+              if proposal['edits'] else 'Za ta primer trenutno nimam razlage, vezane na ustrezni vir.')
     if result is None:
         result={'status':'source_only','answer_kind':'tool_prediction','answer_support':'automated_prediction',
             'generation_status':'not_generated','answer_md':text,'short_answer':text,

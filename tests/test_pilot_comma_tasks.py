@@ -163,3 +163,18 @@ def test_explanation_uses_existing_answer_allowance_and_preserves_unsuccessful_w
   assert result['model_identity']['model_id']=='synthetic-writer'
   assert result['usage']['completion_tokens']==3
   assert result['deterministic_result']['source_explanation_result']['execution']['inference_performed'] is True
+
+
+def test_unchanged_prediction_has_a_local_limit_without_inventing_a_change(tmp_path,monkeypatch):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ monkeypatch.setattr(unified,'freeze',lambda *args:{'bundle':{'contract':'fixture-explanation'}})
+ monkeypatch.setattr(unified,'generate',lambda *args:{'answer_kind':'source_only',
+     'execution':{'inference_performed':False}})
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client);_,current=ask(app,client,headers,True,question='Preveri vejice: Teče kot veter.')
+  answer=current['short']
+  assert answer['comma_proposal']['edits']==[]
+  assert answer['comma_proposal']['proposed_text']=='Teče kot veter.'
+  assert answer['answer_md'].startswith('Za ta primer')
+  assert 'spremembo' not in answer['answer_md'] and 'poseg' not in answer['answer_md']

@@ -8,7 +8,7 @@ from .classification import method
 from .human_feedback import record_stage, safe_exception, terminal_display
 
 
-FREEZE_STAGES={'cpu_collation_ms','tool_evidence_ms','lexical_ms','embedding_ms','vector_search_ms','rerank_ms','retrieval_and_freeze_ms','evidence_lookup_ms','registry_ms','source_collection_ms','gateway_freeze_ms','evidence_preparation_ms'}
+FREEZE_STAGES={'cpu_collation_ms','tool_evidence_ms','lexical_ms','embedding_ms','vector_search_ms','rerank_ms','retrieval_and_freeze_ms','evidence_lookup_ms','registry_ms','source_collection_ms','gateway_freeze_ms','evidence_preparation_ms','message_build_ms','input_preparation_ms','input_fitting_ms'}
 
 def freeze_observation(frozen,elapsed_ms):
     """Private numeric observations, outside the immutable source/model pin."""

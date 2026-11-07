@@ -15,6 +15,39 @@ from test_pilot_unified import QUERY, UnifiedGateway, full_record
 FAMILY = {'question': QUERY, 'locale': 'sl'}
 
 
+def test_core_freeze_phases_survive_without_double_counting_web_stages(monkeypatch):
+    class TimedGateway(UnifiedGateway):
+        def request(self, path, payload, base=None):
+            response = super().request(path, payload, base)
+            if path == '/internal/pilot/freeze':
+                response['timings'] = {'rerank_ms': 40040.0, 'tokenizer_ms': 24,
+                    'input_fitting_ms': 530, 'message_build_ms': 190,
+                    'embedding_ms': None, 'lexical_ms': True,
+                    'vector_search_ms': float('nan'), 'evidence_lookup_ms': -1,
+                    'cpu_collation_ms': float('inf'), 'query': 'private text',
+                    'gateway_freeze_ms': 999999, 'retrieval_and_freeze_ms': 999999}
+            return response
+    monkeypatch.setattr(unified, 'collect_tools', lambda *args: (None, None))
+    frozen = unified.freeze(TimedGateway(), FAMILY, {})
+    assert frozen['timings']['rerank_ms'] == 40040.0
+    assert frozen['timings']['tokenizer_ms'] == 24
+    assert frozen['timings']['input_fitting_ms'] == 530
+    assert frozen['timings']['message_build_ms'] == 190
+    for field in ['embedding_ms', 'lexical_ms', 'vector_search_ms',
+                  'evidence_lookup_ms', 'cpu_collation_ms', 'query']:
+        assert field not in frozen['timings']
+    own = frozen['bundle']['retrieval']['timings']
+    assert set(own) == {'registry_ms', 'source_collection_ms',
+                        'evidence_preparation_ms', 'gateway_freeze_ms'}
+    assert frozen['timings']['gateway_freeze_ms'] == own['gateway_freeze_ms']
+    assert frozen['timings']['retrieval_and_freeze_ms'] < 999999
+    from pilot_backend.jobs import freeze_observation
+    stages = freeze_observation(frozen, 1000)['stages']
+    assert stages['freeze_tokenizer_ms'] == 24
+    assert stages['rerank_ms'] == 40040.0 and stages['input_fitting_ms'] == 530
+    assert stages['message_build_ms'] == 190
+
+
 def definition(slug):
     return {'slug': slug, 'display_name': editorial.SOURCES[slug],
             'adapter_key': 'luka_jsonl_qa', 'rights_mode': 'restricted',

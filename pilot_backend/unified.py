@@ -21,6 +21,10 @@ PACKET = 'klikai.unified-evidence.v1'
 MAX_BYTES = 2 * 1024 * 1024
 MAX_FROZEN_BYTES = 8 * 1024 * 1024
 DETAIL_WORKERS = 4
+GATEWAY_FREEZE_STAGES = frozenset({
+    'cpu_collation_ms', 'tool_evidence_ms', 'lexical_ms', 'embedding_ms',
+    'vector_search_ms', 'rerank_ms', 'evidence_lookup_ms', 'tokenizer_ms',
+    'message_build_ms', 'input_preparation_ms', 'input_fitting_ms'})
 REFERENCE_LEMMA_LIMIT = 8
 REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
@@ -1157,6 +1161,7 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
         raise Failure('unified_capture_too_large', 413)
     timings['evidence_preparation_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     child = None
+    gateway_timings = {}
     stage_started = time.monotonic()
     try:
         # Freeze the same canonical JSON representation that the durable store
@@ -1218,6 +1223,14 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
         if isinstance(extra, list):
             known = {row['family'] for row in coverage}
             coverage.extend(row for row in extra if isinstance(row, dict) and row.get('family') not in known)
+        # These are nested CORE observations, not additional serial WEB work.
+        # Keep them outside retrieval.timings so its enclosing stages cannot be
+        # summed twice. Missing observations remain absent rather than zero.
+        raw_timings = response.get('timings')
+        if isinstance(raw_timings, dict):
+            gateway_timings = {name: value for name, value in raw_timings.items()
+                if name in GATEWAY_FREEZE_STAGES and type(value) in {int, float}
+                and math.isfinite(value) and value >= 0}
     except Failure as error:
         if error.code=='request_plan_mismatch':
             raise
@@ -1240,7 +1253,8 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
     pin = digest(body)
     return {'bundle': dict(body, snapshot_sha256=pin),
             'identity': {'contract': CONTRACT, 'captured_response_sha256': pin},
-            'timings': {'retrieval_and_freeze_ms': retrieval['elapsed_ms'], **timings}}
+            'timings': {'retrieval_and_freeze_ms': retrieval['elapsed_ms'],
+                        **gateway_timings, **timings}}
 
 
 def fallback(bundle, status, elapsed=0.0, error=None):

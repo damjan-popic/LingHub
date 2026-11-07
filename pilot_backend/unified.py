@@ -905,6 +905,40 @@ def expand_same_preposition_legend(
     else:status['status']='ok' if status['returned_count'] else 'no_match'
 
 
+def expand_dictionary_inflection_legend(
+        gateway,family,definitions,found,coverage,detail_pool,pool):
+    """Capture one publisher legend needed by a requested compact entry."""
+    from tools.zrc_reference.pilot_dictionary_inflection import legend_query,legend_capture
+    query=legend_query(family.get('request_plan'),[row['capture']for row in found])
+    if query is None:return
+    definition=next((row for row in definitions if row.get('slug')=='sp2001'
+        and row.get('adapter_key')=='official_reference_jsonl'),None)
+    status=next((row for row in coverage if row.get('family')=='sp2001'),None)
+    if definition is None or status is None:return
+    matches,extra=pool.submit(collect_source,gateway,family,definition,detail_pool,
+        query_override=query).result()
+    scoped=[row for row in matches if legend_capture(row['capture'])]
+    known={(row['source_slug'],row['external_id'],row['capture_sha256'])for row in found}
+    added=[]
+    for row in scoped:
+        identity=(row['source_slug'],row['external_id'],row['capture_sha256'])
+        if identity not in known:found.append(row);added.append(row);known.add(identity)
+    status['dictionary_inflection_legend_expansion']={
+        'basis':'requested_source_compact_entry_marker','query':query,
+        'status':extra['status'],'scoped_returned_count':len(scoped),
+        'added_count':len(added),'candidates':deepcopy(extra.get('candidates',[]))}
+    status.setdefault('surface_returned_count',status['returned_count'])
+    status.setdefault('per_query_limit',status['limit'])
+    status['query_variants']=list(dict.fromkeys([*status.get('query_variants',[]),*extra.get('query_variants',[])]))
+    status['limit']+=extra['limit']
+    status['returned_count']=len({(row['external_id'],row['capture_kind'],row['capture_sha256'])for row in found if row['source_slug']=='sp2001'})
+    status['search_ms']+=extra['search_ms'];status['elapsed_ms']+=extra['elapsed_ms']
+    failed={'partial','timeout','unavailable','unsupported'}
+    if status['status']in failed or extra['status']in failed:
+        status['status']='partial'if status['returned_count']else'unavailable'
+    else:status['status']='ok'if status['returned_count']else'no_match'
+
+
 def o_name_declension_rule_query(family):
     """Return one class-level rule lookup from the shared request plan.
 
@@ -1145,6 +1179,8 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
             exact_heading_only=comma_source is not None)
         if comma_source is None:
             expand_same_preposition_legend(
+                gateway,family,definitions,found,coverage,details,pool)
+            expand_dictionary_inflection_legend(
                 gateway,family,definitions,found,coverage,details,pool)
             expand_o_name_declension_rules(
                 gateway,family,definitions,found,coverage,details,pool)

@@ -44,6 +44,26 @@ def source_record(kind,entry_id,body,provenance,target,relation='recorded_target
  if occurrence:item['source_occurrence_key']=occurrence
  item['record_id']='lexical:'+digest(item);return item
 
+def full_paradigm_occurrences(interpretation,lexemes):
+ """Retain complete recorded paradigms for an explicitly identified class.
+
+ A name/surname is a nominal lexical role, even when the request did not repeat
+ its part of speech. This is the same nominal interpretation used by the
+ source-feature answer builder; it does not choose gender or source variants.
+ """
+ if (interpretation.get('slot_focus') or interpretation.get('requested_grammar_slots')
+     or not {'morphology','inflection','conjugation'}&set(interpretation.get('requested_facets',[]))):return set()
+ choice=interpretation.get('form_choice')or(interpretation.get('request_plan')or{}).get('form_choice')or{}
+ explicit=choice.get('explicit_lexemes')or interpretation.get('explicit_lexemes')or[]
+ def matches(le,x):
+  category=x.get('grammatical_type')
+  if category is None and x.get('lexical_kind')in {'proper_name','surname','common_noun'}:category='noun'
+  features=le.get('grammatical_features',{})
+  return (category is not None and le['lemma']==x.get('text')and le['grammatical_type']==category
+      and(not x.get('gender')or features.get('gender')==x['gender'])
+      and(x.get('lexical_kind')not in {'proper_name','surname'}or features.get('type')=='proper'))
+ return {morphology_key(le)for le in lexemes if any(matches(le,x)for x in explicit)}
+
 def morphological_records(result,target,focus,construction=None,requested_slots=None,full_paradigm=False):
  out=[]
  focus={k:v for k,v in (focus or{}).items()if k!='basis'and v is not None}
@@ -137,14 +157,7 @@ async def make_profile(req,request):
   d=part.get('data');status=d['status']if d else part['status'];morphdata.append({'target':t['text'],'status':status,'result':d,'reason':part.get('reason')})
   if d:
    choice=interpretation.get('form_choice')or(interpretation.get('request_plan')or{}).get('form_choice')or{}
-   explicit=choice.get('explicit_lexemes')or interpretation.get('explicit_lexemes')or[]
-   full=(not interpretation['slot_focus']and not interpretation.get('requested_grammar_slots')
-       and bool({'morphology','inflection','conjugation'}&set(interpretation['requested_facets']))
-       and any(x.get('grammatical_type')for x in explicit))
-   full_occurrences={morphology_key(le)for le in d['lexemes']if full and any(
-       le['lemma']==x.get('text')and le['grammatical_type']==x.get('grammatical_type')
-       and(not x.get('gender')or le['grammatical_features'].get('gender')==x['gender'])
-       for x in explicit)}
+   full_occurrences=full_paradigm_occurrences(interpretation,d['lexemes'])
    records.extend(morphological_records(d,t['text'],interpretation['slot_focus'],choice.get('construction'),interpretation.get('requested_grammar_slots'),full_occurrences))
    exact=[le for le in d['lexemes']if le['matched_by']=='exact_headword']
    t['resource_identity_preference']={'basis':'exact case-preserving headword; alternatives retained, not a frequency decision','source_entry_ids':[le['source_entry_id']for le in exact],'proper_name_primary':bool(exact)and all(le['grammatical_features'].get('type')=='proper'for le in exact)}

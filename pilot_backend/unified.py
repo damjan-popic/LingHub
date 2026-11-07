@@ -908,16 +908,36 @@ def expand_same_preposition_legend(
 def expand_dictionary_inflection_legend(
         gateway,family,definitions,found,coverage,detail_pool,pool):
     """Capture one publisher legend needed by a requested compact entry."""
-    from tools.zrc_reference.pilot_dictionary_inflection import legend_query,legend_capture
-    query=legend_query(family.get('request_plan'),[row['capture']for row in found])
-    if query is None:return
+    plan=family.get('request_plan')or{};targets=plan.get('target_spans')or[]
+    if (plan.get('ambiguities')or plan.get('requested_source')!='sp2001'
+            or plan.get('requested_edition')not in {None,'2001'}
+            or not set(plan.get('requested_facets',[]))&{'inflection','genitive'}
+            or len(targets)!=1):return
+    target=targets[0].get('text')
+    captures=[row.get('capture')or{}for row in found]
+    # Discovery consumes the authenticated plan and the adapter's exact lookup
+    # identity. It observes a glyph, never assigns that glyph a linguistic meaning.
+    if not any(c.get('source_slug')=='sp2001'
+            and c.get('normative_status')=='current_reference'
+            and c.get('rights_mode')in {'owned','open','restricted'}
+            and c.get('semantic_unit')=='dictionary_entry'
+            and c.get('score_method')=='official_reference_exact_headword'
+            and (c.get('dictionary_lookup')or{}).get('target')==target
+            and re.search(r'[°●•]-',c.get('original_text')or'')for c in captures):return
+    query='Splošne normativne oznake'
     definition=next((row for row in definitions if row.get('slug')=='sp2001'
         and row.get('adapter_key')=='official_reference_jsonl'),None)
     status=next((row for row in coverage if row.get('family')=='sp2001'),None)
     if definition is None or status is None:return
     matches,extra=pool.submit(collect_source,gateway,family,definition,detail_pool,
         query_override=query).result()
-    scoped=[row for row in matches if legend_capture(row['capture'])]
+    # Freeze complete current source pages. CORE owns the source-local legend
+    # interpretation and exact supporting span; WEB does not import CORE code.
+    scoped=[row for row in matches if row.get('capture_kind')=='resource_record'
+        and row.get('capture',{}).get('source_slug')=='sp2001'
+        and row['capture'].get('normative_status')=='current_reference'
+        and row['capture'].get('rights_mode')in {'owned','open','restricted'}
+        and row['capture'].get('semantic_unit')!='dictionary_entry']
     known={(row['source_slug'],row['external_id'],row['capture_sha256'])for row in found}
     added=[]
     for row in scoped:

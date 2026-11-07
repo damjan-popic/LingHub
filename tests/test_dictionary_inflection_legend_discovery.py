@@ -14,6 +14,7 @@ def entry(target='Marko',marker='°'):
     capture={'source_slug':'sp2001','normative_status':'current_reference',
         'semantic_unit':'dictionary_entry','score_method':'official_reference_exact_headword',
         'published_headword':target,'rights_mode':'owned',
+        'dictionary_lookup':{'target':target},
         'original_text':target+' -a, '+marker+'-ta m'}
     return {'source_slug':'sp2001','capture_kind':'resource_record','external_id':'entry:fixture','capture_sha256':'a'*64,'capture':capture}
 
@@ -47,6 +48,17 @@ def test_marked_entry_captures_publisher_legend_without_replacing_the_entry(core
     assert found[1]['capture_sha256']=='b'*64
     assert coverage[0]['dictionary_inflection_legend_expansion']['added_count']==1
     assert coverage[0]['returned_count']==2
+
+def test_discovery_does_not_require_core_installed_in_the_web_process(monkeypatch):
+    import builtins
+    original=builtins.__import__
+    def guarded(name,*args,**kwargs):
+        if name.startswith('tools.zrc_reference'):raise ModuleNotFoundError(name)
+        return original(name,*args,**kwargs)
+    monkeypatch.setattr(builtins,'__import__',guarded)
+    found=[entry()]
+    calls,_=run(monkeypatch,family(),found)
+    assert calls==['Splošne normativne oznake']and len(found)==2
 
 @pytest.mark.parametrize('change',['other_source','unmarked','different_target','linked_only','other_edition'])
 def test_no_extra_lookup_for_unrequested_or_ineligible_entry(core,monkeypatch,change):

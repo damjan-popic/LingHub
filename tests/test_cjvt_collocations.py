@@ -58,6 +58,20 @@ class CollocationsTests(unittest.TestCase):
         (self.root / 'release-manifest.json').write_text(json.dumps(manifest))
         return counts, CompiledCollocations(self.root)
 
+    def measurement_fixture(self, measurements):
+        """Explicit measurement mutations of the retained source occurrence."""
+        root=ET.fromstring(SOURCE)
+        examples=root.find('.//exampleContainerList')
+        template=deepcopy(examples[0])
+        for child in list(examples):examples.remove(child)
+        for index,(frequency,logdice) in enumerate(measurements):
+            container=deepcopy(template);example=container.find('multiwordExample')
+            example.set('lexical_unit_id',str(1000+index))
+            for key,value in [('frequency',frequency),('logDice',logdice)]:
+                if value is not None:example.set(key,str(value))
+            examples.append(container)
+        return self.compile(ET.tostring(root,encoding='unicode'))[1]
+
     def test_source_ids_components_nullable_measurements_and_type_accounting(self):
         accounting, index = self.compile()
         self.assertEqual(accounting['counts'], {'entries':1,'senses':1,'multiword_occurrences':3,'collocations':2,'components':9,'other_examples':0})
@@ -92,8 +106,65 @@ class CollocationsTests(unittest.TestCase):
         self.assertEqual(index.lookup('otrok', min_freq=None, min_logdice=13)['count_returned'], 0)
         self.assertEqual(index.lookup("otrok' OR 1=1 --", min_freq=None)['count_total'], 0)
         ascending = index.lookup('otrok', min_freq=None, order='asc')['collocations']
-        self.assertIsNone(ascending[0]['frequency'])
-        self.assertEqual(ascending[1]['frequency'], 6839)
+        self.assertEqual(ascending[0]['frequency'], 6839)
+        self.assertIsNone(ascending[1]['frequency'])
+
+    def test_known_values_zero_and_null_rank_before_native_limit_in_both_directions(self):
+        index=self.measurement_fixture([(None,None)]*501+[(25,2.5),(50,5.0),(0,0.0)])
+        for sort,measure in [('freq','frequency'),('logdice','logDice')]:
+            for order,expected_ids in [('asc',[1503,1501,1502]),('desc',[1502,1501,1503])]:
+                with self.subTest(sort=sort,order=order):
+                    # Eight missing records must not conceal known25/50 or a
+                    # genuine0 in an explicit request for the lowest values.
+                    result=index.lookup('otrok',min_freq=None,sort=sort,order=order,limit=8)
+                    rows=result['collocations']
+                    self.assertEqual([r['lexical_unit_id']for r in rows[:3]],expected_ids)
+                    self.assertEqual(sum(r[measure]is not None for r in rows),3)
+                    self.assertTrue(all(r[measure]is None for r in rows[3:]))
+                    self.assertEqual(result['resource']['ranking'],{
+                        'measure':measure,'order':order,'null_policy':'known_values_first_missing_unranked_tail',
+                        'scope':'returned_lookup','known_returned':3,'missing_returned':5,'status':'mixed'})
+                    window=index.lookup('otrok',min_freq=None,sort=sort,order=order,limit=500)
+                    self.assertEqual([r['lexical_unit_id']for r in window['collocations'][:3]],expected_ids)
+                    self.assertEqual((window['count_total'],window['count_returned']),(504,500))
+                    self.assertEqual(window['resource']['ranking']['missing_returned'],497)
+                    self.assertNotIn('frequency',rows[-1]['source_attributes'])
+                    self.assertNotIn('logDice',rows[-1]['source_attributes'])
+
+    def test_frequency_ties_keep_measured_logdice_before_missing_in_both_directions(self):
+        index=self.measurement_fixture([(25,None),(25,0.0),(25,5.0)])
+        for order,expected in [('asc',[0.0,5.0,None]),('desc',[5.0,0.0,None])]:
+            rows=index.lookup('otrok',min_freq=None,sort='freq',order=order)['collocations']
+            self.assertEqual([r['logDice']for r in rows],expected)
+            self.assertEqual([r['frequency']for r in rows],[25]*3)
+
+    def test_logdice_ties_keep_measured_frequency_before_missing_in_both_directions(self):
+        index=self.measurement_fixture([(None,2.5),(0,2.5),(50,2.5)])
+        for order,expected in [('asc',[0,50,None]),('desc',[50,0,None])]:
+            rows=index.lookup('otrok',min_freq=None,sort='logdice',order=order)['collocations']
+            self.assertEqual([r['frequency']for r in rows],expected)
+            self.assertEqual([r['logDice']for r in rows],[2.5]*3)
+
+    def test_all_missing_measurements_remain_returned_and_explicitly_unranked(self):
+        index=self.measurement_fixture([(None,None)]*10)
+        for sort,measure in [('freq','frequency'),('logdice','logDice')]:
+            for order in ['asc','desc']:
+                result=index.lookup('otrok',min_freq=None,sort=sort,order=order,limit=8)
+                self.assertEqual((result['count_total'],result['count_returned']),(10,8))
+                self.assertTrue(all(r['frequency']is None and r['logDice']is None for r in result['collocations']))
+                self.assertEqual(result['resource']['ranking'],{
+                    'measure':measure,'order':order,'null_policy':'known_values_first_missing_unranked_tail',
+                    'scope':'returned_lookup','known_returned':0,'missing_returned':8,'status':'unranked'})
+        absent=index.lookup('not-recorded',min_freq=None)
+        self.assertEqual(absent['resource']['ranking']['status'],'empty')
+
+    def test_numeric_filters_still_exclude_missing_and_preserve_raw_measurements(self):
+        index=self.measurement_fixture([(None,None),(0,0.0),(25,2.5),(50,5.0)])
+        default=index.lookup('otrok',sort='freq',order='asc')
+        self.assertEqual([r['frequency']for r in default['collocations']],[25,50])
+        self.assertEqual(default['resource']['ranking']['status'],'ranked')
+        filtered=index.lookup('otrok',min_freq=None,min_logdice=2.0,sort='logdice',order='asc')
+        self.assertEqual([r['logDice']for r in filtered['collocations']],[2.5,5.0])
 
     def test_repeated_source_lu_in_another_entry_is_not_deduplicated(self):
         root=ET.fromstring(SOURCE)
@@ -122,8 +193,8 @@ class CollocationsTests(unittest.TestCase):
         with closing(index.connect()) as db:
             with self.assertRaises(sqlite3.OperationalError):
                 db.execute('DELETE FROM occurrences')
-            plans=[r[3] for r in db.execute("EXPLAIN QUERY PLAN SELECT id FROM occurrences WHERE headword_key='otrok' AND kind='collocation' ORDER BY frequency_sort DESC,logdice_sort DESC,surface DESC,id LIMIT 50")]
-            self.assertTrue(any('SEARCH' in r and 'occurrences_frequency' in r for r in plans))
+            plans=[r[3] for r in db.execute("EXPLAIN QUERY PLAN SELECT id FROM occurrences WHERE headword_key='otrok' AND kind='collocation' ORDER BY (frequency IS NULL) ASC,frequency DESC,(logdice IS NULL) ASC,logdice DESC,surface DESC,id LIMIT 50")]
+            self.assertTrue(any('SEARCH' in r and 'occurrences_' in r for r in plans))
         with sqlite3.connect(self.root/'collocations.sqlite') as db:
             db.execute("UPDATE occurrences SET frequency=1 WHERE id=1")
         with self.assertRaisesRegex(ValueError,'identity'):

@@ -170,6 +170,45 @@ def test_duplicate_native_memberships_survive_without_summing_or_merging_distinc
     assert all(u['fields']['coverage']['eligible_count_in_returned_source']==2 for u in selected)
 
 
+
+@pytest.mark.parametrize('excluded_first',[True,False])
+def test_eligible_equivalent_member_remains_primary_in_both_source_orders(
+        selected_core,compiled,monkeypatch,tmp_path,excluded_first):
+    import test_source_advice_morphology as morphology
+    from test_requested_name_paradigm_capture import ENTRIES
+    monkeypatch.setattr(morphology,'ENTRIES',[deepcopy(e)for e in ENTRIES if e['lemma']=='otrok'])
+    eligible=synthetic_rows(compiled,1)[0]
+    excluded=deepcopy(eligible)
+    excluded.update(occurrence_id=2,headword='Otrok')
+    excluded['provenance']['source_entry_id']='other-native-entry'
+    # The lexical unit, surface, structure, components and both measurements
+    # really agree. Only a source membership's headword is the wrong identity.
+    assert excluded['lexical_unit_id']==eligible['lexical_unit_id']
+    rows=[excluded,eligible]if excluded_first else[eligible,excluded]
+    reader=Reader(compiled,rows);before=deepcopy(rows)
+    value,plan=produce(monkeypatch,reader,morphology=morphology.Reader())
+    selected=units(value);assert len(selected)==1
+    chosen=selected[0]
+    assert chosen['fields']['headword']=='otrok'and chosen['fields']['occurrence_id']==1
+    assert {member['entry_id']for member in chosen['source_memberships']}=={'1','2'}
+    assert chosen['fields']['frequency']==eligible['frequency']
+    assert chosen['fields']['logDice']==eligible['logDice']
+    assert chosen['fields']['coverage']['eligible_count_in_returned_source']==1
+    wrong=next(u for u in value['evidence']if u['kind']=='collocations'
+        and u['fields']['occurrence_id']==2)
+    assert wrong['selection']['state']=='excluded'
+    assert wrong['fields']['provenance']['source_entry_id']=='other-native-entry'
+    lookup=value['facets']['collocations']['data'][0]['lookups'][0]
+    assert lookup['result']['original_result']['collocations']==before==reader.rows
+    projected,=lookup['result']['collocations']
+    assert projected['headword']==eligible['headword']
+    assert projected['occurrence_id']==chosen['fields']['occurrence_id']
+    assert projected['provenance']==eligible['provenance']
+    result=native_result(value,plan,tmp_path,monkeypatch)
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result),model='auto')
+    assert output['generation']['status']=='generated'and len(output['citations'])==1
+    assert output['execution']['inference_performed']is False
+
 def test_mixed_spelling_and_collocations_keep_the_verified_source_headword(selected_core,compiled,monkeypatch):
     import test_source_advice_morphology as morphology
     from test_requested_name_paradigm_capture import ENTRIES

@@ -135,7 +135,9 @@ def requested_collocation_projection(records,facets,interpretation):
     unit=by_occurrence.get((part['target'],str(rec['occurrence_id'])))
     ident=membership.get(unit['record_id'])if unit else None
     if rec.get('kind')=='collocation'and ident is not None and ident not in seen:
-     eligible.append((ident,rec));seen.add(ident)
+     # Keep native group order, but project the eligible representative's
+     # observation rather than an earlier excluded membership.
+     eligible.append((ident,original[ident]['fields']));seen.add(ident)
    chosen=eligible[:8]
    total=data.get('count_total');known=type(total)is int and total>=len(loaded)
    source_truncated=total>len(loaded)if known else None

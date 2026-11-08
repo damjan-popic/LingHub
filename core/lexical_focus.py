@@ -124,8 +124,15 @@ def focus_profile(profile):
                 f.get('frequency_scope','collocation'),f.get('corpus','Gigafida 2.0'),
                 [{k:c.get(k)for k in ('position','text','lemma','msd')}for c in f.get('components',[])]],sort_keys=True)
             if key in groups:
-                rep=groups[key];rep.setdefault('source_memberships',[]).append({'record_id':u['record_id'],'entry_id':u['entry_id']})
-                state,reason='excluded','duplicate_observation_membership'
+                rep=groups[key];member={'record_id':u['record_id'],'entry_id':u['entry_id']}
+                if state=='primary'and rep['selection']['state']!='primary':
+                    # An ineligible source membership must not suppress an
+                    # eligible equivalent observation encountered later.
+                    u['source_memberships']=rep.pop('source_memberships')+[member]
+                    groups[key]=u
+                else:
+                    rep.setdefault('source_memberships',[]).append(member)
+                    state,reason='excluded','duplicate_observation_membership'
             else:
                 groups[key]=u;u['source_memberships']=[{'record_id':u['record_id'],'entry_id':u['entry_id']}]
         u['selection']={'state':state,'reason':reason,'version':VERSION}

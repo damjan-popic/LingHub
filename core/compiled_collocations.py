@@ -80,13 +80,17 @@ class CompiledCollocations:
             clauses.append('o.status_key=?')
             params.append(status.strip().casefold())
         direction = order.upper()
-        first, second = ('o.frequency_sort', 'o.logdice_sort') if sort == 'freq' else ('o.logdice_sort', 'o.frequency_sort')
+        first, second = ('o.frequency', 'o.logdice') if sort == 'freq' else ('o.logdice', 'o.frequency')
         query = '''SELECT o.*, e.headword, e.headword_lu_id, e.source_entry_id,
                           e.source_ordinal AS entry_ordinal, s.source_sense_id,
                           s.source_ordinal AS sense_ordinal, sh.name AS source_shard, sh.sha256 AS shard_sha256
                    FROM occurrences o JOIN entries e ON e.id=o.entry_id JOIN senses s ON s.id=o.sense_id
                    JOIN shards sh ON sh.id=e.shard_id WHERE ''' + ' AND '.join(clauses)
-        query += f' ORDER BY {first} {direction}, {second} {direction}, o.surface {direction}, o.id ASC LIMIT ?'
+        # The compiled *_sort columns coalesce missing measurements to zero.
+        # Rank actual measurements before the window, keeping a genuine zero
+        # numeric and missing primary/secondary values in an unranked tail.
+        query += (f' ORDER BY ({first} IS NULL) ASC, {first} {direction}, '
+                  f'({second} IS NULL) ASC, {second} {direction}, o.surface {direction}, o.id ASC LIMIT ?')
         with closing(self.connect()) as db:
             total = db.execute('SELECT count(*) FROM occurrences WHERE headword_key=?' + (' AND kind=?' if kind != 'all' else ''),
                 (key, kind) if kind != 'all' else (key,)).fetchone()[0]
@@ -118,12 +122,19 @@ class CompiledCollocations:
                     'shard_sha256': r['shard_sha256'], 'source_entry_id': r['source_entry_id'],
                     'entry_ordinal': r['entry_ordinal'], 'sense_ordinal': r['sense_ordinal'],
                     'example_ordinal': r['source_ordinal'], 'build_id': self.manifest['build_id']}})
+        measurement = 'frequency' if sort == 'freq' else 'logDice'
+        known = sum(record[measurement] is not None for record in records)
+        missing = len(records) - known
         return {'lemma': head[0] if head else lemma.strip(), 'lemma_key': key,
                 'count_total': total, 'count_returned': len(records), 'filters': {
                     'min_freq': effective_frequency, 'min_logdice': min_logdice, 'structure_id': structure_id,
                     'status': status, 'limit': limit, 'sort': sort, 'order': order},
                 'collocations': records, 'resource': {'build_id': self.manifest['build_id'],
                     'frequency_null_policy': 'Excluded by numeric min_freq; min_freq=null retains missing values',
+                    'ranking': {'measure': measurement, 'order': order,
+                        'null_policy': 'known_values_first_missing_unranked_tail', 'scope': 'returned_lookup',
+                        'known_returned': known, 'missing_returned': missing,
+                        'status': 'empty' if not records else 'unranked' if not known else 'mixed' if missing else 'ranked'},
                     'component_order': 'XML document order; @num preserved separately', 'deduplicated': False,
                     'kind_filter': kind}}
 

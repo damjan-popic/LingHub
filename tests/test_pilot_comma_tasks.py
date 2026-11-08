@@ -49,8 +49,9 @@ def application(tmp_path,monkeypatch,status='ok'):
  return app,gateway,calls
 
 def ask(app,client,headers,consent=False,key='comma-test-request',question=QUESTION):
- r=client.post('/api/pilot/families',headers=headers,json={'question':question,
-   'idempotency_key':key,'comma_checker_consent':consent})
+ payload={'question':question,'idempotency_key':key}
+ if consent is not None:payload['comma_checker_consent']=consent
+ r=client.post('/api/pilot/families',headers=headers,json=payload)
  assert r.status_code==200,r.text
  fid=r.json()['family']['answer_family_id']
  job=app.state.jobs.claim('cpu');assert job
@@ -229,3 +230,53 @@ def test_generic_why_with_multiple_saved_edits_asks_which_without_resending(tmp_
   assert answer['comma_proposal']['explanation_status']=='edit_required'
   assert 'Za katero vejico' in answer['answer_md']
   assert answer['tool_execution']['attempted'] is False and len(calls)==1
+
+
+def test_explicit_comma_request_without_legacy_checkbox_is_saved_honestly(tmp_path,monkeypatch):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ monkeypatch.setattr(unified,'generate',lambda *a,**k:{'answer_kind':'source_only',
+     'execution':{'inference_performed':False}})
+ with TestClient(app,base_url=ORIGIN)as client:
+  headers=login(client);fid,family=ask(app,client,headers,None)
+  assert calls==['Ko pridem domov bom poklical.']
+  assert family['short']['comma_proposal']['status']=='ok'
+  with app.state.store.connect()as db:
+   bundle=json.loads(db.execute('SELECT bundle FROM families WHERE id=?',(fid,)).fetchone()[0])
+   options=db.execute('SELECT options FROM family_request_options WHERE family_id=?',(fid,)).fetchone()
+  assert options is None
+  assert bundle['consent']['accepted']is False
+  assert bundle['authorization']=={'accepted':True,'basis':'explicit_comma_request'}
+  assert bundle['observation']['input_text']=='Ko pridem domov bom poklical.'
+  assert client.get('/api/pilot/families/'+fid).json()==family
+  assert len(calls)==1
+
+
+@pytest.mark.parametrize('question',[
+ 'Preveri vejice v dokumentu.',
+ 'Preveri vejice: https://primer.si/besedilo.txt',
+ 'Preveri vejice v »Ko pridem domov bom poklical.« in »Če bo deževalo ostanemo doma.«',
+])
+def test_request_authorization_does_not_send_an_unbound_or_ambiguous_target(tmp_path,monkeypatch,question):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ with TestClient(app,base_url=ORIGIN)as client:
+  _,family=ask(app,client,login(client),None,question=question)
+  assert family['short']['comma_proposal']['status']=='target_required'
+  assert calls==[]
+
+
+def test_legacy_frozen_proposal_without_authorization_field_remains_readable(tmp_path,monkeypatch):
+ app,gateway,calls=application(tmp_path,monkeypatch)
+ from pilot_backend import unified
+ from pilot_backend.store import digest
+ monkeypatch.setattr(unified,'generate',lambda *a,**k:{'answer_kind':'source_only',
+     'execution':{'inference_performed':False}})
+ frozen=comma_tasks.freeze(gateway,{'question':QUESTION,'context':'','locale':'sl',
+     'input_language':'und','request_options':{'comma_checker_consent':True}}, {})['bundle']
+ frozen.pop('authorization')
+ frozen['snapshot_sha256']=digest({k:v for k,v in frozen.items()if k!='snapshot_sha256'})
+ before=deepcopy(frozen)
+ answer=comma_tasks.answer(gateway,frozen,'answer','auto')
+ assert answer['comma_proposal']['status']=='ok'
+ assert answer['comma_proposal']['proposed_text']=='Ko pridem domov, bom poklical.'
+ assert frozen==before and calls==['Ko pridem domov bom poklical.']

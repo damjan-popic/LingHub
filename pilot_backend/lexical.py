@@ -216,4 +216,4 @@ def reader(bundle):
  section('Letture grammaticali registrate'if it else'Zapisane slovnične možnosti',analysis_rows)
  section('Contesto necessario'if it else'Potreben kontekst',uncertainty)
  section('Altre letture registrate'if it else'Druge zapisane možnosti',alternatives)
- return {'title':'Profilo lessicale'if it else'Podatki o izrazu','sections':sections,'note':'Dati delle fonti, indipendenti dalla risposta generata. Le frequenze non stabiliscono una preferenza normativa.'if it else'Podatki iz virov, neodvisni od generiranega odgovora. Pogostnost ne določa normativne prednosti.'}
+ return {'title':'Profilo lessicale'if it else'Podatki o izrazu','sections':sections,'note':'Dati delle fonti, indipendenti dalla risposta generata.'if it else'Podatki iz virov, neodvisni od generiranega odgovora.'}

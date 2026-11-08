@@ -9,13 +9,8 @@ from .store import digest
 CONTRACT='klikai.comma-proposal.v1'
 LABEL='Predlog postavitve vejic · CJVT Vejice'
 TERMS='https://orodja.cjvt.si/vejice/about'
-DISCLOSURE_SL=('Izbrano besedilo se pošlje API-ju CJVT (gpu-proc1.cjvt.si). '
-    'Posebni pogoji te povezave niso potrjeni; javni pogoji CJVT dopuščajo '
-    'hrambo do treh let za analizo in razvoj. Pošljite le besedilo, ki ga smete deliti.')
-DISCLOSURE_IT=('Il testo selezionato viene inviato all’API CJVT (gpu-proc1.cjvt.si). '
-    'Le condizioni specifiche di questa connessione non sono confermate; '
-    'le condizioni pubbliche CJVT consentono la conservazione fino a tre anni '
-    'per analisi e sviluppo. Inviate soltanto testo che potete condividere.')
+DISCLOSURE_SL='Izbrano besedilo za pregled vejic se pošlje API-ju CJVT (gpu-proc1.cjvt.si).'
+DISCLOSURE_IT='Il testo selezionato per il controllo delle virgole viene inviato all’API CJVT (gpu-proc1.cjvt.si).'
 
 
 def capability(config):
@@ -69,6 +64,11 @@ def freeze(gateway,family,policy):
     status=task['status'];observation=None;reused_parent=None
     options=_options(family)
     consent=options.get('comma_checker_consent') is True
+    # A new direct request is authorized by its interpreted operation and exact
+    # supplied target. The removed checkbox is not silently marked accepted.
+    explicit_request=('comma_checker_consent'not in options
+        and task.get('mode')=='check'and status=='ready'and target is not None)
+    authorized=consent or explicit_request
     if task.get('mode')=='explain_existing':
         parent=options.get('comma_parent')
         if not isinstance(parent,dict)or not isinstance(parent.get('observation'),dict):return None
@@ -77,7 +77,7 @@ def freeze(gateway,family,policy):
         reused_parent=parent['run_id'];status=observation['status']
     if status=='ready' and reused_parent is None and len(target['text'])>config.get('max_chars',3000):
         status='too_long'
-    if status=='ready' and reused_parent is None and not consent:
+    if status=='ready' and reused_parent is None and not authorized:
         status='consent_required'
     if status=='ready' and reused_parent is None:
         from core.comma_checker import check
@@ -105,7 +105,10 @@ def freeze(gateway,family,policy):
         'task':deepcopy(task),'status':status,'observation':observation,'reused_parent_run_id':reused_parent,
         'application_limit_characters':config.get('max_chars',3000),
         'consent':{'accepted':consent,'disclosure_sha256':digest(capability(config)),
-                   'terms_url':TERMS},'explanation':explanation,
+                   'terms_url':TERMS},
+        'authorization':{'accepted':authorized,
+            'basis':'explicit_consent'if consent else'explicit_comma_request'if explicit_request else'not_authorized'},
+        'explanation':explanation,
         'explanation_status':explanation_status}
     bundle={**body,'snapshot_sha256':digest(body)}
     return {'bundle':bundle,'identity':{'contract':CONTRACT,'captured_response_sha256':digest(body)}}

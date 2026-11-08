@@ -193,14 +193,16 @@ test('scope notes, localization and ordinary composer wiring remain explicit',()
   }
   const html=fs.readFileSync(new URL('../pilot_ui/index.html',import.meta.url),'utf8');
   const composer=html.match(/<form id="question-form"[\s\S]*?<\/form>/)[0];
-  assert(composer.includes('id="comma-checker-consent"'));
-  assert(!/id="comma-checker-consent"[^>]*(?:checked|required)/.test(composer));
+  assert(!composer.includes('comma-checker-control'));
+  assert(!composer.includes('comma-checker-consent'));
+  assert(!composer.includes('comma-checker-terms'));
   assert(!html.match(/<form id="login-form"[\s\S]*?<\/form>/)[0].includes('comma-checker'));
   const answer=html.slice(html.indexOf('id="answer-card"'),html.indexOf('id="beta-explorer"'));
   assert(answer.indexOf('id="comma-proposal"')<answer.indexOf('id="short-answer"'));
   assert(answer.includes('<div id="comma-proposal"'),'The proposal belongs to the one answer section');
   const ui=fs.readFileSync(new URL('../pilot_ui/pilot.mjs',import.meta.url),'utf8');
-  assert.match(ui,/commaConsentFields\(state\.capabilities,\$\('comma-checker-consent'\)\.checked\)/);
+  assert(!ui.includes('commaConsentFields('));
+  assert(!ui.includes('comma-checker-consent'));
   assert.match(ui,/renderCommaSuggestion\(family\.short\)/);
   assert.match(ui,/if\(!blocks\.length\)\{if\(tier\?\.comma_proposal/,
     'A check-only result must not acquire an invented source-unavailable refusal');

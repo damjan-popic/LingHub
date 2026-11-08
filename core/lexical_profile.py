@@ -116,6 +116,56 @@ def requested_synonym_projection(records,facets,interpretation,limit):
       unit['target'],unit['match_relation']))
  return out
 
+def requested_collocation_projection(records,facets,interpretation):
+ """Use the existing identity/membership decision before the answer bound."""
+ if 'collocations'not in interpretation.get('requested_facets',[]):return records
+ from .lexical_focus import focus_profile
+ focused=focus_profile({'interpretation':interpretation,'facets':facets,'evidence':records})
+ original={u['record_id']:u for u in records if u['kind']=='collocations'}
+ primaries={u['captured_unit_id']:u for u in focused['evidence']
+     if u['kind']=='collocations'and u['selection']['state']=='primary'}
+ membership={m['record_id']:ident for ident,u in primaries.items()
+     for m in u.get('source_memberships',[{'record_id':ident}])}
+ by_occurrence={(u['target'],str(u['entry_id'])):u for u in original.values()}
+ selected={};ranks={}
+ for part in facets['collocations'].get('data')or[]:
+  for lookup in part['lookups']:
+   data=lookup['result'];loaded=data['collocations'];eligible=[];seen=set()
+   for rec in loaded:
+    unit=by_occurrence.get((part['target'],str(rec['occurrence_id'])))
+    ident=membership.get(unit['record_id'])if unit else None
+    if rec.get('kind')=='collocation'and ident is not None and ident not in seen:
+     eligible.append((ident,rec));seen.add(ident)
+   chosen=eligible[:8]
+   total=data.get('count_total');known=type(total)is int and total>=len(loaded)
+   source_truncated=total>len(loaded)if known else None
+   selection_truncated=len(chosen)<len(eligible)
+   truncated=True if source_truncated is True or selection_truncated else False if source_truncated is False else None
+   options=data.get('filters')or{}
+   for ident,_ in chosen:
+    if ident not in ranks:ranks[ident]=len(ranks)+1
+    coverage={'selection_kind':'requested_collocations','selection_unit':'source_observation_with_memberships',
+        'selection_rank':ranks[ident],'query_headword':lookup['query'],
+        'count_total':total if known else None,'source_count_returned':len(loaded),
+        'eligible_count_in_returned_source':len(eligible),'count_returned':len(chosen),
+        'source_truncated':source_truncated,'selection_truncated':selection_truncated,
+        'truncated':truncated,'sort':options.get('sort','freq'),'order':options.get('order','desc'),
+        'kind':'collocation'}
+    for member in primaries[ident].get('source_memberships',[{'record_id':ident}]):
+     raw=member['record_id']
+     if raw not in selected:selected[raw]=copy.deepcopy(coverage)
+     elif truncated is not False:selected[raw]['truncated']=truncated
+   data.update(collocations=[copy.deepcopy(rec)for _,rec in chosen],
+       count_returned=len(chosen),searched_records=len(loaded),truncated=truncated)
+ out=[]
+ for unit in records:
+  if unit['kind']!='collocations':out.append(unit);continue
+  coverage=selected.get(unit['record_id'])
+  if coverage is not None:
+   out.append(source_record(unit['kind'],unit['entry_id'],{**unit['fields'],'coverage':coverage},
+       unit['provenance'],unit['target'],unit['match_relation']))
+ return out
+
 def morphological_records(result,target,focus,construction=None,requested_slots=None,full_paradigm=False):
  out=[]
  focus={k:v for k,v in (focus or{}).items()if k!='basis'and v is not None}
@@ -261,14 +311,25 @@ async def make_profile(req,request):
        sense['ranking']={'method':'source_order','scores':'original synonym_score retained separately; not corpus frequency','scope':'this source sense and directed relation only'}
      hit=bool(data['entries']);relation=('whole_expression'if any(e['headword'].casefold()==t['text'].casefold()for e in data['entries'])else'component_only')if not lexical_word(t['text'])else'headword_candidate'
     else:
-     multi=not lexical_word(t['text']);data=await run_in_threadpool(state.collocations.get_collocations_for_lemma,lemma,min_freq=None,limit=500 if multi else 8,kind='all')
+     multi=not lexical_word(t['text']);requested='collocations'in interpretation['requested_facets']
+     ordering=(interpretation.get('request_plan')or{}).get('collocation_request')or{}
+     options={'min_freq':None,'limit':500 if requested or multi else 8,'kind':'collocation'if requested else'all'}
+     if requested:options.update(sort=ordering.get('sort')or'freq',order=ordering.get('order')or'desc')
+     original=await run_in_threadpool(state.collocations.get_collocations_for_lemma,lemma,**options)
+     data=copy.deepcopy(original)
+     if requested:data['original_result']=copy.deepcopy(original)
      sequences={s.casefold()for s in t['lemma_sequences']if s};full=[]
      for rec in data['collocations']:
       comp=' '.join(c['lemma']or c['text']or'' for c in rec['components']).casefold()
       rec['match_relation']='whole_expression'if rec['surface'].casefold()==t['text'].casefold()else'inflected_equivalent'if multi and comp in sequences else'component_only'if multi else'headword_collocation'
       if rec['match_relation']in {'whole_expression','inflected_equivalent'}:full.append(rec)
-     chosen=full if full else data['collocations'][:3 if multi else 8]
-     data['searched_records']=data['count_returned'];data['collocations']=chosen;data['count_returned']=len(chosen);data['truncated']=data['count_total']>len(chosen);data['ranking']={'measure':'frequency','scope':'source occurrence count in Gigafida 2.0, separate from logDice','missing_values':'retained; never zero or a frequency preference'}
+     chosen=data['collocations']if requested else full if full else data['collocations'][:3 if multi else 8]
+     data.update(searched_records=data['count_returned'],collocations=chosen,count_returned=len(chosen))
+     data['truncated']=data['count_total']>len(chosen)if type(data.get('count_total'))is int else None
+     data['ranking']={'measure':'logDice'if options.get('sort')=='logdice'else'frequency',
+         'scope':('source-native ordering for this queried headword; frequency and logDice remain separate observations'
+             if requested else'source occurrence count in Gigafida 2.0, separate from logDice'),
+         'missing_values':'retained; never zero or a frequency preference'}
      hit=bool(chosen);relation='whole_expression'if full else'component_only'if multi else'headword_collocation'
     if hit:found.append({'query':lemma,'basis':'original_surface'if lemma==t['text']else'lexical_or_analyzer_candidate','match_relation':relation,'result':data})
    except Exception:failures+=1;continue
@@ -361,6 +422,7 @@ async def make_profile(req,request):
  if not targets:
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
  records=requested_synonym_projection(records,facets,interpretation,req.limit)
+ records=requested_collocation_projection(records,facets,interpretation)
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
  query=req.model_dump(exclude=set()if 'source_advice_captures'in req.model_fields_set else{'source_advice_captures'})

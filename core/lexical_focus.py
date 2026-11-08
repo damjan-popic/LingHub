@@ -94,7 +94,10 @@ def focus_profile(profile):
             elif proper_only and kind not in plan['requested_facets']:state,reason='excluded','personal_name_not_common_noun_profile'
             elif u['match_relation']in {'component_only','alternative_lexical_identity'}:state,reason='excluded','incidental_component_or_reading'
             elif not primary_ids and len(targets)==1 and str(f.get('headword','')).casefold()!=u['target'].casefold() and u['match_relation'] not in {'whole_expression','inflected_equivalent'}:state,reason='alternative','unverified_analyzer_lemma_not_target_identity'
-            elif primary_ids and plan['query_kind']=='word' and f.get('headword')not in {lexemes[i]['lemma']for i in primary_ids}:state,reason='excluded','different_headword'
+            elif (primary_ids and (plan['query_kind']=='word'or len(targets)==1
+                    and {'synonyms','collocations'}&set(plan['requested_facets']))
+                    and f.get('headword')not in {lexemes[i]['lemma']for i in primary_ids}):
+                state,reason='excluded','different_headword'
             elif kind=='collocations'and u['target'].islower()and primary_ids and all(lexemes[i]['grammatical_features'].get('type')=='common'for i in primary_ids):
                 heads=[c for c in f.get('components',[])if c.get('role')=='headword']
                 if heads and all(str(c.get('text',''))[:1].isupper()for c in heads):state,reason='alternative','capitalized_headword_context_not_resolved'

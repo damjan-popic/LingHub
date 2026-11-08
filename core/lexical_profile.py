@@ -287,10 +287,35 @@ async def make_profile(req,request):
   for le in (x.get('result')or{}).get('lexemes',[]):
    frequencies.append({'target':x['target'],'source_entry_id':le['source_entry_id'],'lemma':le['lemma'],'observations':le['frequency_observations'],'form_observations':[{'form':v['form'],'slot_locator':s['slot_locator'],'observations':v['frequency_observations']}for s in le['slots']for v in s['variants']if v['form'].casefold()==x['target'].casefold()],'aggregation':'none; source lexeme total, forms and readings remain distinct'})
  facets['frequency']=facet('matched'if any(x['observations']or x['form_observations']for x in frequencies)else facets['morphology']['status'] if facets['morphology']['status'] in {'not_applicable','unavailable'} else 'no_match',frequencies)
+ # Reuse verified primary morphology before loading unrelated dictionary
+ # inventories. Case/form alternatives remain in the original morphology facet.
+ collocation_lemmas={}
+ if 'collocations'in interpretation['requested_facets']:
+  from .lexical_focus import focus_profile
+  selected=focus_profile({'interpretation':interpretation,'facets':facets,'evidence':records})
+  chosen=selected['interpretation']['selection']['morphology_occurrences_by_target']
+  for part in morphdata:
+   primary=set(chosen.get(part['target'],[]))
+   lemmas=list(dict.fromkeys(le['lemma']for le in(part.get('result')or{}).get('lexemes',[])
+       if morphology_key(le)in primary and (le.get('matched_by')=='exact_headword'
+           or any(row.get('exact_surface')is True for row in le.get('submitted_analyses',[])))))
+   if lemmas:collocation_lemmas[part['target']]=lemmas
  async def dictionary(kind,t,candidates):
   if 'sl'not in interpretation['lookup_languages']:return {'target':t['text'],'status':'not_applicable','lookups':[]}
   if not available(request,kind):return {'target':t['text'],'status':'unavailable','lookups':[]}
-  found=[];failures=0
+  found=[];failures=0;candidate_selection=None;query_memberships={}
+  if kind=='collocations'and'collocations'in interpretation['requested_facets']:
+   from .compiled_collocations import normalize as source_lookup_key
+   original_candidates=list(candidates);owned=collocation_lemmas.get(t['text'])
+   if owned:
+    candidates=list(dict.fromkeys([x for x in candidates if x in owned]+owned))[:8]
+   groups={}
+   for candidate in candidates:groups.setdefault(source_lookup_key(candidate),[]).append(candidate)
+   candidates=[members[0]for members in groups.values()]
+   query_memberships={members[0]:members for members in groups.values()}
+   candidate_selection={'basis':'verified_primary_source_lemmas'if owned else'bounded_headword_candidates',
+       'considered_candidates':original_candidates,'retained_candidates':list(candidates),
+       'source_lookup_normalization':'strip-casefold-v1'}
   for lemma in candidates:
    try:
     if kind=='synonyms':
@@ -331,10 +356,14 @@ async def make_profile(req,request):
              if requested else'source occurrence count in Gigafida 2.0, separate from logDice'),
          'missing_values':'retained; never zero or a frequency preference'}
      hit=bool(chosen);relation='whole_expression'if full else'component_only'if multi else'headword_collocation'
-    if hit:found.append({'query':lemma,'basis':'original_surface'if lemma==t['text']else'lexical_or_analyzer_candidate','match_relation':relation,'result':data})
+    if hit:
+     item={'query':lemma,'basis':'original_surface'if lemma==t['text']else'lexical_or_analyzer_candidate','match_relation':relation,'result':data}
+     if lemma in query_memberships:item['query_memberships']=query_memberships[lemma]
+     found.append(item)
    except Exception:failures+=1;continue
    if len(found)>=2:break
-  return {'target':t['text'],'status':'matched'if found else'unavailable'if failures else'no_match','lookups':found,'failed_lookups':failures,'search_scope':'bounded headword candidates; no whole-dictionary absence claim'}
+  return {'target':t['text'],'status':'matched'if found else'unavailable'if failures else'no_match','lookups':found,'failed_lookups':failures,'search_scope':'bounded headword candidates; no whole-dictionary absence claim',
+      **({'candidate_selection':candidate_selection}if candidate_selection is not None else{})}
  dict_jobs=[(kind,t,candidates)for t,candidates in lookups for kind in ('synonyms','collocations')]
  results=await asyncio.gather(*(dictionary(*j)for j in dict_jobs))
  for kind in ('synonyms','collocations'):

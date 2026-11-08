@@ -44,10 +44,10 @@ class Reader:
             'resource':{'build_id':self.manifest['build_id'],'kind_filter':options['kind']}}
 
 
-def produce(monkeypatch,reader,question='Kolokacije besede otrok?',morphology=None):
+def produce(monkeypatch,reader,question='Kolokacije besede otrok?',morphology=None,analysis_result=None):
     from tools.zrc_reference.request_interpretation import authoritative_request_plan
     async def analysis(*args,**kwargs):
-        return {'status':'ok','raw_engines':{},'engines_used':[],'loris_status':'no_match'}
+        return analysis_result or {'status':'ok','raw_engines':{},'engines_used':[],'loris_status':'no_match'}
     monkeypatch.setattr('core.analysis_profiles.analyze',analysis)
     plan=authoritative_request_plan(question)
     state=NS(synonyms=None,collocations=reader,sloleks_profiles=morphology,morphology=None)
@@ -204,3 +204,91 @@ def test_ordinary_enrichment_keeps_its_existing_query_bound_and_no_new_coverage(
     data=value['facets']['collocations']['data'][0]['lookups'][0]['result']
     assert 'original_result'not in data and len(data['collocations'])==8
     assert all('coverage'not in u['fields']for u in value['evidence']if u['kind']=='collocations')
+
+
+class RecordedForms:
+    """Actual fixture paradigms, including identities with a submitted inflection."""
+    def __init__(self,entries):
+        self.entries=deepcopy(entries)
+        self.manifest={'source_archive_sha256':entries[0]['evidence']['source_archive_sha256']}
+    def lookup(self,surface,*args):
+        rows=[]
+        for original in self.entries:
+            analyses=[{'slot_locator':slot['slot_locator'],'features':slot['normalized_features'],
+                'original_msd':slot['original_msd'],'variant_locator':variant['source_locator'],
+                'exact_surface':True}for slot in original['slots']for variant in slot['variants']
+                if variant['form']==surface]
+            if original['lemma']!=surface and not analyses:continue
+            le=deepcopy(original)
+            le.update(submitted_form=surface,matched_by='exact_headword'if le['lemma']==surface
+                else'recorded_form',submitted_analyses=analyses)
+            rows.append(le)
+        return {'status':'matched'if rows else'no_match','lexemes':rows,
+            'submitted_form':surface,'truncated':False,'next_offset':None}
+    discover=lookup
+
+
+def test_verified_primary_lemma_scopes_native_inventory_before_capture(selected_core,compiled,monkeypatch):
+    from test_requested_name_paradigm_capture import ENTRIES
+    native=[e for e in ENTRIES if e['lemma']in {'Marko','Marka'}]
+    morphology=RecordedForms(native);reader=Reader(compiled,synthetic_rows(compiled,12))
+    for row in reader.rows:row['headword']='Marko'
+    value,_=produce(monkeypatch,reader,'Katere so kolokacije besede Marko?',morphology=morphology)
+    # Marko is also an attested inflection of Marka. Preserve that morphology,
+    # while the already source-verified requested identity owns the inventory.
+    assert {le['lemma']for part in value['facets']['morphology']['data']
+        for le in part['result']['lexemes']}=={'Marko','Marka'}
+    assert [lemma for lemma,_ in reader.calls]==['Marko']
+    part=value['facets']['collocations']['data'][0]
+    assert part['candidate_selection']['considered_candidates']==['Marko','Marka']
+    assert part['candidate_selection']['basis']=='verified_primary_source_lemmas'
+    assert part['lookups'][0]['result']['original_result']['collocations']==reader.rows
+    assert len(units(value))==8
+
+
+def test_inflected_surface_retains_verified_different_source_lemma(selected_core,compiled,monkeypatch):
+    from test_requested_name_paradigm_capture import ENTRIES
+    morphology=RecordedForms([e for e in ENTRIES if e['lemma']=='otrok'])
+    reader=Reader(compiled,synthetic_rows(compiled,3))
+    value,_=produce(monkeypatch,reader,'Katere so kolokacije besede otroka?',morphology=morphology)
+    assert [target['text']for target in value['interpretation']['targets']]==['otroka']
+    assert [lemma for lemma,_ in reader.calls]==['otrok']
+    part=value['facets']['collocations']['data'][0]
+    assert part['candidate_selection']['retained_candidates']==['otrok']
+    assert part['lookups'][0]['result']['original_result']['collocations']==reader.rows
+    assert len(units(value))==3
+
+
+def test_native_normalized_keys_share_one_window_and_ordinary_wording_collects(
+        selected_core,compiled,monkeypatch):
+    from pilot_backend.collation import collect
+    from pilot_backend.store import canonical
+    question='Katere so značilne besedne zveze z besedo otrok?'
+    start=question.index('otrok')
+    # Analyzer nominations vary in case; only the native lookup's declared
+    # normalization coalesces calls. It does not invent a morphology identity.
+    analysis={'status':'ok','engines_used':['first','second'],'loris_status':'no_match',
+        'raw_engines':{name:{'analysis':{'words':[{'lemma':lemma,'start':start,
+            'end':start+5,'feats':{},'upos':'NOUN'}]}}
+            for name,lemma in [('first','otrok'),('second','OTROK')]}}
+    rows=synthetic_rows(compiled,12);rows[0]['headword']='Otrok'
+    reader=Reader(compiled,rows)
+    value,plan=produce(monkeypatch,reader,question,analysis_result=analysis)
+    assert [lemma for lemma,_ in reader.calls]==['otrok']
+    lookup=value['facets']['collocations']['data'][0]['lookups'][0]
+    assert lookup['query_memberships']==['otrok','OTROK']
+    assert lookup['result']['original_result']['collocations']==reader.rows
+    assert lookup['result']['original_result']['collocations'][0]['headword']=='Otrok'
+    class Gateway:
+        lexical_profiles=True;linghub_url='http://fixture.invalid';calls=[]
+        def request(self,path,payload,base):
+            self.calls.append((path,payload))
+            if path=='/v1/capabilities':return {'lexical_profile':{'available':True}}
+            assert path=='/v1/lexical/profile'and payload['request_plan']==plan
+            return value
+    gateway=Gateway()
+    captured=collect(gateway,{'question':question,'request_plan':plan,
+        'input_language':'sl'},automatic=True)
+    assert [path for path,_ in gateway.calls]==['/v1/capabilities','/v1/lexical/profile']
+    assert captured['captures'][0]['response']==value
+    assert len(canonical(captured).encode())<1536*1024

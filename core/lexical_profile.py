@@ -64,6 +64,58 @@ def full_paradigm_occurrences(interpretation,lexemes):
       and(x.get('lexical_kind')not in {'proper_name','surname'}or features.get('type')=='proper'))
  return {morphology_key(le)for le in lexemes if any(matches(le,x)for x in explicit)}
 
+def requested_synonym_projection(records,facets,interpretation,limit):
+ """Select requested source groups after existing identity checks, before caps."""
+ if 'synonyms'not in interpretation.get('requested_facets',[]):return records
+ from .lexical_focus import focus_profile
+ # Reuse the same identity decision with the complete loaded records. Final
+ # source IDs/annotations are built once from the bounded original records.
+ focused=focus_profile({'interpretation':interpretation,'facets':facets,'evidence':records})
+ primary={u['captured_unit_id']for u in focused['evidence']
+     if u['kind']=='synonyms'and u['selection']['state']=='primary'}
+ key=lambda u:(u['target'],u['fields']['headword'],u['entry_id'])
+ units={key(u):u for u in records if u['kind']=='synonyms'}
+ selected={}
+ for part in facets['synonyms'].get('data')or[]:
+  for lookup in part['lookups']:
+   data=lookup['result'];entries=data['entries'];eligible=[]
+   for entry in entries:
+    senses=[]
+    for sense in entry['senses']:
+     unit=units.get((part['target'],entry['headword'],str(sense['sense_id'])))
+     if (unit and unit['record_id']in primary and any(
+         r.get('relation_type')=='synonym'for r in sense['relations'])):senses.append(sense)
+    if senses:eligible.append((entry,senses))
+   chosen=eligible[:min(2,limit)]
+   truncated=len(chosen)<len(eligible)or any(len(senses)>min(4,limit)for _,senses in eligible)
+   projected=[]
+   for entry,senses in chosen:
+    returned=senses[:min(4,limit)];value=copy.deepcopy(entry)
+    value.update(senses=copy.deepcopy(returned),senses_total_in_returned_source=len(entry['senses']),
+        senses_truncated=len(returned)<len(senses),synonym_senses_available=len(senses))
+    projected.append(value)
+    coverage={'selection_kind':'requested_synonyms','entries_total':len(entries),
+        'entries_returned':len(chosen),'synonym_entries_available':len(eligible),
+        'entries_truncated':len(chosen)<len(eligible),
+        'senses_total_in_returned_source':len(entry['senses']),
+        'senses_returned':len(returned),'synonym_senses_available':len(senses),
+        'senses_truncated':len(returned)<len(senses),'selection_truncated':truncated}
+    for sense in returned:
+     identity=(part['target'],entry['headword'],str(sense['sense_id']))
+     if identity not in selected:selected[identity]=copy.deepcopy(coverage)
+     elif truncated:selected[identity]['selection_truncated']=True
+   data.update(entries=projected,entries_total=len(entries),entries_returned=len(chosen),
+       synonym_entries_available=len(eligible),entries_truncated=len(chosen)<len(eligible))
+ out=[]
+ for unit in records:
+  if unit['kind']!='synonyms':out.append(unit);continue
+  coverage=selected.get(key(unit))
+  if coverage is None:continue
+  fields={**unit['fields'],'coverage':coverage}
+  out.append(source_record(unit['kind'],unit['entry_id'],fields,unit['provenance'],
+      unit['target'],unit['match_relation']))
+ return out
+
 def morphological_records(result,target,focus,construction=None,requested_slots=None,full_paradigm=False):
  out=[]
  focus={k:v for k,v in (focus or{}).items()if k!='basis'and v is not None}
@@ -192,14 +244,20 @@ async def make_profile(req,request):
   for lemma in candidates:
    try:
     if kind=='synonyms':
-     data=await run_in_threadpool(state.synonyms.lookup_evidence,lemma,normalized=True)
-     data['entries_total']=len(data['entries']);data['entries_truncated']=len(data['entries'])>min(2,req.limit);data['entries']=data['entries'][:min(2,req.limit)]
-     # Source-defined senses stay separate; bounded relation slices are explicit.
-     data['entries']=copy.deepcopy(data['entries'])
+     original=await run_in_threadpool(state.synonyms.lookup_evidence,lemma,normalized=True)
+     data=copy.deepcopy(original)
+     requested='synonyms'in interpretation['requested_facets']
+     if requested:
+      # Retain the complete original lookup and all relation types beside its
+      # task projection; no extra query or source mutation is involved.
+      data['original_result']=copy.deepcopy(original)
+     else:
+      data['entries_total']=len(data['entries']);data['entries_truncated']=len(data['entries'])>min(2,req.limit);data['entries']=data['entries'][:min(2,req.limit)]
      for ent in data['entries']:
-      ent['senses_total_in_returned_source']=len(ent['senses']);ent['senses_truncated']=len(ent['senses'])>min(4,req.limit);ent['senses']=ent['senses'][:min(4,req.limit)]
+      if not requested:
+       ent['senses_total_in_returned_source']=len(ent['senses']);ent['senses_truncated']=len(ent['senses'])>min(4,req.limit);ent['senses']=ent['senses'][:min(4,req.limit)]
       for sense in ent['senses']:
-       sense['relations_truncated']=False
+       sense.setdefault('relations_truncated',False)
        sense['ranking']={'method':'source_order','scores':'original synonym_score retained separately; not corpus frequency','scope':'this source sense and directed relation only'}
      hit=bool(data['entries']);relation=('whole_expression'if any(e['headword'].casefold()==t['text'].casefold()for e in data['entries'])else'component_only')if not lexical_word(t['text'])else'headword_candidate'
     else:
@@ -302,6 +360,7 @@ async def make_profile(req,request):
  facets['phrase_analysis']=facet('matched'if phrase_analysis else'not_applicable',phrase_analysis)
  if not targets:
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
+ records=requested_synonym_projection(records,facets,interpretation,req.limit)
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
  query=req.model_dump(exclude=set()if 'source_advice_captures'in req.model_fields_set else{'source_advice_captures'})

@@ -111,7 +111,8 @@ def test_real_compiled_reader_preserves_occurrences_measures_and_typed_original_
     assert output['generation']['status']=='generated',output
     assert 'šolski otroci'in output['answer_md']and'otroci in mladostniki'in output['answer_md']
     assert '6839'in output['answer_md']and'12.10279'in output['answer_md']
-    assert 'ni podano'in output['answer_md']
+    assert 'pogostnost ni podana; logDice ni podan'in output['answer_md']
+    assert 'zveze brez tega podatka po tej meri niso razvrščene'in output['answer_md']
     assert '| Kolokacija |'not in output['answer_md'],'The ordinary UI renders text, not Markdown tables'
     assert len(output['citations'])==2 and output['execution']['inference_performed']is False
 

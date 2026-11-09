@@ -28,7 +28,7 @@ function harness(handler){
   const family=id=>({answer_family_id:id,question:'Question '+id,locale:'sl',task:'reference',short:{run_id:'run-'+id,state:'complete'},long:null});
   const state={boot:0,user:{id:'fixture'},locale:'sl',family:family('a'),feedbackTarget:null,feedback:new Map(),feedbackEvents:new Map(),feedbackDrafts:new Map(),delivered:new Set(),requestKeys:new Map(),polling:new Map(),capabilities:{},longOpen:false};
   const renders=[],calls=[];
-  const context={state,$,submission:{clear(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,familyRequest:0,
+  const context={state,$,submission:{clear(){},read:()=>null,readDraft:()=>null,saveDraft(){},clearDraft(){},prepare:(owner,payload)=>({...payload,idempotency_key:'fixture-key'})},document:{querySelectorAll:()=>[...nodes.values()].filter(n=>n.open),addEventListener(){}},sourceRequest:0,familyRequest:0,submissionRequest:0,
     beta:()=>true,api:(path,options)=>{calls.push({path,options});return handler(path,options);},familyId:()=>state.family?.answer_family_id,historyCreatedDate,
     textStatus:(id,value)=>{$(id).textContent=value;},errorText:()=> 'request_failed',t:x=>x,el:(tag,text,attrs={})=>{const n=new Node();n.tag=tag;n.textContent=text??'';n.attrs=attrs;return n;},clear:n=>n.replaceChildren(),
     renderCommaSuggestion(){},commaCheckerControls(){},resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
@@ -38,6 +38,7 @@ function harness(handler){
   };
   vm.createContext(context);
   vm.runInContext([
+    between('function saveComposer()','function setLocale('),
     line('async function action('),
     between('function clearFeedbackContext()','function authenticated('),
     between('async function recordDelivered(','function renderFeedback('),

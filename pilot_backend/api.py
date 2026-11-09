@@ -483,7 +483,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
+        if asset not in {'comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','answer-layout.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n',ui/'brand'}:raise Failure('not_found',404)
         return FileResponse(target)

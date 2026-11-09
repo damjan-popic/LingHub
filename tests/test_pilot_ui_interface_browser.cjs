@@ -1,6 +1,6 @@
 /* Offline browser checks: no service, account, generation, or feedback mutations. */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const {chromium}=require('/home/damjan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.KLIKAI_PLAYWRIGHT_MODULE||'playwright');
 const assets=path.resolve(__dirname,'../pilot_ui'),origin='https://interface.test',output=process.env.KLIKAI_INTERFACE_UI_OUTPUT;
 const configured=['jezikovna_svetovalnica','epravopis','zvezek','crossterm','zkb','tretji_sektor','solska','jezikovna_posta','jezikovna_urgenca','zadrege','gradivo'];
 const registry=JSON.parse(fs.readFileSync(path.join(assets,'source-presentation.json'))),expected=registry.sources.filter(s=>configured.includes(s.suggested_key));
@@ -22,7 +22,7 @@ async function setup(width,{pending=false,matches=true,authenticated=true}={}){
   const api=u.pathname.slice('/api/pilot'.length);calls.push({api,method:req.method()});
   if(api==='/session')return json({authenticated,user:authenticated?{username:'fixture',role:'tester',shared_group:true,can_change_password:false}:null,csrf_token:'fixture',capabilities:{project_beta:true,documentary_sources:configured,beta_updated:'UNRELATED OLD DATE'}});
   if(api==='/capabilities')return json({project_beta:true,documentary_sources:configured,beta_updated:'UNRELATED NEW DATE'});
-  if(api==='/feedback')return json({feedback:[]});
+  if(api==='/feedback'||api.endsWith('/feedback'))return json({feedback:[],events:[]});
   if(api==='/families/saved-answer')return json(family());
   if(api==='/jobs/pending-job')return json({job_id:'pending-job',state:complete?'complete':jobState,progress:{stage:matches?'generation':'retrieval',matches_ready:matches}});
   if(api.endsWith('/cancel')){jobState='cancelled';return json({job_id:'pending-job',state:jobState});}
@@ -62,7 +62,8 @@ async function legendAndCopy(width){
   const body=await page.locator('#short-answer').innerText(),answer=await page.locator('#short-answer').textContent();
   await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Kopirano');assert.equal(await page.evaluate(()=>document.activeElement.id),'copy-answer','Successful copy retains button focus');
   const copied=await page.evaluate(()=>window.copiedText);
-  assert.equal(copied,body.trim()+'\n\nViri\n[1] ePravopis — First cited entry\n[2] ePravopis — Second cited entry');
+  const sourceName=registry.sources.find(source=>source.suggested_key==='epravopis').labels.sl;
+  assert.equal(copied,body.trim()+'\n\nViri\n[1] '+sourceName+' — First cited entry\n[2] '+sourceName+' — Second cited entry');
   assert(copied.includes('osnutek'));assert(!copied.includes('Uncited'));assert(!copied.includes('opaque'));assert(!copied.includes('/api/'));
   await screenshot(page,'copy-'+width);await page.evaluate(()=>window.clipboardFailure=true);await page.locator('#copy-answer').click();assert.equal(await page.locator('#answer-status').innerText(),'Besedilo lahko označite in kopirate.');assert.equal(await page.evaluate(()=>document.activeElement.id),'copy-answer','Clipboard failure retains button focus');
   const noRequest=calls.length;await page.locator('#source-legend-open').click();await page.keyboard.press('Escape');assert.equal(calls.length,noRequest);assert.equal(await page.locator('#short-answer').textContent(),answer);
@@ -80,7 +81,7 @@ async function waiting(matches,ending){
   await page.goto(origin+'/?answer=saved-answer');await page.locator('#job-state').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#job-state').dataset.stage==='generation'||document.querySelector('#job-state').dataset.stage==='retrieval');
   assert(!(await page.locator('#job-message').innerText()).includes('nekoliko dlje'));
   await page.clock.fastForward(21000);await page.waitForFunction(()=>document.querySelector('#job-message').textContent.includes('nekoliko dlje'));
-  assert.equal(await page.locator('#job-message').innerText(),'Priprava odgovora traja nekoliko dlje.'+(matches?' Medtem lahko pod »Preberi več« pregledate najdene vire.':''));
+  assert.equal(await page.locator('#job-message').innerText(),'Priprava odgovora traja nekoliko dlje.'+(matches?' Medtem lahko pod »Viri« pregledate najdene vire.':''));
   if(matches){await page.locator('#expand-button').click();await page.locator('.explorer-badge').click();await page.locator('.explorer-entry').waitFor();}
   const jobs=calls.filter(c=>c.api==='/jobs/pending-job').length;await page.locator('#source-legend-open').click();await page.keyboard.press('Escape');assert.equal(calls.filter(c=>c.api==='/jobs/pending-job').length,jobs);
   await screenshot(page,'waiting-'+(matches?'sources':'no-sources')+'-'+ending);
@@ -90,6 +91,6 @@ async function waiting(matches,ending){
   report.checks.push({case:'long-wait',matches,ending,status:'PASS'});
  }finally{await f.context.close();}
 }
-(async()=>{try{if(output)fs.mkdirSync(output,{recursive:true});browser=await chromium.launch({headless:true,executablePath:'/opt/google/chrome/chrome',args:['--no-sandbox']});for(const width of [1100,390])await legendAndCopy(width);for(const [matches,ending] of [[true,'complete'],[false,'complete'],[true,'cancelled'],[false,'failed']])await waiting(matches,ending);
+(async()=>{try{if(output)fs.mkdirSync(output,{recursive:true});browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage']});for(const width of [1100,390])await legendAndCopy(width);for(const [matches,ending] of [[true,'complete'],[false,'complete'],[true,'cancelled'],[false,'failed']])await waiting(matches,ending);
  const f=await setup(390,{authenticated:false});try{await f.page.goto(origin+'/');await f.page.locator('#login-view').waitFor({state:'visible'});assert.equal(await f.page.locator('footer [data-info]').count(),0);assert.equal(await f.page.locator('#source-legend-open').isVisible(),false);report.checks.push({case:'login-passive-footer',status:'PASS'});}finally{await f.context.close();}
  assert.deepEqual(report.errors,[]);report.status='PASS';}catch(e){report.status='FAIL';report.errors.push(e.stack);process.exitCode=1;}finally{await browser?.close();if(output)fs.writeFileSync(path.join(output,'browser-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));}})();

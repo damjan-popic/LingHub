@@ -1,9 +1,9 @@
 /* Offline ordinary-answer/history flow; every network response is a fixture. */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const {chromium}=require('/home/damjan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.KLIKAI_PLAYWRIGHT_MODULE||'playwright');
 const assets=path.resolve(__dirname,'../pilot_ui'),origin='https://single-answer.test';
 (async()=>{
- const browser=await chromium.launch({headless:true,executablePath:'/opt/google/chrome/chrome',args:['--disable-dev-shm-usage']});
+ const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage']});
  try{for(const locale of ['sl','it'])for(const mode of ['single','historical-short','historical-long']){
   const context=await browser.newContext(),page=await context.newPage(),errors=[],calls=[];
   const labels=JSON.parse(fs.readFileSync(path.join(assets,'i18n',locale+'.json'))),tier=mode==='single'?'answer':mode==='historical-long'?'long':'short';

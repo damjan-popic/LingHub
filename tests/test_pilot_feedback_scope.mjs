@@ -38,7 +38,7 @@ function harness(handler){
   };
   vm.createContext(context);
   vm.runInContext([
-    between('function saveComposer()','function setLocale('),
+    between('function saveComposer(','function setLocale('),
     line('async function action('),
     between('function clearFeedbackContext()','function authenticated('),
     between('async function recordDelivered(','function renderFeedback('),

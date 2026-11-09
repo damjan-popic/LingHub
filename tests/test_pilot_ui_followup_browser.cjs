@@ -11,18 +11,21 @@ a.short.evidence=[{evidence_id:'e1',local_number:1,source_slug:'epravopis',title
  {evidence_id:'e2',local_number:2,source_slug:'epravopis',title:'Second exact source'}];
 a.short.blocks[0].evidence_ids=['e1','e2'];
 let browser;
-async function setup({legacy=false}={}){
+async function setup({legacy=false,initialDelay=null,answer=true,presetNewDraft=null}={}){
  const context=await browser.newContext({viewport:{width:1100,height:900}}),page=await context.newPage(),calls=[];
  const savedA=legacy?{...a,long:{...a.short,run_id:'run-a-long'}}:a;
  const controls={expired:false,hold:null,release:null,historyFailure:false,sourceFailure:false,sourceHold:null,sourceRelease:null,losePost:false,submissionMissing:false};
+ if(initialDelay)controls.initialHold=new Promise(resolve=>{controls.initialRelease=resolve;});
  page.on('pageerror',e=>report.errors.push(e.message));
  await page.addInitScript(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedText=text;}}}));
+ if(presetNewDraft)await page.addInitScript(question=>sessionStorage.setItem('klikai::composer-drafts:synthetic',JSON.stringify({new:{question,followup:null}})),presetNewDraft);
  await context.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url());if(url.origin!==origin)throw Error('Unexpected external request '+url.origin);
   const json=value=>route.fulfill({contentType:'application/json',body:JSON.stringify(value)});
-  if(url.pathname.startsWith('/assets/')){const file=url.pathname.slice(8);return route.fulfill({contentType:file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':'application/json',body:fs.readFileSync(path.join(assets,file))});}
+  if(url.pathname.startsWith('/assets/')){const file=url.pathname.slice(8);let body=fs.readFileSync(path.join(assets,file));if(file==='pilot.mjs')body=body.toString().replace('bind();await bootstrap();','bind();await bootstrap();globalThis.fixtureBootstrapComplete=true;');return route.fulfill({contentType:file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':'application/json',body});}
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(assets,'index.html'),'utf8').replaceAll('__PILOT_BASE__','').replaceAll('__PILOT_LOCALE__','sl')});
   const api=url.pathname.slice('/api/pilot'.length);calls.push({api,method:req.method(),body:req.method()==='POST'?req.postData():null});
+  if(initialDelay===api)await controls.initialHold;
   if(api==='/login'){controls.expired=false;return route.fulfill({contentType:'text/html',body:'<script>location.replace("/?answer=a")</script>'});}
   if(api==='/session')return json({authenticated:true,user:{id:'synthetic',username:'fixture',role:'tester'},csrf_token:'fixture',capabilities:{project_beta:true}});
   if(api==='/capabilities')return json({project_beta:true});
@@ -40,7 +43,7 @@ async function setup({legacy=false}={}){
   if(api.includes('/matches'))return json({items:[],returned_count:0,next_offset:null,usage_final:true});
   throw Error('Unexpected synthetic API '+api);
  });
- await page.goto(origin+'/?answer=a');await page.locator('#followup-button').waitFor({state:'visible'});
+ await page.goto(origin+(answer?'/?answer=a':'/'));await page.locator(initialDelay?'#app-view':'#followup-button').waitFor({state:'visible'});
  return {context,page,calls,controls};
 }
 async function followup(f,text='Katere so njegove sopomenke?'){
@@ -49,6 +52,33 @@ async function followup(f,text='Katere so njegove sopomenke?'){
 }
 (async()=>{try{
  if(out)fs.mkdirSync(out,{recursive:true});browser=await chromium.launch({headless:true});
+ for(const [initialDelay,answer]of [['/capabilities',false],['/feedback',false],['/feedback',true],['/families/a',true]]){
+  const f=await setup({initialDelay,answer});await f.page.locator('#question').fill('Question typed before initialization completes');
+  f.controls.initialRelease();await f.page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);
+  assert.equal(await f.page.locator('#question').inputValue(),'Question typed before initialization completes');
+  assert.equal(await f.page.locator('#followup-context').isHidden(),true,'Loading an owned answer never invents a parent relation for early text');
+  await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');
+  const sent=JSON.parse(f.calls.find(call=>call.api==='/families'&&call.method==='POST').body);
+  assert.equal(sent.question,'Question typed before initialization completes');assert.equal('parent_run_id'in sent,false);
+  report.checks.push({case:'early-typing-survives-delayed-initialization',initialDelay,answer,status:'PASS'});await f.context.close();
+ }
+ for(const answer of [false,true]){
+  const f=await setup({initialDelay:'/feedback',answer});await f.page.locator('#question').fill('Question submitted before initialization completes');
+  await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');f.controls.initialRelease();
+  await f.page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);
+  assert.equal(f.page.url(),origin+'/?answer=new');assert.equal(await f.page.locator('#question').inputValue(),'Question submitted before initialization completes');
+  assert.equal(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').length,1);
+  assert.equal(await f.page.locator('#followup-context').isHidden(),true);
+  report.checks.push({case:'early-submit-keeps-ownership-over-late-bootstrap',answer,status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup({initialDelay:'/families/a',presetNewDraft:'Independent New question draft'});
+  await f.page.locator('#question').fill('Early draft for the owned saved answer');f.controls.initialRelease();
+  await f.page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);
+  assert.equal(await f.page.locator('#question').inputValue(),'Early draft for the owned saved answer');
+  assert.equal(await f.page.evaluate(()=>JSON.parse(sessionStorage.getItem('klikai::composer-drafts:synthetic')).new.question),'Independent New question draft');
+  report.checks.push({case:'early-saved-answer-edit-preserves-independent-new-question-draft',status:'PASS'});await f.context.close();
+ }
  {
   const f=await setup(),before=await followup(f);await f.page.locator('#history-toggle').click();
   await f.page.locator('#history-list button').filter({hasText:b.question}).click();await f.page.waitForURL('**/?answer=b');

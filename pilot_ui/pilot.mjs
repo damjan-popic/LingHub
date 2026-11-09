@@ -9,7 +9,7 @@ import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,m
 
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
-const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false,followup:null,feedbackEvents:new Map(),submitting:false,composerFamily:null,composerReady:false,earlyComposerEdited:false};
+const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false,followup:null,feedbackEvents:new Map(),submitting:false,composerFamily:null,composerSlot:null,composerReady:false,earlyComposerEdited:false};
 let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0, familyRequest=0, submissionRequest=0;
 let registry = {sources:[]};
 let signInResume = null;
@@ -25,29 +25,37 @@ function localButton(key,handler,className='plain') {const b=el('button',t(key),
 function showDialog(id) { if(!$(id).open)$(id).showModal(); }
 function unwrapFamily(data) {return data?.family || data;}
 function familyId() {return state.family?.answer_family_id;}
-function setURL(push=false) {const u=new URL(location.href);u.pathname=localePath(base,state.locale);u.search='';if(familyId())u.searchParams.set('answer',familyId());if(state.comparison?.comparison_id)u.searchParams.set('comparison',state.comparison.comparison_id);if(push&&u.href!==location.href)history.pushState({},'',u);else history.replaceState({},'',u);}
+function setURL(push=false,force=false) {const u=new URL(location.href);u.pathname=localePath(base,state.locale);u.search='';if(familyId())u.searchParams.set('answer',familyId());if(state.comparison?.comparison_id)u.searchParams.set('comparison',state.comparison.comparison_id);if(push&&(force||u.href!==location.href))history.pushState({},'',u);else history.replaceState({},'',u);}
 function saveComposer(edited=false){
   if(!state.user?.id)return;
   if(!state.composerReady){if(edited===true)state.earlyComposerEdited=true;if(!state.earlyComposerEdited)return;}
-  const question=$('question').value,slot=state.composerReady?state.composerFamily:'opening';
-  if(!state.followup&&question===(state.family?.question||'')&&$('focus').value===(state.family?.focus||'')){submission.clearDraft(state.user.id,slot);return;}
-  submission.saveDraft(state.user.id,slot,{question,focus:$('focus').value,task:$('task').value,input_language:$('input-language').value,answer_locale:$('answer-locale').value,answer_locale_explicit:state.answerLocaleExplicit,followup:state.followup});
+  const question=$('question').value,slot=state.composerReady?state.composerSlot:'opening';
+  submission.saveDraft(state.user.id,slot,{question,focus:$('focus').value,task:$('task').value,model:$('model').value,input_language:$('input-language').value,answer_locale:$('answer-locale').value,answer_locale_explicit:state.answerLocaleExplicit,followup:state.followup});
 }
-function restoreComposer(family=null){
+function restoreComposer(family=null,{slot=undefined}={}){
   if(family)family=ordinaryFamilyView(family);
   const earlyDraft=!state.composerReady&&state.earlyComposerEdited?submission.readDraft(state.user?.id,'opening'):null;
-  state.composerFamily=family?.answer_family_id||null;state.composerReady=true;
-  const draft=earlyDraft||submission.readDraft(state.user?.id,state.composerFamily);state.earlyComposerEdited=false;
-  if(earlyDraft){submission.saveDraft(state.user.id,state.composerFamily,earlyDraft);submission.clearDraft(state.user.id,'opening');}
+  state.composerFamily=family?.answer_family_id||null;state.composerSlot=slot===undefined?state.composerFamily:slot;state.composerReady=true;
+  const draft=earlyDraft||submission.readDraft(state.user?.id,state.composerSlot);state.earlyComposerEdited=false;
+  if(earlyDraft&&state.composerSlot!=='opening'){submission.saveDraft(state.user.id,state.composerSlot,earlyDraft);submission.clearDraft(state.user.id,'opening');}
   $('question').value=draft?.question??family?.question??'';$('focus').value=draft?.focus??family?.focus??'';
   $('task').value=draft?.task||family?.task||'reference';$('input-language').value=draft?.input_language||(['sl','it'].includes(family?.input_language)?family.input_language:'');
+  if(draft?.model)$('model').value=draft.model;
   if(draft?.answer_locale){$('answer-locale').value=draft.answer_locale;state.answerLocaleExplicit=draft.answer_locale_explicit===true;}
   state.followup=draft?.followup&&draft.followup.run_id===family?.short?.run_id?draft.followup:null;
   $('followup-context').hidden=!state.followup;if(state.followup)$('followup-context').textContent=t('followup_context',{question:state.followup.question});
   taskControls();
 }
+function pendingDraftSlot(pending){return pending.draft_slot??pending.draft_family??(submission.readDraft(state.user?.id,'opening')?.question===pending.payload.question?'opening':null);}
+function newerPendingComposer(pending){const draft=submission.readDraft(state.user?.id,pendingDraftSlot(pending));return Boolean(draft&&(pending.composer===undefined||JSON.stringify(draft)!==JSON.stringify(pending.composer)));}
+async function restorePendingComposer(pending){
+  if(pending.draft_family){if(!await loadFamily(pending.draft_family))return false;}
+  else restoreComposer(null,{slot:pendingDraftSlot(pending)});
+  if(!$('question').value)$('question').value=pending.payload.question;
+  return true;
+}
 function newQuestion({push=true,discard=true}={}){
-  if(discard)submission.clearDraft(state.user?.id,state.composerFamily);else saveComposer();
+  if(discard)submission.clearDraft(state.user?.id,state.composerSlot);else saveComposer();
   submissionRequest++;familyRequest++;state.submitting=false;submission.clear();renderCommaSuggestion();state.followup=null;$('followup-context').hidden=true;$('ask-button').disabled=false;clearFeedbackContext();resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;clearClarification();restoreComposer();setURL(push);$('question').focus();
 }
 async function reopenURL(){
@@ -90,7 +98,7 @@ async function action(button,fn,errorId='global-status') {if(button?.disabled)re
 function clearFeedbackContext() {state.feedbackTarget=null;textStatus('answer-status','');textStatus('feedback-status','');if($('feedback-dialog').open)$('feedback-dialog').close();}
 function resetPrivate() {
   sourceRequest++;resetMatches();clearFeedbackContext();
-  state.boot++;submissionRequest++;for(const cancel of state.polling.values())cancel();state.polling.clear();state.user=null;state.csrf=null;state.family=null;state.comparison=null;state.selection=null;state.feedback.clear();state.feedbackEvents.clear();state.followup=null;state.submitting=false;state.composerFamily=null;state.composerReady=false;state.earlyComposerEdited=false;state.feedbackDrafts.clear();state.delivered.clear();state.requestKeys.clear();state.job=null;state.longOpen=false;
+  state.boot++;submissionRequest++;for(const cancel of state.polling.values())cancel();state.polling.clear();state.user=null;state.csrf=null;state.family=null;state.comparison=null;state.selection=null;state.feedback.clear();state.feedbackEvents.clear();state.followup=null;state.submitting=false;state.composerFamily=null;state.composerSlot=null;state.composerReady=false;state.earlyComposerEdited=false;state.feedbackDrafts.clear();state.delivered.clear();state.requestKeys.clear();state.job=null;state.longOpen=false;
   $('app-view').hidden=true;$('account-button').hidden=true;$('beta-logout').hidden=true;$('password-view').hidden=true;clear($('short-answer'));clear($('long-answer'));clear($('short-sources'));clear($('long-sources'));clear($('short-feedback'));clear($('long-feedback'));clear($('history-list'));clear($('admin-content'));clear($('source-content'));clear($('side-a-answer'));clear($('side-b-answer'));$('question').value='';document.querySelectorAll('dialog[open]').forEach(d=>d.close());setURL();
   clearClarification();$('focus').value='';$('model').value='auto';state.answerLocaleExplicit=false;state.capabilities={};$('capacity-state').hidden=true;renderSourceLegend();renderCommaSuggestion();
 }
@@ -156,7 +164,9 @@ async function bootstrap() {
   await refreshCapabilities();
   await loadFeedback();
   if(boot!==state.boot||navigation!==submissionRequest)return;
-  if(!answer){const pending=submission.read(state.user.id);if(pending){try{const recovered=await api('/submissions/'+encodeURIComponent(pending.payload.idempotency_key));if(submission.readDraft(state.user.id,pending.draft_family)?.question===pending.payload.question)submission.clearDraft(state.user.id,pending.draft_family);submission.clear();await loadFamily(unwrapFamily(recovered).answer_family_id);return;}catch(error){if(error.status!==404)throw error;if(pending.draft_family)await loadFamily(pending.draft_family);else restoreComposer();if(!$('question').value)$('question').value=pending.payload.question;textStatus('global-status','submission_unconfirmed');return;}}}
+  const pending=submission.read(state.user.id);
+  if(pending?.clarification&&(!answer||answer===pending.draft_family)){const newer=newerPendingComposer(pending);if(await restorePendingComposer(pending)&&!newer)showClarification(pending.clarification);return;}
+  if(!answer&&pending){try{const recovered=await api('/submissions/'+encodeURIComponent(pending.payload.idempotency_key));if(newerPendingComposer(pending)){submission.accepted(state.user.id,pending.payload.idempotency_key);await restorePendingComposer(pending);return;}const slot=pendingDraftSlot(pending);submission.clearDraft(state.user.id,slot);submission.clear();await loadFamily(unwrapFamily(recovered).answer_family_id);return;}catch(error){if(error.status!==404)throw error;if(await restorePendingComposer(pending))textStatus('global-status','submission_unconfirmed');return;}}
   if(answer){await loadFamily(answer);if(comparison&&!beta())await loadComparison(comparison);}else restoreComposer();
   try{const draft=JSON.parse(sessionStorage.getItem(loginDraftKey));sessionStorage.removeItem(loginDraftKey);if(draft?.owner===state.user.id&&typeof draft.question==='string'&&!answer&&!$('question').value)$('question').value=draft.question;}catch{}
 }
@@ -350,11 +360,11 @@ async function submitQuestion(button,overrides={}) {
   if(state.submitting)return;
   if(pendingStates.has(jobState(state.family?.short))&&state.family&&!overrides.parent_run_id){textStatus('global-status','question_pending');return;}
   const question=overrides.question||$('question').value;if(!question.trim()){textStatus('global-status','question_required');$('question').focus();return;}
-  saveComposer();const request=++submissionRequest,boot=state.boot,owner=state.user.id,draftFamily=state.composerFamily,draftSlot=state.composerReady?draftFamily:'opening';
+  saveComposer();const request=++submissionRequest,boot=state.boot,owner=state.user.id,draftFamily=state.composerFamily,draftSlot=state.composerReady?state.composerSlot:'opening',originFamily=state.family,submittedComposer=submission.readDraft(state.user.id,draftSlot);
   const current=()=>request===submissionRequest&&boot===state.boot&&owner===state.user?.id;
   state.submitting=true;
   try{await action(button,async()=>{
-    familyRequest++;textStatus('global-status','');clearFeedbackContext();resetMatches();renderCommaSuggestion();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;setURL(true);
+    familyRequest++;textStatus('global-status','');clearFeedbackContext();resetMatches();renderCommaSuggestion();for(const stop of state.polling.values())stop();state.polling.clear();state.job=null;state.longOpen=false;state.selection=null;state.comparison=null;state.family=null;$('comparison').hidden=true;$('answer-card').hidden=true;
     const locale=overrides.locale||$('answer-locale').value;
     let payload={question,locale,interface_locale:state.locale,input_language:['text_check','morphology','reference'].includes($('task').value)&&['sl','it'].includes($('input-language').value)?$('input-language').value:'und',model:overrides.model||$('model').value,task:$('task').value};
     if(beta()){delete payload.model;payload.task='reference';}
@@ -362,25 +372,33 @@ async function submitQuestion(button,overrides={}) {
     if(state.followup){payload.parent_run_id=state.followup.run_id;payload.parent_relation='followup';}
     if(overrides.parent_run_id){payload.parent_run_id=overrides.parent_run_id;payload.parent_relation=overrides.parent_relation;}
     if(overrides.context)payload.context=overrides.context;
-    payload=submission.prepare(state.user.id,payload,()=>crypto.randomUUID(),draftFamily);
+    const previousKey=submission.read(owner)?.payload.idempotency_key;
+    payload=submission.prepare(state.user.id,payload,()=>crypto.randomUUID(),draftFamily,draftSlot,submittedComposer);
+    setURL(previousKey!==payload.idempotency_key,previousKey!==payload.idempotency_key);
     textStatus('job-message','checking_request');$('job-state').hidden=false;$('empty-state').hidden=true;
     try{
       const result=await api('/families',{method:'POST',body:payload});
-      if(submission.read(owner)?.payload.idempotency_key===payload.idempotency_key)submission.clear();
+      const draftChanged=JSON.stringify(submission.readDraft(owner,draftSlot))!==JSON.stringify(submittedComposer);
+      const clarification=result.status==='clarification_required';
+      if(clarification)submission.clarify(owner,payload.idempotency_key,result.clarification);
+      else if(draftChanged)submission.accepted(owner,payload.idempotency_key);
+      else if(submission.read(owner)?.payload.idempotency_key===payload.idempotency_key)submission.clear();
       if(!current())return;
-      const laterDraft=$('question').value!==question?submission.readDraft(owner,draftSlot):null;
+      if(draftChanged){state.job=null;$('job-state').hidden=true;if(originFamily)renderFamily(originFamily);else if(draftFamily)await loadFamily(draftFamily);else{state.composerReady=true;state.composerSlot=draftSlot;state.earlyComposerEdited=false;$('answer-card').hidden=true;$('empty-state').hidden=false;}return;}
+      if(clarification){showClarification(result.clarification);return;}
       submission.clearDraft(owner,draftSlot);state.followup=null;$('followup-context').hidden=true;
-      if(result.status==='clarification_required'){showClarification(result.clarification);return;}
-      const family=unwrapFamily(result);if(laterDraft)submission.saveDraft(owner,family.answer_family_id,{...laterDraft,followup:null});restoreComposer(family);renderFamily(family);const job=result.job;const id=job?.job_id||job?.id||state.family?.short?.job_id;if(id)pollJob(id,familyId(),'short');else $('job-state').hidden=true;
+      const family=unwrapFamily(result);restoreComposer(family);renderFamily(family);const job=result.job;const id=job?.job_id||job?.id||state.family?.short?.job_id;if(id)pollJob(id,familyId(),'short');else $('job-state').hidden=true;
     }catch(error){
+      const languageClarification=error.code==='input_language_required'?{code:error.code,fields:['input_language']}:null;
+      if(languageClarification)submission.clarify(owner,payload.idempotency_key,languageClarification);
       if(!current())return;
       $('job-state').hidden=true;
-      if(error.code==='input_language_required'){showClarification({code:error.code,fields:['input_language']});return;}
+      if(languageClarification){if(JSON.stringify(submission.readDraft(owner,draftSlot))===JSON.stringify(submittedComposer))showClarification(languageClarification);return;}
       if(error.code==='generation_waiting_capacity'){clearClarification();$('capacity-state').hidden=beta();textStatus(beta()?'global-status':'capacity-message','generation_waiting_capacity');return;}
       if(error.status&&error.status<500&&error.status!==401)submission.clear();
       throw error;
     }
-  });}finally{if(current())state.submitting=false;if(state.submitting||pendingStates.has(jobState(state.family?.short)))$('ask-button').disabled=true;}
+  });}finally{if(current())state.submitting=false;if(state.submitting||(state.family?.short&&pendingStates.has(jobState(state.family.short))))$('ask-button').disabled=true;}
 }
 function expand() {
   // Source browsing never creates another answer or generation request.
@@ -506,8 +524,8 @@ function bind() {
   $('logout-button').addEventListener('click',event=>action(event.currentTarget,async()=>{await api('/logout',{method:'POST'});submission.clear();submission.clearDrafts(state.user?.id);signInResume=null;try{sessionStorage.removeItem(loginDraftKey);}catch{}resetPrivate();await bootstrap();}));
   $('question-form').addEventListener('submit',event=>{event.preventDefault();submitQuestion(event.submitter);});$('question').addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();$('question-form').requestSubmit($('ask-button'));}});
   $('question').addEventListener('input',()=>{$('focus').value='';clearClarification();saveComposer(true);});
-  for(const id of ['focus','input-language','answer-locale','task','model'])$(id).addEventListener('change',saveComposer);
-  $('task').addEventListener('change',()=>{clearClarification();taskControls();});$('model').addEventListener('change',()=>{modelControls();capacityControls();});$('answer-locale').addEventListener('change',()=>{state.answerLocaleExplicit=true;});taskControls();
+  for(const id of ['focus','input-language','task','model'])$(id).addEventListener('change',()=>saveComposer(true));
+  $('task').addEventListener('change',()=>{clearClarification();taskControls();});$('model').addEventListener('change',()=>{modelControls();capacityControls();});$('answer-locale').addEventListener('change',()=>{state.answerLocaleExplicit=true;saveComposer(true);});taskControls();
   $('capacity-models').addEventListener('click',()=>{$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');$('model').focus();});$('capacity-sources').addEventListener('click',()=>{$('task').value='source_search';clearClarification();taskControls();$('ask-button').focus();});
   $('capacity-tools').addEventListener('click',()=>{$('task').value='terminology';clearClarification();taskControls();$('question').focus();});
   $('matches-source').addEventListener('change',renderMatches);$('matches-more').addEventListener('click',()=>loadMatches(familyId(),true));

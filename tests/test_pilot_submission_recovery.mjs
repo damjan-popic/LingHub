@@ -52,3 +52,20 @@ test('pending journal retains its known composer key without changing the API pa
   assert.equal(journal.read('owner').draft_family,'owned-family');assert.equal('draft_family'in sent,false);
   assert.deepEqual(journal.prepare('owner',payload,()=> 'unused','owned-family'),sent);
 });
+test('submitted composer snapshot and opening slot stay local; accepted deliberate repeat gets a fresh key',()=>{
+  const rows=new Map(),storage={getItem:k=>rows.get(k),setItem:(k,v)=>rows.set(k,v),removeItem:k=>rows.delete(k)};
+  const journal=submissionJournal(storage,'fixture'),payload={question:'Early question'},composer={question:'Early question',answer_locale:'it',model:'auto',followup:null};
+  let next=0;const uuid=()=> 'request-'+(++next),sent=journal.prepare('owner',payload,uuid,null,'opening',composer);
+  assert.equal(journal.read('owner').draft_family,null);assert.equal(journal.read('owner').draft_slot,'opening');assert.deepEqual(journal.read('owner').composer,composer);
+  assert.equal('composer'in sent,false);assert.equal('draft_slot'in sent,false);assert.equal(journal.read('other'),null);
+  assert.equal(journal.prepare('owner',payload,uuid,null,'opening',composer).idempotency_key,sent.idempotency_key);
+  journal.accepted('owner',sent.idempotency_key);assert.notEqual(journal.prepare('owner',payload,uuid,null,'opening',composer).idempotency_key,sent.idempotency_key);
+});
+test('clarification retains owned context and changes key only when its request changes',()=>{
+  const rows=new Map(),storage={getItem:k=>rows.get(k),setItem:(k,v)=>rows.set(k,v),removeItem:k=>rows.delete(k)},journal=submissionJournal(storage,'fixture');
+  let next=0;const uuid=()=> 'request-'+(++next),payload={question:'Owned follow-up',parent_run_id:'owned-run',parent_relation:'followup'},sent=journal.prepare('owner',payload,uuid,'owned-family','owned-family',{question:payload.question,followup:{run_id:'owned-run'}});
+  journal.clarify('other',sent.idempotency_key,{code:'focus_required',fields:['focus']});assert.equal(journal.read('owner').clarification,undefined);
+  journal.clarify('owner',sent.idempotency_key,{code:'focus_required',fields:['focus']});assert.equal(journal.read('owner').clarification.code,'focus_required');
+  assert.equal(journal.prepare('owner',payload,uuid).idempotency_key,sent.idempotency_key);
+  assert.notEqual(journal.prepare('owner',{...payload,focus:'specified'},uuid).idempotency_key,sent.idempotency_key);
+});

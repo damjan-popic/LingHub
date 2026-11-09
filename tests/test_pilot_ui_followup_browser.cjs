@@ -18,7 +18,7 @@ async function setup({legacy=false,initialDelay=null,answer=true,presetNewDraft=
  if(initialDelay)controls.initialHold=new Promise(resolve=>{controls.initialRelease=resolve;});
  page.on('pageerror',e=>report.errors.push(e.message));
  await page.addInitScript(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedText=text;}}}));
- if(presetNewDraft)await page.addInitScript(question=>sessionStorage.setItem('klikai::composer-drafts:synthetic',JSON.stringify({new:{question,followup:null}})),presetNewDraft);
+ if(presetNewDraft)await page.addInitScript(question=>{if(!sessionStorage.getItem('klikai::composer-drafts:synthetic'))sessionStorage.setItem('klikai::composer-drafts:synthetic',JSON.stringify({new:{question,followup:null}}));},presetNewDraft);
  await context.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url());if(url.origin!==origin)throw Error('Unexpected external request '+url.origin);
   const json=value=>route.fulfill({contentType:'application/json',body:JSON.stringify(value)});
@@ -32,7 +32,7 @@ async function setup({legacy=false,initialDelay=null,answer=true,presetNewDraft=
   if(api==='/feedback')return json({feedback:[]});
   if(api.startsWith('/runs/')&&api.endsWith('/feedback'))return json({events:[]});
   if(api==='/families'&&req.method()==='GET')return controls.expired?route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:{code:'unauthorized'}})}):json({families:[a,b]});
-  if(api==='/families'&&req.method()==='POST'){if(controls.losePost)return route.abort('failed');const held=controls.hold;if(held)await held;const payload=JSON.parse(req.postData());return json({family:family('new',payload.question)});}
+  if(api==='/families'&&req.method()==='POST'){if(controls.losePost)return route.abort('failed');const held=controls.hold;if(held)await held;if(controls.inputLanguageRequired)return route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'input_language_required'}})});if(controls.clarify)return json({status:'clarification_required',clarification:{code:'focus_required',fields:['focus']}});const payload=JSON.parse(req.postData());return json({family:family('new',payload.question)});}
   if(api.startsWith('/submissions/'))return controls.submissionMissing?route.fulfill({status:404,contentType:'application/json',body:'{}'}):json({family:family('new','Recovered exact submitted question')});
   if(api==='/families/new')return json(family('new','Recovered exact submitted question'));
   if(api==='/families/a')return json(savedA);
@@ -43,7 +43,7 @@ async function setup({legacy=false,initialDelay=null,answer=true,presetNewDraft=
   if(api.includes('/matches'))return json({items:[],returned_count:0,next_offset:null,usage_final:true});
   throw Error('Unexpected synthetic API '+api);
  });
- await page.goto(origin+(answer?'/?answer=a':'/'));await page.locator(initialDelay?'#app-view':'#followup-button').waitFor({state:'visible'});
+ await page.goto(origin+(answer?'/?answer=a':'/'));if(initialDelay)await page.locator('#app-view').waitFor({state:'visible'});else if(answer)await page.locator('#followup-button').waitFor({state:'visible'});else await page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);
  return {context,page,calls,controls};
 }
 async function followup(f,text='Katere so njegove sopomenke?'){
@@ -80,6 +80,74 @@ async function followup(f,text='Katere so njegove sopomenke?'){
   report.checks.push({case:'early-saved-answer-edit-preserves-independent-new-question-draft',status:'PASS'});await f.context.close();
  }
  {
+  const f=await setup({initialDelay:'/feedback',answer:false,presetNewDraft:'Independent older New draft'});f.controls.losePost=true;f.controls.submissionMissing=true;
+  await f.page.locator('#question').fill('Actual early submitted question');await f.page.locator('#ask-button').click();
+  await f.page.waitForFunction(()=>document.querySelector('#global-status').textContent.length>0);assert.equal(await f.page.locator('#ask-button').isDisabled(),false);const first=JSON.parse(f.calls.find(call=>call.api==='/families'&&call.method==='POST').body);
+  f.controls.initialRelease();await f.page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);await f.page.reload();await f.page.waitForFunction(()=>globalThis.fixtureBootstrapComplete===true);
+  assert.equal(await f.page.locator('#question').inputValue(),'Actual early submitted question');
+  assert.equal(await f.page.evaluate(()=>JSON.parse(sessionStorage.getItem('klikai::composer-drafts:synthetic')).new.question),'Independent older New draft');
+  assert.equal(f.calls.some(call=>call.api==='/families/opening'),false);
+  f.controls.losePost=false;await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');
+  const retried=JSON.parse(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').at(-1).body);assert.equal(retried.question,first.question);assert.equal(retried.idempotency_key,first.idempotency_key);
+  assert.equal(await f.page.evaluate(()=>JSON.parse(sessionStorage.getItem('klikai::composer-drafts:synthetic')).new.question),'Independent older New draft');
+  report.checks.push({case:'early-lost-response-retries-opening-draft-without-consuming-independent-new-draft',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await followup(f,'First submitted follow-up');f.controls.hold=new Promise(resolve=>{f.controls.release=resolve;});await f.page.locator('#ask-button').click();
+  await f.page.locator('#question').fill('Newer unsent follow-up');await f.page.evaluate(()=>{for(const[id,value]of [['answer-locale','it'],['input-language','sl'],['focus','newer focus']]){const n=document.getElementById(id);n.value=value;n.dispatchEvent(new Event('change',{bubbles:true}));}});
+  const finished=f.page.waitForResponse(response=>response.request().method()==='POST'&&response.url()===origin+'/api/pilot/families');f.controls.release();await(await finished).finished();await f.page.waitForTimeout(100);
+  assert.equal(await f.page.locator('#question').inputValue(),'Newer unsent follow-up');assert.equal(await f.page.locator('#followup-context').isHidden(),false);assert.equal(f.page.url(),origin+'/?answer=a');
+  await f.page.reload();await f.page.locator('#followup-button').waitFor({state:'visible'});assert.equal(await f.page.locator('#question').inputValue(),'Newer unsent follow-up');
+  assert.equal(await f.page.locator('#answer-locale').inputValue(),'it');assert.equal(await f.page.locator('#focus').inputValue(),'newer focus');assert.equal(await f.page.locator('#input-language').inputValue(),'sl');
+  await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');const bodies=f.calls.filter(call=>call.api==='/families'&&call.method==='POST').map(call=>JSON.parse(call.body));
+  assert.equal(bodies[1].question,'Newer unsent follow-up');assert.equal(bodies[1].parent_run_id,'run-a');assert.equal(bodies[1].locale,'it');assert.equal(bodies[1].focus,'newer focus');assert.notEqual(bodies[1].idempotency_key,bodies[0].idempotency_key);
+  report.checks.push({case:'accepted-q1-preserves-newer-q2-settings-and-original-explicit-parent-through-reload',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await followup(f,'Follow-up needing clarification');await f.page.evaluate(()=>{const n=document.getElementById('answer-locale');n.value='it';n.dispatchEvent(new Event('change',{bubbles:true}));});f.controls.clarify=true;
+  await f.page.locator('#ask-button').click();await f.page.locator('#clarification').waitFor({state:'visible'});await f.page.reload();await f.page.locator('#clarification').waitFor({state:'visible'});
+  assert.equal(await f.page.locator('#question').inputValue(),'Follow-up needing clarification');assert.equal(await f.page.locator('#followup-context').isHidden(),false);assert.equal(await f.page.locator('#answer-locale').inputValue(),'it');
+  f.controls.expired=true;await f.page.locator('#history-toggle').click();await f.page.locator('#login-view').waitFor({state:'visible'});await f.page.locator('#username').fill('fixture');await f.page.locator('#password').fill('synthetic-only-password');await f.page.locator('#login-form button[type=submit]').click();await f.page.locator('#clarification').waitFor({state:'visible'});
+  assert.equal(await f.page.locator('#question').inputValue(),'Follow-up needing clarification');assert.equal(await f.page.locator('#followup-context').isHidden(),false);assert.equal(await f.page.locator('#answer-locale').inputValue(),'it');
+  await f.page.locator('#focus').fill('clarified focus');f.controls.clarify=false;await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');
+  const bodies=f.calls.filter(call=>call.api==='/families'&&call.method==='POST').map(call=>JSON.parse(call.body));assert.equal(bodies[1].parent_run_id,'run-a');assert.equal(bodies[1].locale,'it');assert.equal(bodies[1].focus,'clarified focus');assert.notEqual(bodies[1].idempotency_key,bodies[0].idempotency_key);
+  report.checks.push({case:'clarification-retains-owned-followup-and-settings-through-reload-and-signin',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await followup(f,'Clarification workspace question');f.controls.clarify=true;await f.page.locator('#ask-button').click();await f.page.locator('#clarification').waitFor({state:'visible'});
+  await f.page.locator('#focus').fill('resolved focus');f.controls.clarify=false;f.controls.hold=new Promise(resolve=>{f.controls.release=resolve;});await f.page.locator('#ask-button').click();
+  await f.page.locator('#question').fill('Newer question while clarification retry is pending');const finished=f.page.waitForResponse(response=>response.request().method()==='POST'&&JSON.parse(response.request().postData()).focus==='resolved focus');
+  f.controls.release();await(await finished).finished();await f.page.waitForURL('**/?answer=a');assert.equal(await f.page.locator('#followup-context').isHidden(),false);
+  await f.page.reload();await f.page.locator('#followup-button').waitFor({state:'visible'});assert.equal(await f.page.locator('#question').inputValue(),'Newer question while clarification retry is pending');assert.equal(await f.page.locator('#followup-context').isHidden(),false);
+  await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');const sent=JSON.parse(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').at(-1).body);assert.equal(sent.parent_run_id,'run-a');
+  report.checks.push({case:'newer-composer-keeps-parent-from-clarification-workspace-with-no-displayed-family',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await followup(f,'Follow-up needing input language');f.controls.inputLanguageRequired=true;await f.page.locator('#ask-button').click();await f.page.locator('#clarification').waitFor({state:'visible'});
+  await f.page.reload();await f.page.locator('#clarification').waitFor({state:'visible'});assert.equal(await f.page.locator('#question').inputValue(),'Follow-up needing input language');assert.equal(await f.page.locator('#followup-context').isHidden(),false);
+  f.controls.inputLanguageRequired=false;await f.page.locator('#input-language').selectOption('sl');await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');
+  const sent=JSON.parse(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').at(-1).body);assert.equal(sent.input_language,'sl');assert.equal(sent.parent_run_id,'run-a');
+  report.checks.push({case:'input-language-error-uses-same-owned-clarification-recovery',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await followup(f,'Same text with newer settings');f.controls.losePost=true;await f.page.locator('#ask-button').click();await f.page.waitForFunction(()=>document.querySelector('#global-status').textContent.length>0);
+  const first=JSON.parse(f.calls.find(call=>call.api==='/families'&&call.method==='POST').body);await f.page.evaluate(()=>{const n=document.getElementById('answer-locale');n.value='it';n.dispatchEvent(new Event('change',{bubbles:true}));});
+  await f.page.reload();await f.page.locator('#followup-button').waitFor({state:'visible'});assert.equal(f.page.url(),origin+'/?answer=a');assert.equal(await f.page.locator('#question').inputValue(),first.question);assert.equal(await f.page.locator('#answer-locale').inputValue(),'it');assert.equal(await f.page.locator('#followup-context').isHidden(),false);
+  f.controls.losePost=false;await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');const retried=JSON.parse(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').at(-1).body);
+  assert.equal(retried.parent_run_id,'run-a');assert.equal(retried.locale,'it');assert.notEqual(retried.idempotency_key,first.idempotency_key);
+  report.checks.push({case:'accepted-lost-response-keeps-newer-settings-for-same-question-and-parent',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup({answer:false});await f.page.locator('#question').fill('First real request from base');await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');await f.page.goBack();await f.page.waitForURL(origin+'/');
+  assert.equal(await f.page.locator('#answer-card').isHidden(),true);assert.equal(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').length,1);
+  report.checks.push({case:'first-base-submission-keeps-browser-back-entry-without-regeneration',status:'PASS'});await f.context.close();
+ }
+ {
+  const f=await setup();await f.page.evaluate(()=>{const n=document.getElementById('answer-locale');n.value='it';n.dispatchEvent(new Event('change',{bubbles:true}));});await f.page.locator('#history-toggle').click();await f.page.locator('#history-list button').filter({hasText:b.question}).click();await f.page.waitForURL('**/?answer=b');await f.page.goBack();await f.page.waitForURL('**/?answer=a');
+  await f.page.reload();await f.page.locator('#followup-button').waitFor({state:'visible'});assert.equal(await f.page.locator('#question').inputValue(),a.question);assert.equal(await f.page.locator('#answer-locale').inputValue(),'it');assert.equal(await f.page.locator('html').getAttribute('lang'),'sl');
+  report.checks.push({case:'explicit-answer-language-persists-for-unchanged-question-and-sl-interface',status:'PASS'});await f.context.close();
+ }
+ {
   const f=await setup(),before=await followup(f);await f.page.locator('#history-toggle').click();
   await f.page.locator('#history-list button').filter({hasText:b.question}).click();await f.page.waitForURL('**/?answer=b');
   const focus=await f.page.evaluate(()=>document.activeElement.id);assert.equal(focus,'short-heading');
@@ -112,7 +180,7 @@ async function followup(f,text='Katere so njegove sopomenke?'){
   await f.page.reload();await f.page.locator('#followup-button').waitFor({state:'visible'});
   if(missing){
    assert.equal(await f.page.locator('#question').inputValue(),'Submitted follow-up with lost response');assert.equal(await f.page.locator('#followup-context').isHidden(),false);
-   f.controls.losePost=false;await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');
+   const historyLength=await f.page.evaluate(()=>history.length);f.controls.losePost=false;await f.page.locator('#ask-button').click();await f.page.waitForURL('**/?answer=new');assert.equal(await f.page.evaluate(()=>history.length),historyLength);
    const retried=JSON.parse(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').at(-1).body);
    assert.equal(retried.idempotency_key,first.idempotency_key);assert.equal(retried.parent_run_id,'run-a');
   }else{assert.equal(f.page.url(),origin+'/?answer=new');assert.equal(f.calls.filter(call=>call.api==='/families'&&call.method==='POST').length,1);}

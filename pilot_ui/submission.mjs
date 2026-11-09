@@ -19,14 +19,16 @@ export function submissionJournal(storage, prefix) {
           typeof value.payload.question==='string' ? value : null;
       } catch {return null;}
     },
-    prepare(owner, payload, uuid, draftFamily=undefined) {
+    prepare(owner, payload, uuid, draftFamily=undefined, draftSlot=undefined, composer=undefined) {
       const prior=this.read(owner);
       const plain=value=>JSON.stringify(Object.fromEntries(Object.entries(value).filter(([k])=>k!=='idempotency_key').sort(([a],[b])=>a.localeCompare(b))));
-      if(prior && plain(prior.payload)===plain(payload))return prior.payload;
+      if(prior && !prior.accepted && plain(prior.payload)===plain(payload))return prior.payload;
       const body={...payload,idempotency_key:uuid()};
-      try {storage.setItem(key,JSON.stringify({owner,payload:body,...(draftFamily===undefined?{}:{draft_family:draftFamily})}));} catch {}
+      try {storage.setItem(key,JSON.stringify({owner,payload:body,...(draftFamily===undefined?{}:{draft_family:draftFamily}),...(draftSlot===undefined?{}:{draft_slot:draftSlot}),...(composer===undefined?{}:{composer})}));} catch {}
       return body;
     },
+    clarify(owner,id,clarification){const prior=this.read(owner);if(prior?.payload.idempotency_key!==id)return;try{storage.setItem(key,JSON.stringify({...prior,clarification}));}catch{}},
+    accepted(owner,id){const prior=this.read(owner);if(prior?.payload.idempotency_key!==id)return;try{storage.setItem(key,JSON.stringify({...prior,accepted:true}));}catch{}},
     clear(){try {storage.removeItem(key);} catch {}},
   };
 }

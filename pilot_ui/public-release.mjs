@@ -1,2 +1,2 @@
 // Immutable publication metadata; stamped by the ordinary release preparation.
-export const publicRelease = Object.freeze({"version":"0.5.13","date":"2026-11-09"});
+export const publicRelease = Object.freeze({"version":"0.5.14","date":"2026-11-10"});

@@ -16,6 +16,7 @@ ROUTES={
  ('POST','morphology/inflect'):('/v1/morphology/inflect','lexical'),
  ('GET','synonyms'):('/v1/resources/thesaurus','lexical'),('GET','collocations'):('/v1/resources/collocations','lexical')}
 PROFILES={'stable':'linghub_lexical_stable_v1','experimental':'klikai_experimental_v1'}
+PAGE_LIMITS={'synonyms':20,'collocations':500}
 
 def install(app,config):
  clients_path=config.get('linghub_clients_file');base=config.get('linghub_url')
@@ -53,8 +54,12 @@ def install(app,config):
   try:
    params=dict(request.query_params);selected=params.pop('profile','stable')
    if operation in {'synonyms','collocations'}:
-    params.setdefault('limit','8')
-    if not params['limit'].isdigit()or not 1<=int(params['limit'])<=20:return response({'error':'record_bound'},422)
+    try:limit=int(params.get('limit','8'));offset=int(params.get('offset','0'))
+    except ValueError:return response({'error':'record_bound'},422)
+    maximum=PAGE_LIMITS[operation]
+    if not 1<=limit<=maximum:return response({'error':'record_bound'},422)
+    if not 0<=offset<=2147483647:return response({'error':'offset_bound'},422)
+    params.update(limit=str(limit),offset=str(offset));params.setdefault('include_pagination','true')
    payload=await request.json()if request.method=='POST'else None
    if payload is not None:
     if not isinstance(payload,dict):return response({'error':'object_required'},422)
@@ -75,6 +80,11 @@ def install(app,config):
       body.extend(chunk)
       if len(body)>2*1024*1024:return response({'error':'response_bound'},413)
      data=json.loads(body)
+   if operation=='capabilities'and status==200:
+    data['application_api']={'version':'1.1.0','dictionary_pagination':{
+     name:{'default_limit':8,'max_limit':maximum,'unit':'entry'if name=='synonyms'else'occurrence',
+           'max_offset':2147483647,'include_pagination_default':True}for name,maximum in PAGE_LIMITS.items()},
+     'response_bytes':2*1024*1024}
    return response(data,status)
   except (httpx.HTTPError,ValueError,TypeError):return response({'error':'linghub_unavailable','request_id':rid},503)
   finally:

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LingHub lexical API",
-    "version": "1.0.0",
-    "description": "Stable lexical-20261017-v1 and explicitly selected experimental profile. No submitted text persisted by default."
+    "version": "1.1.0",
+    "description": "Source-bound LingHub lexical API. Existing stable/experimental profile defaults and source fields are retained. Dictionary pages use explicit source-entry or occurrence units; sorting is applied to all matching collocations before paging."
   },
   "paths": {
     "/capabilities": {
@@ -303,18 +303,34 @@
             "in": "query",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 20,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 8
+            },
+            "description": "Maximum source entries per page; omitted requests retain the existing public default of8."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Zero-based entry offset in the complete matching ordered result."
+          },
+          {
+            "name": "include_pagination",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Return page metadata. False with offset0 retains the prior response shape."
           }
         ],
         "responses": {
@@ -342,7 +358,8 @@
             "applicationKey": []
           }
         ],
-        "x-required-scope": "lexical"
+        "x-required-scope": "lexical",
+        "description": "All existing source fields, grouping and IDs are retained. pagination contains unit, offset, limit, total, count_returned, has_more and next_offset. The limit and offset page source entries, not flattened synonyms. returned_senses/returned_relations describe the returned nested groups, while existing count_senses/count_relations remain original full-lookup counts. truncated_within_entries independently reports the existing20-sense/100-relation bounds; entry paging does not page those nested bounds. Keep the same lemma, kind, filters and sort/order when following next_offset. Responses retain the existing2MiB bound; use a smaller page if response_bound is returned."
       }
     },
     "/collocations": {
@@ -432,11 +449,11 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
               "minimum": 1,
-              "default": 20,
-              "title": "Limit"
-            }
+              "maximum": 500,
+              "default": 8
+            },
+            "description": "Maximum source collocation occurrences per page; omitted requests retain the existing public default of8."
           },
           {
             "name": "sort",
@@ -480,6 +497,28 @@
               "default": "collocation",
               "title": "Kind"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647,
+              "default": 0
+            },
+            "description": "Zero-based occurrence offset in the complete matching ordered result."
+          },
+          {
+            "name": "include_pagination",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Return page metadata. False with offset0 retains the prior response shape."
           }
         ],
         "responses": {
@@ -507,7 +546,8 @@
             "applicationKey": []
           }
         ],
-        "x-required-scope": "lexical"
+        "x-required-scope": "lexical",
+        "description": "All existing source fields, grouping and IDs are retained. pagination contains unit, offset, limit, total, count_returned, has_more and next_offset. For collocations, total counts all records matching the current filters and source_total preserves the earlier pre-filter count_total. Sort/order apply before SQL pagination; missing measurements remain after measured values. Keep the same lemma, kind, filters and sort/order when following next_offset. Responses retain the existing2MiB bound; use a smaller page if response_bound is returned."
       }
     }
   },

@@ -55,11 +55,15 @@ class CompiledCollocations:
     def get_collocations_for_lemma(self, lemma: str, *, min_freq: int | None = 1,
             min_logdice: float | None = None, structure_id: int | None = None,
             status: str | None = None, limit: int = 50, sort: str = 'freq', order: str = 'desc',
-            kind: str = 'collocation') -> dict:
+            kind: str = 'collocation', offset: int = 0, include_pagination: bool = False) -> dict:
         if sort not in ('freq', 'logdice') or order not in ('asc', 'desc'):
             raise ValueError('Invalid collocation ordering')
         key = normalize(lemma)
         limit = min(500, max(1, int(limit)))
+        offset = int(offset)
+        if offset < 0:
+            raise ValueError('Collocation offset must be nonnegative')
+        paged = include_pagination or offset > 0
         if kind not in ('collocation', 'grammaticalCombination', 'all'):
             raise ValueError('Invalid source occurrence kind')
         clauses, params = ['o.headword_key=?'], [key]
@@ -91,11 +95,16 @@ class CompiledCollocations:
         # numeric and missing primary/secondary values in an unranked tail.
         query += (f' ORDER BY ({first} IS NULL) ASC, {first} {direction}, '
                   f'({second} IS NULL) ASC, {second} {direction}, o.surface {direction}, o.id ASC LIMIT ?')
+        page_params = [*params, limit]
+        if paged:
+            query += ' OFFSET ?'
+            page_params.append(offset)
         with closing(self.connect()) as db:
             total = db.execute('SELECT count(*) FROM occurrences WHERE headword_key=?' + (' AND kind=?' if kind != 'all' else ''),
                 (key, kind) if kind != 'all' else (key,)).fetchone()[0]
             head = db.execute('SELECT headword FROM entries WHERE headword_key=? ORDER BY id LIMIT 1', (key,)).fetchone()
-            rows = db.execute(query, [*params, limit]).fetchall()
+            filtered_count = db.execute('SELECT count(*) FROM occurrences o WHERE ' + ' AND '.join(clauses), params).fetchone()[0] if paged else None
+            rows = db.execute(query, page_params).fetchall()
             components = defaultdict(list)
             if rows:
                 placeholders = ','.join('?' for _ in rows)
@@ -125,7 +134,7 @@ class CompiledCollocations:
         measurement = 'frequency' if sort == 'freq' else 'logDice'
         known = sum(record[measurement] is not None for record in records)
         missing = len(records) - known
-        return {'lemma': head[0] if head else lemma.strip(), 'lemma_key': key,
+        result = {'lemma': head[0] if head else lemma.strip(), 'lemma_key': key,
                 'count_total': total, 'count_returned': len(records), 'filters': {
                     'min_freq': effective_frequency, 'min_logdice': min_logdice, 'structure_id': structure_id,
                     'status': status, 'limit': limit, 'sort': sort, 'order': order},
@@ -137,5 +146,11 @@ class CompiledCollocations:
                         'status': 'empty' if not records else 'unranked' if not known else 'mixed' if missing else 'ranked'},
                     'component_order': 'XML document order; @num preserved separately', 'deduplicated': False,
                     'kind_filter': kind}}
+        if paged:
+            more = offset + len(records) < filtered_count
+            result['pagination'] = {'unit': 'occurrence', 'offset': offset, 'limit': limit,
+                'total': filtered_count, 'source_total': total, 'count_returned': len(records),
+                'has_more': more, 'next_offset': offset + len(records) if more else None}
+        return result
 
     lookup = get_collocations_for_lemma

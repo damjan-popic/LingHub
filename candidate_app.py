@@ -182,9 +182,11 @@ def legacy_synonyms(request: Request, lemma: str = Query(..., max_length=256)):
 
 
 @app.get('/v1/resources/thesaurus')
-def thesaurus_evidence(request: Request, lemma: str = Query(..., max_length=256), limit: int | None = Query(None,ge=1,le=20)):
-    if limit is not None:
-        return bounded_thesaurus(request.app.state.synonyms,clean_lemma(lemma),limit,normalized=False)
+def thesaurus_evidence(request: Request, lemma: str = Query(..., max_length=256), limit: int | None = Query(None,ge=1,le=20),
+                      offset: int = Query(0,ge=0,le=2147483647), include_pagination: bool = False):
+    if limit is not None or offset or include_pagination:
+        return bounded_thesaurus(request.app.state.synonyms,clean_lemma(lemma),limit or 20,normalized=False,
+                                 offset=offset,include_pagination=include_pagination)
     return request.app.state.synonyms.lookup_evidence(clean_lemma(lemma))
 
 
@@ -212,9 +214,11 @@ def collocation_evidence(request: Request, lemma: str = Query(..., max_length=25
                          structure_id: int | None = None, status: str | None = Query(None, max_length=64),
                          limit: int = Query(20, ge=1, le=500), sort: Literal['freq','logdice'] = 'freq',
                          order: Literal['desc','asc'] = 'desc',
-                         kind: Literal['collocation','grammaticalCombination','all'] = 'collocation'):
+                         kind: Literal['collocation','grammaticalCombination','all'] = 'collocation',
+                         offset: int = Query(0,ge=0,le=2147483647), include_pagination: bool = False):
     return collocation_lookup(request, lemma, min_freq=min_freq, min_logdice=min_logdice,
-                               structure_id=structure_id, status=status, limit=limit, sort=sort, order=order, kind=kind)
+                               structure_id=structure_id, status=status, limit=limit, sort=sort, order=order, kind=kind,
+                               offset=offset,include_pagination=include_pagination)
 
 
 class InflectedLookup(BaseModel):

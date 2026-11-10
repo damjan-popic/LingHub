@@ -1,5 +1,9 @@
 # Reusable local LingHub platform
 
+For the authenticated public dictionary API, larger collocation pages and
+pagination, see [Application API](docs/APPLICATION_API.md). The local contracts
+below retain their existing defaults.
+
 The versioned API uses the adopted CJVT and morphology SQLite releases. It does
 not rebuild lexicons, import KLIKai database/settings modules, perform synonym
 expansion in terminology retrieval, or select CLASSLA as the default. Source

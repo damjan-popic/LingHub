@@ -1,5 +1,6 @@
 """Versioned reusable LingHub APIs. Selection offsets refer to original code points."""
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
@@ -258,17 +259,26 @@ def part(status,data=None,provenance=None,truncated=False,reason=None):
     return {'status':status,'data':data,'provenance':provenance or {},'truncated':truncated,**({'reason':reason} if reason else {})}
 
 
-def bounded_thesaurus(reader,lemma,limit,normalized=True):
-    data=reader.lookup_evidence(lemma,normalized=normalized)
-    truncated=False
-    entries=data['entries'][:limit]
-    truncated |= len(entries)<len(data['entries'])
+def bounded_thesaurus(reader,lemma,limit,normalized=True,offset=0,include_pagination=False):
+    source=reader.lookup_evidence(lemma,normalized=normalized)
+    data=dict(source)
+    if offset<0: raise ValueError('Synonym entry offset must be nonnegative')
+    total=len(source['entries']);within=False
+    entries=deepcopy(source['entries'][offset:offset+limit])
+    truncated=len(entries)<total
     for entry in entries:
-        senses=entry['senses'][:20]; truncated |= len(senses)<len(entry['senses']); entry['senses']=senses
+        senses=entry['senses'][:20]; within |= len(senses)<len(entry['senses']); entry['senses']=senses
         for sense in senses:
-            relations=sense['relations'][:100]; truncated |= len(relations)<len(sense['relations']); sense['relations']=relations
+            relations=sense['relations'][:100]; within |= len(relations)<len(sense['relations']); sense['relations']=relations
             sense['namespaced_id']='cjvt-thesaurus:2.2:'+sense['sense_id']
-    data['entries']=entries;data['truncated']=bool(truncated)
+    data['entries']=entries;data['truncated']=bool(truncated or within)
+    if include_pagination or offset:
+        more=offset+len(entries)<total
+        data['pagination']={'unit':'entry','offset':offset,'limit':limit,'total':total,
+            'count_returned':len(entries),'has_more':more,'next_offset':offset+len(entries)if more else None,
+            'returned_senses':sum(len(entry['senses'])for entry in entries),
+            'returned_relations':sum(len(sense['relations'])for entry in entries for sense in entry['senses']),
+            'truncated_within_entries':bool(within)}
     return data
 
 

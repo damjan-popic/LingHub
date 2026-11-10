@@ -1333,6 +1333,9 @@ def fallback(bundle, status, elapsed=0.0, error=None):
     elif code == 'incomplete_source':
         message = ('Il testo completo delle fonti non è disponibile. Puoi consultare i risultati trovati.' if it else
                    'Celotno besedilo virov ni na voljo. Pregledate lahko najdene zadetke.')
+    elif code == 'complete_dictionary_alternatives_exceed_selected_input':
+        message = ('Non è stato possibile includere tutti i dati delle voci del dizionario nella preparazione della risposta. Puoi consultare le fonti salvate e le tabelle delle forme disponibili.' if it else
+                   'V pripravo odgovora ni bilo mogoče vključiti vseh podatkov slovarskih iztočnic. Pregledate lahko shranjene vire in razpoložljive preglednice oblik.')
     return {'status': 'no_hit' if status == 'no_support' else 'source_only', 'answer_kind': 'source_only',
             'generation_status': 'not_generated', 'short_answer': message, 'answer_md': message,
             'display_blocks': [{'block_id': 'unified-status', 'text': message}], 'evidence': [], 'source_badges': [],
@@ -1351,6 +1354,12 @@ def undelivered_reason(result):
     if status in {'invalid_composition_envelope', 'all_claims_withheld'}:
         return 'failed', {'error_code': status, 'stage': 'composition_validation'}
     reasons = validation.get('limitation_reasons', [])
+    execution=result.get('execution')or{}
+    if ('complete_dictionary_alternatives_exceed_selected_input' in reasons
+            and execution.get('route_reason')=='pre_dispatch_evidence_limitation'
+            and execution.get('inference_performed')is False):
+        return 'failed', {'error_code': 'complete_dictionary_alternatives_exceed_selected_input',
+                          'stage': 'evidence_selection'}
     if any(reason in reasons for reason in ('empty_indexed_evidence', 'model_found_insufficient_evidence')):
         return 'no_support', {'error_code': 'insufficient_selected_evidence', 'stage': 'evidence_selection'}
     return 'failed', {'error_code': 'undelivered_answer', 'stage': 'provider_result'}

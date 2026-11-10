@@ -1457,6 +1457,47 @@ def test_complete_native_json_source_avoids_indentation_without_changing_binding
     assert historical==history_before
 
 
+@pytest.mark.parametrize('locale',['sl','it'])
+@pytest.mark.parametrize('reason',['complete_dictionary_alternatives_exceed_selected_input',
+    'unrecognized_internal_reason'])
+def test_pre_dispatch_dictionary_input_limit_is_specific_without_becoming_an_answer(locale,reason):
+    from types import SimpleNamespace
+    producer={'status':'validated','answer_kind':'source_only','generation_status':'not_generated',
+        'short_answer':'Source view only.','answer_md':'Source view only.',
+        'evidence':[],'citations':[],'claims':[],
+        'limitations':[{'code':'unsupported_inference','scope':'answer','claim_ids':[],
+            'reason':reason}],
+        'execution':{'device':'none','dtype':'none','runtime':'source_view','provider_scope':'none',
+            'selection':'auto','route_reason':'pre_dispatch_evidence_limitation','inference_performed':False},
+        'model_identity':{'model_id':'not_invoked','inference_performed':False},'provider_attempts':[]}
+    bundle={'contract':unified.CONTRACT,'locale':locale,'matches':[
+        {'evidence_id':'retained-source','source_slug':'sloleks','source':{'title':'Retained source'}}],
+        'gateway_bundle':{'synthetic':True},'retrieval':{'status':'complete'}}
+    bundle['snapshot_sha256']=digest(bundle);before=deepcopy(bundle);calls=[]
+    def request(path,payload):
+        assert path=='/internal/pilot/generate'
+        calls.append(path)
+        return deepcopy(producer)
+    result=unified.generate(SimpleNamespace(request=request),bundle,'short','auto')
+    assert len(calls)==1 and bundle==before
+    assert result['answer_kind']=='source_only'and result['generation_status']=='not_generated'
+    assert result['evidence']==[]and not result.get('citations')
+    assert result['execution']==producer['execution']and result['model_identity']==producer['model_identity']
+    assert result['provider_attempts']==[]
+    if reason=='complete_dictionary_alternatives_exceed_selected_input':
+        assert result['generation']['error_code']==reason
+        assert result['generation']['stage']=='evidence_selection'
+        assert result['generation_validation']['limitation_reasons']==[reason]
+        assert ('preglednice oblik'if locale=='sl'else'tabelle delle forme')in result['answer_md']
+    else:
+        assert result['generation']['error_code']=='undelivered_answer'
+        assert result['generation']['stage']=='provider_result'
+        assert reason not in json.dumps(result)
+    unobserved=deepcopy(producer);unobserved.pop('execution')
+    assert unified.undelivered_reason(unobserved)==(
+        'failed',{'error_code':'undelivered_answer','stage':'provider_result'})
+
+
 @pytest.mark.parametrize('language,question,context,facets,target',[
     ('sl','Kako se glasi rodilnik imena Hugo?','Popravek: množina.',
      ['genitive','plural'],'Hugo'),

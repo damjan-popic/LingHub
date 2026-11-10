@@ -50,7 +50,8 @@ VALIDATION_ACTIONS={'accepted','withhold','omit','source_supported_partial','mix
     'deterministic_supported_application','source_bound_derivation'}
 VALIDATION_LIMITATION_REASONS={'model_found_insufficient_evidence','no_supported_generated_claims',
     'invalid_or_inconsistently_scoped_composition','native_tokenizer_unavailable','empty_indexed_evidence',
-    'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested'}
+    'selected_model_or_frozen_profile_unavailable','generation_failed_or_truncated','source_search_requested',
+    'complete_dictionary_alternatives_exceed_selected_input'}
 RECOMPOSITION_TRIGGERS={
     'comparison_practical_choice_missing','comparison_practical_option_unresolved',
     'comparison_decision_missing','comparison_decision_source_not_cited',

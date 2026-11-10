@@ -141,7 +141,10 @@ class Gateway:
             if prediction is not None:return prediction
             guidance=request_tasks.freeze(family,self)
             if guidance is not None:return guidance
-            return unified.freeze(self,family,policy)
+            interpretation=unified.shared_interpretation(self,family.get('original_question',family['question']),family.get('context',''),family.get('input_language','und'),family['locale'])
+            guidance=request_tasks.freeze(family,self,interpretation=interpretation)
+            if guidance is not None:return guidance
+            return unified.freeze(self,family,policy,interpretation=interpretation)
         if family['task'] in editorial.SOURCES:
             if not self.klikai_url:raise Failure('task_unavailable',503)
             query=family['question']

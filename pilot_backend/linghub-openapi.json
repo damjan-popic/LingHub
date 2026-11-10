@@ -565,7 +565,7 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 10000,
+            "maxLength": 3000,
             "minLength": 1,
             "title": "Text"
           },

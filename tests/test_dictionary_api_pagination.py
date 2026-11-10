@@ -156,3 +156,28 @@ def test_public_capabilities_separate_dictionary_limits_from_native_explore_limi
     assert data['application_api']['dictionary_pagination']=={
         'synonyms':{'default_limit':8,'max_limit':20,'unit':'entry','max_offset':2147483647,'include_pagination_default':True},
         'collocations':{'default_limit':8,'max_limit':500,'unit':'occurrence','max_offset':2147483647,'include_pagination_default':True}}
+
+
+def test_public_analysis_schema_matches_enforced_bound_and_keeps_native_bound(public_api,monkeypatch):
+    # The public gateway is narrower than the native analyzer contract.
+    result=public_api.client.get(linghub_api.PREFIX+'/openapi.json',headers=public_api.headers)
+    assert result.status_code==200
+    spec=result.json()
+    schema_ref=spec['paths']['/analyze']['post']['requestBody']['content']['application/json']['schema']['$ref']
+    schema=spec['components']['schemas'][schema_ref.rsplit('/',1)[1]]
+    assert schema['properties']['text']['minLength']==1
+    assert schema['properties']['text']['maxLength']==3000
+    assert platform_api.AnalyzeRequest.model_json_schema()['properties']['text']['maxLength']==10000
+
+    public_api.clients['clients']['pages']['scopes'].append('analysis')
+    public_api.clients_path.write_text(json.dumps(public_api.clients))
+    analyze=AsyncMock(return_value={'fixture':'accepted without analyzer/model invocation'})
+    monkeypatch.setattr(platform_api,'analyze_once',analyze)
+    accepted=public_api.client.post(linghub_api.PREFIX+'/analyze',headers=public_api.headers,
+        json={'lang':'sl','text':'x'*3000,'include_loris':False})
+    assert accepted.status_code==200 and analyze.await_count==1
+    calls=len(public_api.calls)
+    rejected=public_api.client.post(linghub_api.PREFIX+'/analyze',headers=public_api.headers,
+        json={'lang':'sl','text':'x'*3001,'include_loris':False})
+    assert rejected.status_code==422 and rejected.json()['error']=='text_bound'
+    assert len(public_api.calls)==calls and analyze.await_count==1

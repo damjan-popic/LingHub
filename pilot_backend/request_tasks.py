@@ -1,4 +1,4 @@
-"""Recorded, deterministic guidance for a small verified resource registry.
+"""Recorded resource guidance and clarification of bound request ambiguities.
 
 No generated URLs, live crawling, account-history inference or linguistic
 equivalence claims. The registry is captured with each answer for inspection.
@@ -66,12 +66,30 @@ def interpret(question, context='', locale='sl'):
         return {'kind':'resource_not_registered', 'text': 'Non ho un collegamento verificato a questa risorsa. Puoi indicarne il titolo o l’ente responsabile?' if it else 'Za ta vir nimam preverjene povezave. Lahko navedete naslov ali ustanovo, ki ga objavlja?', 'resources':[]}
     return None
 
-def freeze(family, gateway=None):
-    decision = interpret(family['question'], family.get('context',''), family.get('locale','sl'))
+def grammar_decision(interpretation,locale):
+    plan=interpretation['request_plan']
+    reasons=sorted(set(plan.get('ambiguities',[]))&{
+        'grammar_slot_pairing_unresolved','grammar_target_binding_unresolved'})
+    if not reasons:return None
+    target='grammar_target_binding_unresolved'in reasons
+    if locale=='it':
+        message=('Per quale espressione vuoi la forma? Indica l’espressione, il caso e, se necessario, il numero.'if target else
+                 'Indica quale caso e, se necessario, quale numero vuoi per ciascuna espressione.')
+    else:
+        message=('Za kateri izraz želite obliko? Navedite izraz, sklon in po potrebi število.'if target else
+                 'Navedite, kateri sklon in morebitno število želite za posamezni izraz.')
+    return {'kind':'grammar_request_clarification','text':message,'resources':[],
+            'ambiguities':reasons}
+
+def freeze(family, gateway=None,*,interpretation=None):
+    decision = (interpret(family['question'],family.get('context',''),family.get('locale','sl'))
+                if interpretation is None else grammar_decision(interpretation,family.get('locale','sl')))
     if decision is None: return None
     if decision['kind'] == 'document_search':
         decision = documents.lookup(gateway, family['question'], family.get('locale', 'sl'))
-    body = {'contract':CONTRACT, 'locale':family.get('locale','sl'), 'question':family['question'], 'context':family.get('context',''), 'decision':decision}
+    question=family.get('original_question',family['question'])if interpretation is not None else family['question']
+    body = {'contract':CONTRACT, 'locale':family.get('locale','sl'), 'question':question, 'context':family.get('context',''), 'decision':decision}
+    if interpretation is not None:body['shared_interpretation']=deepcopy(interpretation)
     return {'bundle':{**body,'snapshot_sha256':digest(body)}, 'identity':{'contract':CONTRACT,'captured_response_sha256':digest(body)}}
 
 def checked(bundle):
@@ -85,11 +103,16 @@ def answer(bundle, tier):
     checked(bundle)
     if tier not in {'short','answer'}: raise Failure('expansion_unavailable',409)
     text = bundle['decision']['text']; refs = evidence(bundle)
-    return {'status':'source_only','short_answer':text,'answer_md':text,'display_blocks':[{'block_id':'guidance','text':text,'evidence_ids':[r['evidence_id'] for r in refs]}],
+    result={'status':'source_only','short_answer':text,'answer_md':text,'display_blocks':[{'block_id':'guidance','text':text,'evidence_ids':[r['evidence_id'] for r in refs]}],
             'evidence':refs,'source_badges':list({r['source_slug']:{'source_slug':r['source_slug'],'label':r['source_label']} for r in refs}.values()),
             'answer_kind':'deterministic_guidance','answer_support':'supported' if refs else 'clarification', 'generation_status':'not_generated',
             'diagnostics':{'writer':{'status':'not_invoked','reason':bundle['decision']['kind']},'request_interpretation':{'kind':bundle['decision']['kind'],'original_question':bundle['question'],'explicit_context':bundle['context']}},
             'deterministic_result':deepcopy(bundle['decision']), 'limitations':[], 'synthesis_mode':'deterministic_guidance'}
+    if bundle['decision']['kind']=='grammar_request_clarification':
+        result['execution']={'provider_scope':'none','inference_performed':False,
+                             'route_reason':'grammar_request_clarification'}
+        result['model_identity']={'model_id':'not_invoked','inference_performed':False}
+    return result
 
 def source(bundle, eid, tier):
     if tier not in {'short','answer'}: raise Failure('not_found',404)

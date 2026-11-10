@@ -1409,6 +1409,54 @@ def test_real_source_view_status_is_preserved_in_frozen_original_drawer(monkeypa
     assert view==source_views([passage])[0][0]
 
 
+def test_complete_native_json_source_avoids_indentation_without_changing_binding_or_reader(monkeypatch):
+    from types import SimpleNamespace
+    from test_generic_paradigm_presentation import ENTRIES
+    from pilot_backend.source_reader import source_view
+    monkeypatch.syspath_prepend(str(core_test_root()))
+    from tools.zrc_reference.pilot_evidence import source_views
+    native=next(le for le in ENTRIES if le['lemma']=='biti'
+        and le['grammatical_features'].get('type')=='auxiliary')
+    record={'kind':'morphology','fields':{'lemma':native['lemma'],
+        'grammatical_type':native['grammatical_type'],
+        'grammatical_features':deepcopy(native['grammatical_features']),
+        'slot':deepcopy(native['slots'][0])}}
+    passage={'source_slug':'sloleks','title':'Retained native slot','url':None,
+        'text':unified.canonical(record),'passage_id':'native-slot-passage',
+        'source_id':'native-slot','source_revision':'a'*64,'span':deepcopy(native['evidence']),
+        'original_json':record}
+    view=source_views([passage])[0][0];before=deepcopy(view)
+    remote={'evidence_id':view['citation_id'],'source_slug':'sloleks','source':view}
+    expected_binding=unified.frozen_citation_binding(remote,view)
+    assert expected_binding is not None
+    def request(path,payload):
+        if path=='/internal/pilot/interpret':
+            plan=shared_plan(payload['question'],payload['context'])
+            return {'contract':'klikai.request-interpretation.v1',
+                'input_sha256':digest({'contract':'klikai.request-interpretation.input.v1',**payload}),
+                'request_plan':plan,'request_plan_sha256':digest(plan)}
+        assert path=='/internal/pilot/freeze'
+        return {'bundle':{'synthetic':True},'matches':[deepcopy(remote)]}
+    monkeypatch.setattr(unified,'registry',lambda gateway:[])
+    monkeypatch.setattr(unified,'collect_tools',lambda gateway,family:(None,None))
+    frozen=unified.freeze(SimpleNamespace(klikai_url='synthetic-unused',request=request),
+        {'question':'synthetic','locale':'sl'}, {})['bundle']
+    shown=frozen['matches'][0]['source'];excerpt=shown['excerpt']
+    assert json.loads(excerpt)==record
+    assert len(excerpt.encode())<len(json.dumps(record,ensure_ascii=False,indent=2).encode())
+    assert frozen['matches'][0]['_citation_binding']==expected_binding
+    assert source_view(shown)['reader_blocks']==source_view(dict(shown,
+        excerpt=json.dumps(record,ensure_ascii=False,indent=2)))['reader_blocks']
+    assert view==before
+    historical=deepcopy(frozen)
+    old_excerpt=json.dumps(record,ensure_ascii=False,indent=2)
+    historical['matches'][0]['source']['excerpt']=old_excerpt
+    historical['snapshot_sha256']=digest({k:v for k,v in historical.items()if k!='snapshot_sha256'})
+    history_before=deepcopy(historical)
+    assert unified.source(historical,view['citation_id'])['excerpt']==old_excerpt
+    assert historical==history_before
+
+
 @pytest.mark.parametrize('language,question,context,facets,target',[
     ('sl','Kako se glasi rodilnik imena Hugo?','Popravek: množina.',
      ['genitive','plural'],'Hugo'),

@@ -1,5 +1,6 @@
 """Public lexical text is human-readable; exact frozen records remain intact."""
 import copy
+import pytest
 from pilot_backend.lexical import reader
 
 
@@ -77,3 +78,59 @@ def test_inflection_patterns_have_human_titles_without_changing_source_ids():
     assert 'Vzorec pregibanja 1'in text
     assert 'opaque_123'not in text and 'LE_PRIVATE'not in text and 'MANUAL'not in text
     assert b==before
+
+
+def no_match_bundle(locale='sl',facets_key='inferred_facets'):
+    b=bundle();b['locale']=locale;p=b['analysis']['captures'][0]['response']
+    p['interpretation'][facets_key]=['frequency'];p['evidence']=[]
+    p['facets']['morphology']={'status':'no_match','data':[
+        {'target':'unmatched source expression','status':'no_match','result':{
+            'status':'no_match','lexemes':[],'truncated':False,'next_offset':None,
+            'provenance':{'resource_id':'sloleks','version':'3.1','status':'READY'}}}]}
+    return b
+
+
+@pytest.mark.parametrize('locale,facets_key',[
+    ('sl','requested_facets'),('sl','inferred_facets'),('it','requested_facets')])
+def test_frequency_no_match_explanation_uses_frozen_scope_without_fabricating_an_entry(locale,facets_key):
+    b=no_match_bundle(locale,facets_key);before=copy.deepcopy(b);cards=reader(b)
+    assert b==before and cards['sections']==[]
+    assert len(cards['availability_notes'])==1
+    note=cards['availability_notes'][0]
+    assert 'unmatched source expression'in note and 'Sloleks'in note and '3.1'in note and 'Gigafid'in note
+    assert ('ni primerljivega podatka'if locale=='sl'else'non è disponibile un dato comparabile')in note
+    assert 'record_id'not in cards and 'frequency_position'not in cards
+    # Existing source-backed advice/answer data remains independent and exact.
+    other=bundle();other['locale']=locale;b['analysis']['captures'][0]['response']['evidence']=copy.deepcopy(
+        other['analysis']['captures'][0]['response']['evidence'])
+    assert reader(b)['sections']==reader(other)['sections']
+
+
+@pytest.mark.parametrize('case',[
+    'unrequested','facet_unavailable','facet_partial','facet_unknown','part_unknown',
+    'result_unavailable','missing_lexemes','nonempty_lexemes','truncated','truncated_unknown',
+    'next_page','pagination_unknown','wrong_source','wrong_edition','source_not_ready','source_unknown'])
+def test_frequency_availability_note_never_turns_unknown_partial_or_outage_into_absence(case):
+    b=no_match_bundle();p=b['analysis']['captures'][0]['response'];facet=p['facets']['morphology']
+    part=facet['data'][0];result=part['result']
+    if case=='unrequested':p['interpretation']['inferred_facets']=[]
+    elif case=='facet_unavailable':facet['status']='unavailable'
+    elif case=='facet_partial':facet['status']='partial'
+    elif case=='facet_unknown':facet.pop('status')
+    elif case=='part_unknown':part.pop('status')
+    elif case=='result_unavailable':result['status']='unavailable'
+    elif case=='missing_lexemes':result.pop('lexemes')
+    elif case=='nonempty_lexemes':result['lexemes']=[{'lemma':'source match'}]
+    elif case=='truncated':result['truncated']=True
+    elif case=='truncated_unknown':result.pop('truncated')
+    elif case=='next_page':result['next_offset']=10
+    elif case=='pagination_unknown':result.pop('next_offset')
+    elif case=='wrong_source':result['provenance']['resource_id']='another dictionary'
+    elif case=='wrong_edition':result['provenance']['version']='2.0'
+    elif case=='source_not_ready':result['provenance']['status']='unavailable'
+    elif case=='source_unknown':result.pop('provenance')
+    # The deliberately contradictory nonempty fixture has no full source entry.
+    if case=='nonempty_lexemes':
+        from pilot_backend.lexical import frequency_availability_notes
+        assert frequency_availability_notes(p,'sl')==[]
+    else:assert 'availability_notes'not in reader(b)

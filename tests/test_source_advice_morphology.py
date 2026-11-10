@@ -220,3 +220,44 @@ def test_failed_supplement_preserves_the_independent_original_capture(monkeypatc
         [{'source_slug':'cu-slogovni','capture':{'advice_units':[{}]}}],coverage)
     assert result==initial==before
     assert coverage[0]['status']=='timeout'and coverage[0]['returned_count']==0
+
+
+def test_unrelated_advice_keeps_complete_native_paradigms_without_duplicate_capture(
+        core,monkeypatch,advice_capture):
+    from tools.zrc_reference.request_interpretation import response
+    from tools.zrc_reference.pilot_tool_evidence import validate_capture_set
+    question='Kako se sprega glagol biti?'
+    plan=response(question,'','sl','sl')['request_plan']
+    class Gateway:
+        lexical_profiles=True
+        linghub_url='synthetic-private-profile'
+        def __init__(self):self.requests=[];self.responses=[]
+        def request(self,path,payload,base):
+            if path=='/v1/capabilities':return {'lexical_profile':{'available':True}}
+            assert path=='/v1/lexical/profile'
+            self.requests.append(deepcopy(payload))
+            value=profile(monkeypatch,question,payload.get('source_advice_captures'),plan)[0]
+            self.responses.append(deepcopy(value))
+            return value
+    gateway=Gateway();family={'question':question,'input_language':'sl','request_plan':plan}
+    initial=collation.collect(gateway,family,automatic=True);before=deepcopy(initial)
+    found=[{'source_slug':'cu-slogovni','capture':advice_capture}]
+    documentary_before=deepcopy(found);coverage=[]
+    result=unified.supplement_source_advice_morphology(gateway,family,initial,found,coverage)
+    assert len(gateway.requests)==2
+    supplemented=gateway.responses[-1]
+    assert supplemented['query']['source_advice_captures']==[advice_capture]
+    assert supplemented['facets']['source_advice_morphology']['status']=='not_applicable'
+    assert not any(u.get('application_support')for u in supplemented['evidence'])
+    assert result is initial and result==before
+    assert found==documentary_before
+    assert coverage[0]['status']=='no_match'and coverage[0]['returned_count']==0
+    assert 'source_advice_captures'not in result['captures'][0]['request']
+    raw=result['captures'][0]['response']['facets']['morphology']['data'][0]['result']
+    expected=[le for le in ENTRIES if le['lemma']=='biti']
+    assert len(raw['lexemes'])==len(expected)==2
+    for le in raw['lexemes']:
+        native=next(source for source in expected if source_occurrence_key(source['evidence'])==source_occurrence_key(le['evidence']))
+        assert le['slots']==native['slots']and le['patterns']==native['patterns']
+    assert sum(len(le['slots'])for le in raw['lexemes'])==87
+    validate_capture_set(result)

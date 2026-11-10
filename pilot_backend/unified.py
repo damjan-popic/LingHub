@@ -1143,7 +1143,10 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         status.update(status='ok'if count else'unavailable'if support.get('status')=='unavailable'else'no_match',
             returned_count=count)
         coverage.append(status)
-        return capture
+        # With no source-nominated units, this response adds only another copy
+        # of the CU parents in its request/query. Keep the original authoritative
+        # profile; those complete parents remain in the documentary packet.
+        return capture if count else tool_capture
     except Exception as error:
         status.update(status='timeout'if isinstance(error,Failure)and error.code=='source_timeout'else'unavailable',
             **diagnostic(error,'source_advice_morphology'))
@@ -1247,7 +1250,10 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
             item['source'].update(source_label=view.get('source_label')or item.get('source_label')or item['source_slug'],
                 excerpt=view.get('excerpt',view.get('snippet','')),
                 bibliography=deepcopy(view.get('bibliography',view.get('bibliographic',{}))))
-            if isinstance(view.get('original_json'),dict):item['source']['excerpt']=json.dumps(view['original_json'],ensure_ascii=False,indent=2)
+            # This field is itself stored in JSON. Indenting its complete source
+            # record multiplies whitespace without adding source observations;
+            # the reader parses either representation to the same source blocks.
+            if isinstance(view.get('original_json'),dict):item['source']['excerpt']=canonical(view['original_json'])
             if not isinstance(item['source']['excerpt'],str)or not item['source']['excerpt']:
                 raise Failure('invalid_answer',502)
             item['snippet']=item.get('snippet','')[:1000]

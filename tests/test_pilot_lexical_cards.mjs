@@ -51,3 +51,16 @@ test('one complete paradigm and a safe source reference, including old pattern-b
  assert.equal(descendants(full,'th').find(node=>node.attributes.scope==='row').textContent,'rodilnik');
  const cell=descendants(full,'td')[0];assert.equal(text(cell),'A / B / CVzorec 1: AVzorec 2: B');
 });
+
+test('captured frequency availability note remains visible without a fabricated lexical entry',()=>{
+ const root=new Node('section'),answer=new Node('div');answer.textContent='Frozen LORIS answer[1]';
+ const note='Za izraz »unmatched source expression« v zajetem Sloleksu 3.1 ni primerljivega podatka o pogostnosti v Gigafidi 2.0.';
+ const family={lexical_profile:{title:'Podatki o izrazu',note:'Podatki iz virov.',sections:[],availability_notes:[note]}};
+ const context={document:{createElement:t=>new Node(t)},state:{locale:'sl'},$:id=>id==='short-answer'?answer:root,clear:n=>n.replaceChildren(),safeSourceLink,t,appendMorphologyTables,appendFrequencyPosition,family};
+ vm.runInNewContext(el+'\n'+renderer+'\nrenderLexical(family);',context);
+ assert.equal(root.hidden,false);assert(text(root).includes(note));
+ assert.equal(descendants(root,'article').length,0);assert.equal(descendants(root,'svg').length,0);
+ assert.equal(descendants(root,'a').length,0);assert.equal(answer.textContent,'Frozen LORIS answer[1]');
+ delete family.lexical_profile.availability_notes;
+ vm.runInNewContext('renderLexical(family);',context);assert.equal(root.hidden,true);
+});

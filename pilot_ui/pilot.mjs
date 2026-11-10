@@ -300,9 +300,10 @@ function syncMatches(family){
 
 function renderLexical(family) {
   let node=$('lexical-profile');if(!node){node=el('section',null,{id:'lexical-profile',class:'lexical-profile'});$('short-answer').after(node);}
-  clear(node);const p=family.lexical_profile||family.short?.lexical_profile;node.hidden=!p?.sections?.length;if(node.hidden)return;
+  clear(node);const p=family.lexical_profile||family.short?.lexical_profile;node.hidden=!(p?.sections?.length||p?.availability_notes?.length);if(node.hidden)return;
   node.append(el('h3',p.title),el('p',p.note,{class:'small muted'}));
-  for(const section of p.sections){
+  for(const note of p.availability_notes||[])node.append(el('p',note,{class:'small muted lexical-availability'}));
+  for(const section of p.sections||[]){
     const box=el('details');box.append(el('summary',section.title));
     for(const row of section.items){
       const item=el('article',null,{class:'lexical-entry'});item.append(el('h4',row.title),el('p',row.text),el('small',row.label));

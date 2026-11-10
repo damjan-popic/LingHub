@@ -22,6 +22,25 @@ def profile(bundle):
  if capture.get('version')!='klikai.lexical-collation.v1':return None
  return capture['captures'][0]['response']
 
+def frequency_availability_notes(p,locale):
+ """Explain a complete captured no-match, never a missing count or outage."""
+ interpretation=p.get('interpretation')or{}
+ if 'frequency'not in set(interpretation.get('requested_facets')or[])|set(interpretation.get('inferred_facets')or[]):return []
+ facet=(p.get('facets')or{}).get('morphology')or{}
+ if facet.get('status')!='no_match':return []
+ notes=[]
+ for part in facet.get('data')or[]:
+  result=part.get('result')or{};source=result.get('provenance')or{};target=part.get('target')
+  if (part.get('status')!='no_match'or result.get('status')!='no_match'
+      or result.get('lexemes')!=[]or result.get('truncated')is not False
+      or 'next_offset'not in result or result['next_offset']is not None
+      or source.get('resource_id')!='sloleks'or source.get('version')!='3.1'
+      or source.get('status')!='READY'or not isinstance(target,str)or not target.strip()):continue
+  note=('Per l’espressione «'+target+'» non è disponibile un dato comparabile di frequenza in Gigafida 2.0 nello Sloleks 3.1 acquisito.'
+      if locale=='it'else'Za izraz »'+target+'« v zajetem Sloleksu 3.1 ni primerljivega podatka o pogostnosti v Gigafidi 2.0.')
+  if note not in notes:notes.append(note)
+ return notes
+
 def comparison_overview(packets):
  """Use the existing wider browser profile for a supported comparison.
 
@@ -224,4 +243,7 @@ def reader(bundle):
  section('Letture grammaticali registrate'if it else'Zapisane slovnične možnosti',analysis_rows)
  section('Contesto necessario'if it else'Potreben kontekst',uncertainty)
  section('Altre letture registrate'if it else'Druge zapisane možnosti',alternatives)
- return {'title':'Profilo lessicale'if it else'Podatki o izrazu','sections':sections,'note':'Dati delle fonti, indipendenti dalla risposta generata.'if it else'Podatki iz virov, neodvisni od generiranega odgovora.'}
+ cards={'title':'Profilo lessicale'if it else'Podatki o izrazu','sections':sections,'note':'Dati delle fonti, indipendenti dalla risposta generata.'if it else'Podatki iz virov, neodvisni od generiranega odgovora.'}
+ notes=frequency_availability_notes(p,bundle['locale'])
+ if notes:cards['availability_notes']=notes
+ return cards

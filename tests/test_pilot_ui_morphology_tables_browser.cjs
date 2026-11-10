@@ -59,7 +59,7 @@ const position={version:'sloleks-lexeme-frequency-position-v1',corpus:'Gigafida 
   const tier={state:'complete',status:'validated',run_id:'saved-run',delivery_token:'fixture',answer_kind:'generated',generation_status:'generated',
    blocks:[{block_id:'C1',text,evidence_ids:['e1']}],evidence:[{evidence_id:'e1',local_number:1,source_slug:'sloleks',title:'Retained slot'}]};
   const family={answer_family_id:'saved-family',question:'Oblike izraza',locale,task:'reference',answer_format:'single',answer:tier,short:tier,long:null,matches_available:false,
-   lexical_profile:{title:'Podatki o izrazu',note:'Retained source records',sections:[{title:'Source morphology',items:rows}]}};
+   lexical_profile:{title:'Podatki o izrazu',note:'Retained source records',sections:[{kind:'morphology',title:'Source morphology',items:rows}]}};
   const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage(),calls=[],errors=[];
   const messages=JSON.parse(fs.readFileSync(path.join(assets,'i18n',locale+'.json')));
   await page.addInitScript(()=>{window.policyViolations=[];document.addEventListener('securitypolicyviolation',event=>window.policyViolations.push(event.violatedDirective));Object.defineProperty(navigator,'clipboard',{value:{writeText:async value=>window.copiedText=value}});});
@@ -81,7 +81,9 @@ const position={version:'sloleks-lexeme-frequency-position-v1',corpus:'Gigafida 
   });
   await page.goto(origin+(locale==='it'?'/it/':'/')+'?answer=saved-family');await page.locator('#short-answer [data-block-id]').waitFor();
   const canonical=await page.locator('#short-answer').textContent(),block=page.locator('#short-answer [data-block-id]');assert.equal(await block.textContent(),text);
-  await page.locator('#lexical-profile > details > summary').click();
+  assert(await page.locator('#lexical-profile > details').evaluate(node=>node.open));
+  assert(await page.locator('.frequency-position').first().isVisible());
+  assert.equal(await page.locator('.morphology-tables[open]').count(),0);
   const exactCard=title=>page.locator('#lexical-profile article').filter({has:page.getByRole('heading',{name:title,exact:true})});
   const adj=exactCard(adjective.title);await adj.locator('.morphology-tables > summary').click();
   assert.equal(await adj.locator('.morphology-tables > summary').innerText(),messages.morphology_inflection);
@@ -130,7 +132,7 @@ const position={version:'sloleks-lexeme-frequency-position-v1',corpus:'Gigafida 
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(await page.evaluate(()=>window.policyViolations),[]);assert.deepEqual(errors,[]);
   if(process.env.KLIKAI_MORPHOLOGY_UI_OUTPUT){await adj.locator('[data-morphology-control=gender]').selectOption(JSON.stringify('feminine'));await adj.locator('[data-morphology-control=degree]').selectOption(JSON.stringify('comparative'));fs.mkdirSync(process.env.KLIKAI_MORPHOLOGY_UI_OUTPUT,{recursive:true});await adj.screenshot({path:path.join(process.env.KLIKAI_MORPHOLOGY_UI_OUTPUT,'tables-'+locale+'-'+width+'.png')});await unique.locator('.frequency-position').screenshot({path:path.join(process.env.KLIKAI_MORPHOLOGY_UI_OUTPUT,'unique-frequency-'+locale+'-'+width+'.png')});}
   assert(!calls.some(row=>row.api==='/families'&&row.method==='POST'));
-  checks.push({locale,width,status:'PASS',source_slots:617,typed_controls_and_unknown_groups:true,source_occurrences_separate:true,canonical_answer_offsets_copy_citations:true,actual_security_header:true,frequency_tie_band_and_visible_unique_marker:true});await context.close();
+  checks.push({locale,width,status:'PASS',source_slots:617,typed_controls_and_unknown_groups:true,source_occurrences_separate:true,canonical_answer_offsets_copy_citations:true,actual_security_header:true,frequency_visible_without_opening_source_section:true,paradigms_initially_collapsed:true,frequency_tie_band_and_visible_unique_marker:true});await context.close();
  }}finally{await browser.close();}
  console.log(JSON.stringify({status:'PASS',scope:'Retained source-backed reader fixtures through intercepted UI under the real API CSP header; frequency positions are explicit protocol fixtures, not real corpus-rank measurements.',source_slots:617,checks,external_requests:0,model_calls:0}));
 })().catch(error=>{console.error(error.stack);process.exit(1);});

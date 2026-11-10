@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {safeSourceLink} from '../pilot_ui/core.mjs';
-import {appendMorphologyTables,appendFrequencyPosition} from '../pilot_ui/morphology-tables.mjs';
+import {appendMorphologyTables,appendFrequencyPosition,frequencyPositionView} from '../pilot_ui/morphology-tables.mjs';
 const messages=JSON.parse(fs.readFileSync(new URL('../pilot_ui/i18n/sl.json',import.meta.url)));
 const t=(key,values={})=>(messages[key]||key).replace(/\{(\w+)\}/g,(_,name)=>String(values[name]??''));
 class Node {
@@ -63,4 +63,21 @@ test('captured frequency availability note remains visible without a fabricated 
  assert.equal(descendants(root,'a').length,0);assert.equal(answer.textContent,'Frozen LORIS answer[1]');
  delete family.lexical_profile.availability_notes;
  vm.runInNewContext('renderLexical(family);',context);assert.equal(root.hidden,true);
+});
+
+test('only typed primary morphology with a compatible chart opens its source section',()=>{
+ const position={version:'sloleks-lexeme-frequency-position-v1',corpus:'Gigafida 2.0',inventory:'Sloleks 3.1',
+  population_unit:'source_lexeme_occurrence',frequency:100,eligible_total:10,rank_min:3,rank_max:3,
+  percentile_low:70,percentile_high:80,percentile_mid:75};
+ const root=new Node('section'),row={title:'Recorded occurrence',text:'Source count',label:'Sloleks',frequency_position:position};
+ const cases=[{kind:'morphology',compatible:true,open:true},{kind:'morphology',compatible:false,open:false},
+  {kind:'alternative',compatible:true,open:false},{kind:null,compatible:true,open:false}];
+ for(const scenario of cases){
+  const sourceRow={...row,frequency_position:scenario.compatible?position:{...position,inventory:'another source'}};
+  const section={title:'Oblike in pregibanje',items:[sourceRow],...(scenario.kind?{kind:scenario.kind}:{})};
+  const context={document:{createElement:t=>new Node(t)},state:{locale:'sl'},$:()=>root,clear:n=>n.replaceChildren(),safeSourceLink,t,appendMorphologyTables,
+   appendFrequencyPosition:(_node,value)=>frequencyPositionView(value),family:{lexical_profile:{title:'Podatki o izrazu',sections:[section]}}};
+  vm.runInNewContext(el+'\n'+renderer+'\nrenderLexical(family);',context);
+  assert.equal(Boolean(root.children.find(n=>n.tag==='details').open),scenario.open);
+ }
 });

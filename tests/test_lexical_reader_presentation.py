@@ -75,6 +75,8 @@ def test_inflection_patterns_have_human_titles_without_changing_source_ids():
     b=bundle();p=b['analysis']['captures'][0]['response'];slot={'slot_locator':0,'normalized_features':{'case':'nominative','number':'singular'},'variants':[{'form':'dan'}]}
     p['facets']['morphology']['data']=[{'result':{'lexemes':[{'source_entry_id':'LE_PRIVATE','lemma':'dan','grammatical_features':{'type':'common','gender':'masculine'},'grammatical_type':'noun','frequency_observations':[],'source_status':'MANUAL','slots':[slot],'patterns':[{'source_pattern_id':'opaque_123','members':[{'slot':0,'variant':0}]}]}]}}]
     before=copy.deepcopy(b);cards=reader(b);text=visible(cards)
+    assert next(section for section in cards['sections']if section['title']=='Oblike in pregibanje')['kind']=='morphology'
+    assert all('kind'not in section for section in cards['sections']if section['title']!='Oblike in pregibanje')
     assert 'Vzorec pregibanja 1'in text
     assert 'opaque_123'not in text and 'LE_PRIVATE'not in text and 'MANUAL'not in text
     assert b==before

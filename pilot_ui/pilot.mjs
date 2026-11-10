@@ -307,7 +307,8 @@ function renderLexical(family) {
     const box=el('details');box.append(el('summary',section.title));
     for(const row of section.items){
       const item=el('article',null,{class:'lexical-entry'});item.append(el('h4',row.title),el('p',row.text),el('small',row.label));
-      appendFrequencyPosition(item,row.frequency_position,{element:el,translate:t});
+      const frequency=appendFrequencyPosition(item,row.frequency_position,{element:el,translate:t});
+      if(section.kind==='morphology'&&frequency)box.open=true;
       if(row.reference_url){const reference=safeSourceLink(row.reference_url);if(reference)item.append(el('a',state.locale==='it'?'Riferimento della fonte':'Povezava v viru',{href:reference,target:'_blank',rel:'noopener noreferrer'}));}
       if(!row.forms?.length)for(const special of row.items||[])item.append(el('p',special.title+': '+special.text,{class:'lexical-alternative'}));
       if(row.details?.length){const detail=el('details');detail.append(el('summary',state.locale==='it'?'Dettagli della fonte':'Podrobnosti vira'));for(const field of row.details)detail.append(el('p',field.title+': '+field.text));item.append(detail);}

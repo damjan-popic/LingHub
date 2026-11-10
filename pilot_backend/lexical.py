@@ -138,8 +138,8 @@ def reader(bundle):
   if value in {'automatic','ssss-automatic'}:return 'elaborazione automatica'if it else'samodejno pripravljeno'
   return 'stato non specificato'if it else'status ni opredeljen'
  def status_details(raw):return [{'title':'Preparazione dei dati'if it else'Priprava podatkov','text':status_label(raw)}]
- def section(title,rows):
-  if rows:sections.append({'title':title,'items':rows})
+ def section(title,rows,**metadata):
+  if rows:sections.append({'title':title,'items':rows,**metadata})
  def measures(items):
   return '; '.join(str(x['value'])+' · '+(x.get('corpus')or ('corpus non specificato'if it else'korpus ni naveden')) for x in items if x.get('value')is not None and x.get('measure')=='frequency')
  morphology=[]
@@ -180,7 +180,7 @@ def reader(bundle):
        'paradigm_focus':{key:value for key,value in focus.items()if key in {'gender','degree','vform','case','number'}
            and any(s['normalized_features'].get(key)==value for s in le['slots'])}}
    (alternatives if state=='alternative'else morphology).append(row)
- section('Forme e flessione'if it else'Oblike in pregibanje',morphology)
+ section('Forme e flessione'if it else'Oblike in pregibanje',morphology,kind='morphology')
  synonyms=[];collocations=[];loris=[];terms=[]
  for u in p['evidence']:
   state=u.get('selection',{}).get('state')

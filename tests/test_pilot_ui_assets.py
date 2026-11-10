@@ -20,4 +20,5 @@ def test_entrypoint_imports_are_available_through_the_real_asset_route(tmp_path)
             assert response.headers['cache-control']=='no-store'
             pending.extend(re.findall(r"(?:from\s*|import\s*)['\"]\./([^'\"]+\.mjs)['\"]",response.text))
         assert 'answer-layout.mjs'in seen
+        assert 'morphology-tables.mjs'in seen
         assert client.get('/assets/not-a-published-module.mjs').status_code==404

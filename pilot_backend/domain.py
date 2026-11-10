@@ -26,12 +26,13 @@ def fields(payload,allowed):
     if not isinstance(payload,dict)or set(payload)-set(allowed):raise Failure('invalid_request')
 
 class Domain:
-    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None,single_answers=None,request_gateway=None):
+    def __init__(self,store,tasks=('reference','source_search'),models=('qwen','gemma'),max_queue=30,per_owner=4,generation_admission=None,comparisons_enabled=True,unified_answers=False,release=None,single_answers=None,request_gateway=None,frequency_reference=None):
         self.store=store;self.tasks=tuple(tasks);self.models=tuple(models);self.max_queue=max_queue;self.per_owner=per_owner;self.generation_admission=generation_admission;self.comparisons_enabled=comparisons_enabled
         self.release=release
         self.unified_answers=unified_answers
         self.single_answers=unified_answers if single_answers is None else single_answers
         self.request_gateway=request_gateway
+        self.frequency_reference=frequency_reference
         self.default_model='auto'if'auto'in self.models else'qwen'if'qwen'in self.models else self.models[0]
         self.comparison_models=tuple(model for model in self.models if model in {'qwen','gemma'})
     def require_generation(self,models):
@@ -232,6 +233,9 @@ class Domain:
             if bundle.get('contract')==unified.CONTRACT:
                 from .lexical import reader
                 lexical=reader(bundle)
+                if lexical and self.frequency_reference is not None:
+                    from .frequency_position import annotate
+                    lexical=annotate(lexical,bundle,self.frequency_reference)
                 if lexical:out['lexical_profile']=lexical
             out['unified_answers']=bundle.get('contract')==comma_tasks.CONTRACT or out['matches_available']or(self.unified_answers and f['task']=='reference'and not f['bundle'])
             focus=db.execute('SELECT focus FROM family_focus WHERE family_id=?',(fid,)).fetchone()

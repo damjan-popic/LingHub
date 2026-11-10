@@ -22,13 +22,13 @@ HELDOUT=json.loads(gzip.decompress((Path(__file__).parent/
 ENTRIES+=HELDOUT
 
 
-def full_cards(entries,locale):
+def full_cards(entries,locale,focus=None):
     lexemes=copy.deepcopy(entries)
     for le in lexemes:
         le.update(submitted_form=le['lemma'],matched_by='exact_headword',submitted_analyses=[])
     raw={'lexemes':lexemes}
     p={'interpretation':{'targets':[{'text':lexemes[0]['lemma']}],
-        'query_kind':'word','requested_facets':['morphology'],'slot_focus':None,
+        'query_kind':'word','requested_facets':['morphology'],'slot_focus':copy.deepcopy(focus),
         'form_choice':{'intent':'dictionary_information'}},
         'facets':{'morphology':{'data':[{'target':lexemes[0]['lemma'],'result':raw}]}},
         'evidence':morphological_records(raw,lexemes[0]['lemma'],None)}
@@ -51,16 +51,53 @@ def test_all_retained_slots_forms_and_pattern_memberships_survive_with_labels(lo
         for le in entries:
             row=by_key[source_occurrence_key(le['evidence'])]
             assert row['record_id']==le['source_entry_id']
+            assert row['grammatical_type']==le['grammatical_type']
+            assert row['grammatical_features']==le['grammatical_features']
             assert 'patterns'not in row and len(row['forms'])==len(le['slots'])
             for slot,shown in zip(le['slots'],row['forms']):
                 count+=1
                 assert shown['text']==' / '.join(dict.fromkeys(v['form']for v in slot['variants']))
                 assert shown['title'] and 'Vir:'not in shown['title']and'Fonte:'not in shown['title']
+                assert shown['slot_locator']==slot['slot_locator']and shown['original_msd']==slot['original_msd']
+                assert shown['normalized_features']==slot['normalized_features']
+                assert shown['variants']==[{key:copy.deepcopy(variant.get(key))for key in
+                    ['form','original_form_id','source_locator','source_pattern_ids','labels','source_attributes']}
+                    for variant in slot['variants']]
                 memberships=shown['pattern_memberships']
                 assert sum(len(m['forms'])for m in memberships)==sum(len({le['slots'][m['slot']]['variants'][m['variant']]['form']
                     for m in pat['members']if m['slot']==slot['slot_locator']})for pat in le['patterns'])
                 assert structured({'kind':'morphology','fields':{'lemma':lemma,'slot':slot}},locale)[0]['text']==shown['title']+'\n'+shown['text']
     assert count==617
+
+
+def test_table_projection_keeps_equal_spelling_variants_conditions_and_pattern_identity():
+    # Explicit mechanism mutation of a retained source slot, not an attestation.
+    le=copy.deepcopy(next(le for le in ENTRIES if le['lemma']=='dober'and le['grammatical_type']=='adjective'))
+    slot=le['slots'][0];variant=copy.deepcopy(slot['variants'][0])
+    variant['labels']=[{'tag':'label','attributes':{'type':'fixture-condition'},'text':'<redko>','children':[]}]
+    variant['source_attributes']['fixture_condition']='literal value'
+    variant['source_pattern_ids']=['fixture-second-pattern'];variant['source_locator']+=':fixture-second-variant'
+    slot['variants'].append(variant)
+    slot['normalized_features']['fixture_unknown_feature']='opaque'
+    le['patterns'].append({'source_pattern_id':'fixture-second-pattern','members':[{'slot':slot['slot_locator'],'variant':1}],
+        'description':None,'evidence':copy.deepcopy(le['evidence'])})
+    before=copy.deepcopy(le);row=full_cards([le],'sl')[0];shown=row['forms'][0]
+    assert le==before
+    assert shown['text']=='dober'  # Existing flattened compatibility field stays exact.
+    assert [value['form']for value in shown['variants']]==['dober','dober']
+    assert shown['variants'][0]['labels']==[]and shown['variants'][1]['labels']==variant['labels']
+    assert shown['variants'][1]['source_attributes']['fixture_condition']=='literal value'
+    assert {value['source_pattern_id']for value in shown['pattern_memberships']}==set(
+        value for variant in slot['variants']for value in variant['source_pattern_ids'])
+    assert shown['feature_labels']['fixture_unknown_feature']=='Vir: fixture_unknown_feature=opaque'
+
+
+def test_table_initial_focus_is_existing_typed_source_scope_not_question_text():
+    entry=next(le for le in ENTRIES if le['lemma']=='dober'and le['grammatical_type']=='adjective')
+    focus={'degree':'comparative','gender':'feminine','case':'genitive','vform':'future'}
+    row=full_cards([entry],'sl',focus)[0]
+    assert row['paradigm_focus']=={'degree':'comparative','gender':'feminine','case':'genitive'}
+    assert len(row['forms'])==167
 
 
 def test_verbal_person_form_and_polarity_and_pronoun_clitic_are_distinct():

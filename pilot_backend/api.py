@@ -1,7 +1,7 @@
 """Small authenticated same-origin pilot surface; internal APIs stay private."""
 from __future__ import annotations
 from contextlib import asynccontextmanager
-import asyncio,csv,hashlib,hmac,io,ipaddress,json,os,re,secrets,threading
+import asyncio,csv,hashlib,hmac,io,ipaddress,json,logging,os,re,secrets,sqlite3,threading
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs,urlencode
 from fastapi import FastAPI,Request
@@ -60,7 +60,14 @@ def config_checked(config):
     return c
 
 def create_app(config,adapter=None,hasher=None,start_workers=True):
-    config=config_checked(config);base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    config=config_checked(config)
+    frequency_reference=None
+    if config.get('frequency_position_reference'):
+        from .frequency_position import Reference
+        try:frequency_reference=Reference(Path(config['frequency_position_reference']))
+        except (OSError,ValueError,sqlite3.Error):
+            logging.getLogger(__name__).warning('Frequency-position reference unavailable; retaining source counts',exc_info=True)
+    base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
@@ -483,7 +490,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','answer-layout.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
+        if asset not in {'comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','answer-layout.mjs','morphology-tables.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n',ui/'brand'}:raise Failure('not_found',404)
         return FileResponse(target)

@@ -1,6 +1,7 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {publicRelease} from './public-release.mjs';
 import {appendAnswerParts} from './answer-layout.mjs';
+import {appendMorphologyTables,appendFrequencyPosition} from './morphology-tables.mjs';
 import {commaExplanationHeading,renderCommaProposal} from './comma-proposal.mjs';
 import {noAnswerFeedback,canOpenCurrentOriginal,ordinaryFamilyView} from './core.mjs';
 import {sourcePresentation,legendSources,answerCopyText,longerWaitMessage,releaseLabel,appendSourceReaderBlocks,historyCreatedDate} from './interface-details.mjs';
@@ -301,7 +302,19 @@ function renderLexical(family) {
   let node=$('lexical-profile');if(!node){node=el('section',null,{id:'lexical-profile',class:'lexical-profile'});$('short-answer').after(node);}
   clear(node);const p=family.lexical_profile||family.short?.lexical_profile;node.hidden=!p?.sections?.length;if(node.hidden)return;
   node.append(el('h3',p.title),el('p',p.note,{class:'small muted'}));
-  for(const section of p.sections){const box=el('details');box.append(el('summary',section.title));for(const row of section.items){const item=el('article',null,{class:'lexical-entry'});item.append(el('h4',row.title),el('p',row.text),el('small',row.label));if(row.reference_url){const reference=safeSourceLink(row.reference_url);if(reference)item.append(el('a',state.locale==='it'?'Riferimento della fonte':'Povezava v viru',{href:reference,target:'_blank',rel:'noopener noreferrer'}));}for(const special of row.items||[])item.append(el('p',special.title+': '+special.text,{class:'lexical-alternative'}));if(row.details?.length){const detail=el('details');detail.append(el('summary',state.locale==='it'?'Dettagli della fonte':'Podrobnosti vira'));for(const field of row.details)detail.append(el('p',field.title+': '+field.text));item.append(detail);}if(row.forms?.length){const forms=el('details');forms.append(el('summary',state.locale==='it'?'Paradigma completo':'Celotno pregibanje'));for(const form of row.forms){const memberships=form.pattern_memberships||[];const text=memberships.length>1?form.text.split(' / ').map(value=>{const labels=memberships.filter(m=>m.forms.includes(value)).map(m=>m.title);return value+(labels.length?' ('+labels.join(', ')+')':'');}).join(' / '):form.text;forms.append(el('p',form.title+': '+text));}item.append(forms);}box.append(item);}node.append(box);}
+  for(const section of p.sections){
+    const box=el('details');box.append(el('summary',section.title));
+    for(const row of section.items){
+      const item=el('article',null,{class:'lexical-entry'});item.append(el('h4',row.title),el('p',row.text),el('small',row.label));
+      appendFrequencyPosition(item,row.frequency_position,{element:el,translate:t});
+      if(row.reference_url){const reference=safeSourceLink(row.reference_url);if(reference)item.append(el('a',state.locale==='it'?'Riferimento della fonte':'Povezava v viru',{href:reference,target:'_blank',rel:'noopener noreferrer'}));}
+      if(!row.forms?.length)for(const special of row.items||[])item.append(el('p',special.title+': '+special.text,{class:'lexical-alternative'}));
+      if(row.details?.length){const detail=el('details');detail.append(el('summary',state.locale==='it'?'Dettagli della fonte':'Podrobnosti vira'));for(const field of row.details)detail.append(el('p',field.title+': '+field.text));item.append(detail);}
+      if(row.forms?.length)appendMorphologyTables(item,row,{element:el,translate:t});
+      box.append(item);
+    }
+    node.append(box);
+  }
 }
 function renderFamily(family,{pushURL=false}={}) {
   family=ordinaryFamilyView(family);state.longOpen=false;

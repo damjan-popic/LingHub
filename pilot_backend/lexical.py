@@ -139,9 +139,14 @@ def reader(bundle):
     fs=s['normalized_features'];forms=list(dict.fromkeys(v['form']for v in s['variants']))
     label=feature_text(fs,bundle['locale'])
     memberships=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(index+1),
+        'source_pattern_id':pat['source_pattern_id'],
         'forms':list(dict.fromkeys(le['slots'][m['slot']]['variants'][m['variant']]['form']for m in pat['members']if m['slot']==s['slot_locator']))}
         for index,pat in enumerate(le['patterns'])if any(m['slot']==s['slot_locator']for m in pat['members'])]
-    rows.append({'title':label,'text':' / '.join(forms),'label':'Sloleks 3.1','record_id':le['source_entry_id'],'pattern_memberships':memberships})
+    rows.append({'title':label,'text':' / '.join(forms),'label':'Sloleks 3.1','record_id':le['source_entry_id'],
+        'slot_locator':s['slot_locator'],'original_msd':s.get('original_msd'),
+        'normalized_features':deepcopy(fs),'feature_labels':{key:feature_text({key:value},bundle['locale'])for key,value in fs.items()},
+        'variants':[{key:deepcopy(v.get(key))for key in ('form','original_form_id','source_locator','source_pattern_ids','labels','source_attributes')}
+            for v in s['variants']],'pattern_memberships':memberships})
    submitted={a['slot_locator']for a in le.get('submitted_analyses',[])}
    noteworthy=[r for r,s in zip(rows,le['slots'])if
        (all(s['normalized_features'].get(k)==v for k,v in focus.items())if focus else
@@ -151,7 +156,10 @@ def reader(bundle):
    head_labels=[feature_text({key:value},bundle['locale'])for key,value in grammar.items()]
    if head_labels:title+=' · '+', '.join(head_labels)
    pattern_details=[{'title':('Schema di flessione 'if it else'Vzorec pregibanja ')+str(number+1),'text':str(len(pat['members']))+(' forme associate nel paradigma completo.'if it else' povezanih oblik v celotnem pregibanju.')}for number,pat in enumerate(le['patterns'])]
-   row={'title':title,'text':(('Frequenza del lessema: 'if it else'Pogostnost leksema: ')+freq if freq else ('Frequenza non registrata.'if it else'Pogostnost ni zapisana.')),'label':'Sloleks 3.1 · '+status_label(le['source_status']),'details':status_details(le['source_status'])+pattern_details,'record_id':le['source_entry_id'],'source_occurrence_key':occurrence,'items':noteworthy[:6],'forms':rows}
+   row={'title':title,'text':(('Frequenza del lessema: 'if it else'Pogostnost leksema: ')+freq if freq else ('Frequenza non registrata.'if it else'Pogostnost ni zapisana.')),'label':'Sloleks 3.1 · '+status_label(le['source_status']),'details':status_details(le['source_status'])+pattern_details,'record_id':le['source_entry_id'],'source_occurrence_key':occurrence,'items':noteworthy[:6],'forms':rows,
+       'grammatical_type':le['grammatical_type'],'grammatical_features':deepcopy(grammar),'language':le.get('language'),
+       'paradigm_focus':{key:value for key,value in focus.items()if key in {'gender','degree','vform','case','number'}
+           and any(s['normalized_features'].get(key)==value for s in le['slots'])}}
    (alternatives if state=='alternative'else morphology).append(row)
  section('Forme e flessione'if it else'Oblike in pregibanje',morphology)
  synonyms=[];collocations=[];loris=[];terms=[]

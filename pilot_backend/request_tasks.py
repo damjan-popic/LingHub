@@ -73,10 +73,10 @@ def grammar_decision(interpretation,locale):
     if not reasons:return None
     target='grammar_target_binding_unresolved'in reasons
     if locale=='it':
-        message=('Per quale espressione vuoi la forma? Indica l’espressione, il caso e, se necessario, il numero.'if target else
+        message=('Per quale espressione vuoi la forma?'if target else
                  'Indica quale caso e, se necessario, quale numero vuoi per ciascuna espressione.')
     else:
-        message=('Za kateri izraz želite obliko? Navedite izraz, sklon in po potrebi število.'if target else
+        message=('Za kateri izraz želite obliko?'if target else
                  'Navedite, kateri sklon in morebitno število želite za posamezni izraz.')
     return {'kind':'grammar_request_clarification','text':message,'resources':[],
             'ambiguities':reasons}

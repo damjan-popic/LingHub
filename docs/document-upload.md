@@ -120,9 +120,11 @@ the unchanged full frozen-reader identity remain available. Only the complete
 selected advice units receive support IDs. This creates no executable rule or
 automatic preferred equivalent; A5e remains qualified, proposed source advice.
 
-Missing governing context, invalid pins/ranges, unknown scope annotations or
-unresolved editorial dependencies retain the full passage with an explicit
-fallback reason. Hash/range checks prove identity and exact inclusion, not
+Malformed plan schemas, duplicate parent plans and plans naming an absent
+parent reject before projection. Structurally valid plans with missing governing
+context, invalid pins/ranges, unknown scope annotations or unresolved editorial
+dependencies retain the full passage with an explicit fallback reason.
+Hash/range checks prove identity and exact inclusion, not
 semantic completeness. Establishing the required scope dependencies is the
 explicit inspected-plan assumption; a client or model cannot self-certify it.
 Translation selections remain unavailable in this bounded version. Typed ready comma tasks budget the actual

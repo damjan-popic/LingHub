@@ -17,8 +17,17 @@ be reopened from the document list.
 Each section retains its exact original, proposed wording, explanations and
 frozen sources. The user can download a report as TXT/Word and, after every
 section has a usable draft, download the proposed Word document. A failed,
-cancelled or unreviewed section blocks the complete draft download; partial
-reports remain available and identify missing work.
+cancelled or unreviewed section, including a recorded failed requested
+sub-operation, blocks the complete draft download. Bounded source support by
+itself does not block export. Reports identify missing work.
+
+The user separately authorized partial proofreading Word drafts on 11 November
+2026. An explicit partial download is available after proofreading is terminal:
+it applies available bound proposals and retains the original text where no
+proposal is available. Its filename and visible opening label identify it as
+partial; the report identifies each retained/proposed section. Saved model
+results stay unchanged. This option does not apply to translation and does not
+relax complete-draft eligibility or edit validation.
 
 Word drafts use the uploaded package to retain paragraph styles, tables,
 images and relationships. Body paragraphs, table cells, headers, footers,
@@ -46,6 +55,13 @@ whitespace. Protected inline expressions stay together within the 3,000-codepoin
 hard limit. Adjacent exact slices retain all original characters and are rejoined
 for draft export. This bounded packaging does not guarantee that a provider
 operation will finish; failures retain partial reports and block a complete draft.
+For a terminal proofreading job, an explicit separate partial Word download is
+available. It carries a visible partial-review title and explanation, retains
+available proposals, and preserves the exact original text where no proposal
+exists. The report identifies these sections and any failed sub-operation.
+Translation has no partial Word export. A recorded failed proofreading
+sub-operation blocks the complete draft even when a separate supported comma
+correction is available; partial source coverage alone does not block it.
 
 Original text, original Word packages, task options, section links and frozen
 results live in the existing protected account SQLite store and its existing
@@ -76,6 +92,11 @@ Source lookup uses one literal contiguous snippet of at most 500 codepoints
 per section, preserving phrase adjacency within the existing capture limits.
 Direct recorded advice and term matches are fitted ahead of generic material;
 the full frozen records and their qualifications remain available in readers.
+Pinned native morphology nominations can provide the exact observed source
+surface for input relevance and terminology hints. A whole query returned by a
+contained raw lookup is not treated as a term occurrence. These annotations
+retain native ambiguity, release pins and scope; they do not select an
+equivalent or establish that a source applies.
 When a review has exact native advice or term nominations, only those whole
 records enter its writer request; the omitted records remain in the saved
 readers and coverage is explicitly partial. Review passages are represented
@@ -105,6 +126,12 @@ All output remains a draft requiring human review. Schema, source membership,
 quoted support and protected values are mechanically checked; these checks do
 not establish linguistic entailment, complete error coverage or translation
 quality. Original failures and provider observations remain preserved.
+Standalone reports include real source titles and authenticated frozen-reader
+links, plus the saved answer destination. They distinguish edit support from
+sources present in a retained writer request and from additional retrieval
+context. Missing or ambiguous writer-selection observations are marked unknown;
+neither retrieval nor presence in the writer input proves linguistic use.
+These references require the original KLIKai instance and the same account.
 Valid independent dotted dates can vary padding and spacing while retaining
 the same ordered day, month and year. Changed values, identifiers, URLs and
 other protected numerals retain their strict checks.

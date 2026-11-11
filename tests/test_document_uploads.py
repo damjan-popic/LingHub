@@ -274,3 +274,31 @@ def test_uploaded_word_original_is_used_by_authenticated_draft_export(rig):
     assert document_files.extract(response.content,'draft.docx')['blocks'][0]['text']=='Spoštovani, prosim za potrdilo.'
     with app.state.store.connect()as db:
         assert db.execute('SELECT package FROM document_originals').fetchone()[0]==original
+
+
+def test_failed_suboperation_blocks_complete_word_but_explicit_partial_is_labelled(rig):
+    from pilot_backend import document_files
+    app,client,adapter,_=rig;headers=login(client)
+    doc=upload(client,headers,b'Original text.')
+    def freeze(family,policy):
+        return {'bundle':{'task':family['request_options']['document_task']},'identity':{'test':'partial'}}
+    def generate(bundle,tier,model,parent=None):
+        task=bundle['task']
+        return {'status':'partial','answer_support':'partial','answer_md':'Original text.',
+            'limitations':[{'code':'document_transform_failed','scope':'answer'}],
+            'document_result':{**{k:task[k]for k in ('mode','source_language','target_language','locale','source_sha256')},
+                'proposed_text':'Original text.','edits':[],'notes':[],'requires_human_review':True,'status':'draft'}}
+    adapter.freeze=freeze;adapter.generate=generate
+    assert start(client,headers,doc['document_id']).status_code==200;finish(app)
+    before=client.get('/api/pilot/documents/'+doc['document_id']).json()
+    assert before['state']=='complete'and before['sections'][0]['answer_support']=='partial'
+    assert client.get('/api/pilot/documents/'+doc['document_id']+'/draft/docx').status_code==409
+    partial=client.get('/api/pilot/documents/'+doc['document_id']+'/draft/docx?partial=true')
+    assert partial.status_code==200 and'klikai-partial-draft.docx'in partial.headers['content-disposition']
+    blocks=document_files.extract(partial.content,'partial.docx')['blocks']
+    assert blocks[0]['text']=='Delni osnutek jezikovnega pregleda'
+    assert blocks[-1]['text']=='Original text.'
+    assert client.get('/api/pilot/documents/'+doc['document_id']).json()==before
+    report=client.get('/api/pilot/documents/'+doc['document_id']+'/export/txt').text
+    assert ORIGIN+'/api/pilot/documents/'+doc['document_id']in report
+    assert ORIGIN+'/api/pilot/families/'+before['sections'][0]['family_id']in report

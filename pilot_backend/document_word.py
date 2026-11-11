@@ -385,6 +385,7 @@ def _rewrite(original_docx_bytes, sections):
     if not isinstance(sections,list)or not 1<=len(sections)<=files.MAX_BLOCKS:
         _unavailable()
     if files.repeated_translation_sections(sections):_unavailable()
+    if any(files.failed_document_operation(s)for s in sections):_unavailable()
     proposals = {}
     paragraph_mappings={};paragraph_modes={};paragraph_edits={}
     output_size = 0
@@ -523,3 +524,37 @@ def rewrite(original_docx_bytes, sections):
     except (BadZipFile, OSError, RuntimeError, ValueError, KeyError, TypeError,
             NotImplementedError, UnicodeError, RecursionError):
         _unavailable()
+
+
+def _label_partial_review(data, locale='sl'):
+    """Add a visible partial-review label without rewriting existing markup."""
+    label=('Bozza parziale di revisione'if locale=='it'else'Delni osnutek jezikovnega pregleda')
+    note=('Contiene soltanto le proposte disponibili. Le altre parti conservano il testo originale. Non è una revisione completa; controlla le modifiche e il rapporto con limiti e fonti.'if locale=='it'else
+          'Vsebuje razpoložljive predloge popravkov. Drugi deli ohranijo izvirno besedilo. To ni popoln jezikovni pregled; preverite spremembe in poročilo z omejitvami ter viri.')
+    namespace=files.W[1:-1]
+    def paragraph(text,bold=False):
+        return ('<kp:p xmlns:kp="'+namespace+'">'+('<kp:pPr><kp:pStyle kp:val="Title"/></kp:pPr>'if bold else'')+'<kp:r>'+
+            ('<kp:rPr><kp:b/><kp:color kp:val="000000"/></kp:rPr>'if bold else'')+
+            '<kp:t>'+escape(text)+'</kp:t></kp:r></kp:p>').encode()
+    with files._package(data)as archive:
+        raw=_utf8_xml(archive.read('word/document.xml'));positions=[]
+        parser=expat.ParserCreate(namespace_separator='}')
+        def start(name,attributes):
+            if name==_W+'body':positions.append(_tag_end(raw,parser.CurrentByteIndex))
+        parser.StartElementHandler=start;parser.Parse(raw,True)
+        if len(positions)!=1:_unavailable()
+        changed=raw[:positions[0]]+paragraph(label,True)+paragraph(note)+raw[positions[0]:]
+        files._xml(changed)
+        if sum(i.file_size for i in archive.infolist())+len(changed)-len(archive.read('word/document.xml'))>files.MAX_EXPANDED:_unavailable()
+        output=io.BytesIO()
+        with ZipFile(output,'w')as target:
+            target.comment=archive.comment
+            for info in archive.infolist():
+                target.writestr(copy(info),changed if info.filename=='word/document.xml'else archive.read(info.filename))
+    return output.getvalue()
+
+
+def label_partial_review(data,locale='sl'):
+    try:return _label_partial_review(data,locale)
+    except Failure:raise
+    except(BadZipFile,OSError,RuntimeError,ValueError,KeyError,TypeError,expat.ExpatError):_unavailable()

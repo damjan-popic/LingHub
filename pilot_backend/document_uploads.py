@@ -172,7 +172,7 @@ class Documents:
                 'answer_method': result.get('answer_method'),
                 'document_result': result.get('document_result'),
                 'limitations': result.get('limitations', []),
-                'sources': [{k: e[k] for k in ('local_number', 'evidence_id', 'title', 'source_label', 'url')
+                'sources': [{k: e[k] for k in ('local_number', 'evidence_id', 'title', 'source_label', 'url','source_id','source_revision','locator')
                              if k in e} for e in result.get('evidence', []) if isinstance(e, dict)]})
         warnings=json.loads(row['warnings'])
         if document_files.repeated_translation_sections(sections):warnings.append('document_repeated_translation')
@@ -251,11 +251,19 @@ class Documents:
                            (owner,*owned))
         return {'acknowledged': True}
 
-    def export(self, owner, identifier, fmt, draft=False):
+    def export(self, owner, identifier, fmt, draft=False, origin=None, api_path='/api/pilot', partial=False):
         if fmt not in {'txt', 'docx'}:
             raise Failure('invalid_request')
         document = self.get(owner, identifier)
         if draft:
+            if partial:
+                if fmt!='docx':raise Failure('invalid_request')
+                assembled=document_files.partial_review_document(document)
+                with self.store.connect()as db:
+                    original=db.execute('SELECT package FROM document_originals WHERE document_id=?',(identifier,)).fetchone()
+                from .document_word import rewrite,label_partial_review
+                data=rewrite(original[0],assembled['sections'])if original else document_files.draft_docx(assembled)
+                return label_partial_review(data,document['options'].get('locale','sl'))
             # Validate completeness before consulting any source package.
             document_files.draft_blocks(document)
             if fmt=='docx':
@@ -266,8 +274,21 @@ class Documents:
                     return rewrite(original[0],document['sections'])
                 return document_files.draft_docx(document)
             return document_files.draft_text(document)
-        report = {**document, **document['options'], 'sections': [
-            {**s, 'status': s['state']} for s in document['sections']]}
+        if partial:raise Failure('invalid_request')
+        from .document_report_sources import report_section
+        from urllib.parse import quote
+        api_root=(origin or'')+api_path
+        sections=[]
+        with self.store.connect()as db:
+            for section in document['sections']:
+                saved=db.execute("SELECT f.bundle,o.snapshot FROM runs r JOIN families f ON f.id=r.family_id "
+                    "LEFT JOIN run_observations o ON o.run_id=r.id WHERE r.family_id=?AND r.tier='short' "
+                    "AND r.assignment_id IS NULL ORDER BY r.revision DESC LIMIT 1",(section.get('family_id'),)).fetchone()
+                bundle=json.loads(saved[0]or'{}')if saved else{}
+                snapshot=json.loads(saved[1]or'{}')if saved else{}
+                sections.append(report_section({**section,'status':section['state']},bundle,snapshot,api_root))
+        report = {**document, **document['options'], 'sections':sections,
+                  'saved_result_url':api_root+'/documents/'+quote(identifier,safe='')}
         return document_files.report_docx(report) if fmt == 'docx' else document_files.report_text(report)
 
     @serialized

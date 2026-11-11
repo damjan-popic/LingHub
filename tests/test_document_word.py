@@ -26,6 +26,19 @@ def test_word_export_rejects_replayed_translation_of_different_paragraph_slice()
     with pytest.raises(Failure,match='document_draft_unavailable'):rewrite(data,rows)
 
 
+def test_partial_label_preserves_existing_word_markup_and_other_parts():
+    from pilot_backend.document_word import label_partial_review
+    data=package('<w:p><w:r><w:t>Original paragraph</w:t></w:r></w:p>',{'word/media/preserved.bin':b'image'})
+    labelled=label_partial_review(data,'sl')
+    with ZipFile(io.BytesIO(data))as old,ZipFile(io.BytesIO(labelled))as new:
+        assert old.namelist()==new.namelist()
+        assert new.read('word/media/preserved.bin')==old.read('word/media/preserved.bin')
+        assert b'<w:p><w:r><w:t>Original paragraph</w:t></w:r></w:p>'in new.read('word/document.xml')
+    blocks,_=files._word_blocks(labelled)
+    assert blocks[0][1]=='Delni osnutek jezikovnega pregleda'
+    assert blocks[-1][1]=='Original paragraph'
+
+
 def package(body, extras=None):
     output = io.BytesIO()
     with ZipFile(output, 'w', ZIP_DEFLATED) as archive:

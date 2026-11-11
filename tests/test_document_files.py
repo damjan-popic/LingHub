@@ -203,3 +203,28 @@ def test_translated_paragraph_replay_blocks_export_and_is_visible_in_report():
     assert files.draft_docx(report)
     report['sections'][1].update(location='text@7:14',text='Primo. ')
     assert files.draft_docx(report)
+
+
+def test_complete_export_distinguishes_failed_operation_from_partial_support():
+    section={'index':0,'location':'text@0:8','text':'Izvirnik','state':'complete','answer_support':'partial',
+        'limitations':[{'code':'document_transform_failed','scope':'answer'}],
+        'document_result':{'mode':'review','status':'draft','proposed_text':'Predlog','edits':[],'notes':[]}}
+    report={'name':'review.txt','mode':'review','state':'complete','source_language':'sl','locale':'sl','sections':[section]}
+    with pytest.raises(Failure,match='document_draft_unavailable'):files.draft_docx(report)
+    assert 'Del zahtevane obdelave ni uspel'in files.report_text(report).decode()
+    section['limitations']=[{'code':'document_draft_requires_review','scope':'answer'}]
+    assert files.draft_docx(report)  # Bounded partial support is not a failed operation.
+
+
+def test_partial_review_keeps_valid_proposal_and_falls_back_without_changing_history():
+    from copy import deepcopy
+    report={'state':'failed','options':{'mode':'review'},'sections':[
+        {'state':'complete','text':'Original A','location':'text@0:10',
+         'limitations':[{'code':'document_transform_failed'}],
+         'document_result':{'mode':'review','status':'draft','proposed_text':'Proposal A','edits':[]}},
+        {'state':'failed','text':'Original B','location':'other@0:10','document_result':None}]}
+    before=deepcopy(report);partial=files.partial_review_document(report)
+    assert report==before
+    assert files.draft_blocks(partial)==['Proposal A','Original B']
+    report['options']['mode']='translate'
+    with pytest.raises(Failure,match='document_draft_unavailable'):files.partial_review_document(report)

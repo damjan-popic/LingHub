@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 import stat
 from pathlib import PurePosixPath
@@ -313,6 +314,12 @@ def repeated_translation_sections(sections):
     return repeated
 
 
+def failed_document_operation(section):
+    """A recorded operation failure differs from bounded source coverage."""
+    return any(isinstance(item,dict)and item.get('code')=='document_transform_failed'
+               for item in section.get('limitations',[]))
+
+
 def _report_blocks(report):
     it=report.get('locale')=='it';mode=report.get('mode')
     title=('Rapporto di traduzione'if it else'Poročilo o prevodu')if mode=='translate'else(
@@ -326,9 +333,15 @@ def _report_blocks(report):
     yield 'body',('Il rapporto confronta originale e proposta, indica la copertura e distingue le fonti delle modifiche dal materiale di contesto. Le proposte richiedono una revisione umana.'if it else
         'Poročilo primerja izvirnik in predlog, opiše obseg obdelave ter loči vire sprememb od gradiva za kontekst. Predloge mora preveriti človek.')
     yield 'body',('Il rapporto usa una propria impaginazione. La bozza Word è un file separato.'if it else'Poročilo uporablja svojo postavitev. Wordov osnutek je ločena datoteka.')
+    if mode=='review':
+        yield 'body',('La bozza parziale di revisione, se scaricata, contiene le proposte disponibili e conserva invariato l’originale dove manca una proposta. Non costituisce una revisione completa; richiede un controllo umano.'if it else'Delni osnutek pregleda, če ga prenesete, vsebuje razpoložljive predloge; kjer predloga ni, ohrani izvirnik brez sprememb. To ni popoln jezikovni pregled; zahteva človeški pregled.')
+    if report.get('saved_result_url'):
+        yield 'body',('Risultato salvato sul servizio KLIKai originale; richiede l’accesso con lo stesso account.'if it else'Shranjeni rezultat na izvornem primerku KLIKai; potrebna je prijava z istim računom.')
+        yield 'body',report['saved_result_url']
     sections=report.get('sections',[])
     repeated=repeated_translation_sections(sections)
-    if mode in {'review','translate'} and (repeated or report.get('state')!='complete' or not sections or any(
+    failed_operations=any(failed_document_operation(s)for s in sections)
+    if mode in {'review','translate'} and (repeated or failed_operations or report.get('state')!='complete' or not sections or any(
             s.get('state')!='complete' or (s.get('document_result')or{}).get('status')!='draft'for s in sections)):
         yield 'body',('Il documento non ha ancora una bozza completa. Il rapporto conserva anche le sezioni non completate o non revisionate.'if it else
             'Dokument še nima popolnega osnutka. Poročilo ohrani tudi odseke, ki niso bili dokončani ali pregledani.')
@@ -346,8 +359,13 @@ def _report_blocks(report):
         label=report_location(section.get('location',''),report.get('locale','sl'))
         if parts[key]>1:label+=(' · parte 'if it else' · del ')+str(seen[key])+'/'+str(parts[key])
         yield 'body',label
+        if section.get('saved_result_url'):
+            yield 'body',('Risposta salvata e identità delle fonti'if it else'Shranjeni odgovor in identitete virov')
+            yield 'body',section['saved_result_url']
         result=section.get('document_result')or{};state=section.get('state',section.get('status','unknown'))
-        if position in repeated:
+        if failed_document_operation(section):
+            status='Una sotto-operazione richiesta non è riuscita; la bozza completa non è disponibile.'if it else'Del zahtevane obdelave ni uspel; popoln osnutek ni na voljo.'
+        elif position in repeated:
             status='Bozza ripetuta da un’altra parte; traduzione da verificare.'if it else'Ponovljen osnutek drugega dela; prevod je treba preveriti.'
         elif result.get('status')=='not_reviewed':
             status='Non revisionato; originale conservato senza modifiche.'if it else'Ni pregledano; izvirnik je ohranjen brez sprememb.'
@@ -359,6 +377,10 @@ def _report_blocks(report):
             'cancelled':('Elaborazione interrotta.','Obdelava je ustavljena.'),'queued':('In attesa.','Čaka na obdelavo.'),
             'running':('Elaborazione in corso.','Obdelava poteka.')} .get(state,('Non elaborato.','Ni obdelano.')))[0 if it else 1]
         yield 'body',status
+        if mode=='review':
+            available=section.get('state')=='complete'and result.get('status')=='draft'and isinstance(result.get('proposed_text'),str)
+            yield 'body',(('Nella bozza parziale: proposta disponibile; controlla le modifiche.'if available else'Nella bozza parziale: originale conservato senza modifiche.')if it else(
+                'V delnem osnutku: razpoložljivi predlog; preverite spremembe.'if available else'V delnem osnutku: izvirnik ohranjen brez sprememb.'))
         yield 'subheading','Originale'if it else'Izvirnik'
         yield 'body',str(section.get('text',''))
         yield 'subheading','Proposta'if it else'Predlagano besedilo'
@@ -368,6 +390,10 @@ def _report_blocks(report):
                 'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.')}
             yield 'body',known.get(note,(note,note))[0 if it else 1]
         sources=section.get('sources')or[]
+        if section.get('writer_input_selection')=='unknown':
+            yield 'body',('La selezione delle fonti inviate al modello non è ricostruibile dai dati conservati. Non viene dedotta dall’elenco dei risultati trovati.'if it else'Iz shranjenih podatkov ni mogoče ugotoviti izbora virov, poslanih modelu. Izbora ne sklepamo iz seznama najdenih zadetkov.')
+        if section.get('unresolved_writer_evidence_ids'):
+            yield 'body',('Identità delle fonti nell’input senza una scheda recuperabile: 'if it else'Identitete virov v vhodu brez dosegljivega referenčnega zapisa: ')+', '.join(section['unresolved_writer_evidence_ids'])
         numbers={source.get('evidence_id'):source.get('local_number',i+1)for i,source in enumerate(sources)}
         used=set()
         for edit in result.get('edits',[]):
@@ -383,17 +409,26 @@ def _report_blocks(report):
         contextual=[s for s in sources if s.get('evidence_id')not in used]
         for rows,heading in [(claimed,'Fonti delle modifiche'if it else'Viri sprememb'),(contextual,'Materiale di contesto'if it else'Gradivo za kontekst')]:
             if not rows:continue
-            if rows is contextual and result:
-                subject=('traduzione'if mode=='translate'else'revisione')if it else('prevoda'if mode=='translate'else'pregleda')
-                yield 'body',('Le altre fonti trovate restano consultabili nel risultato salvato. Non sono presentate come prova di modifiche o della correttezza dell’intera '+subject+'.'if it else'Drugi najdeni viri ostajajo na voljo ob shranjenem rezultatu. Niso prikazani kot potrditev sprememb ali pravilnosti celotnega '+subject+'.')
-                continue
             yield 'subheading',heading
-            if rows is contextual:yield 'body',('Questo materiale non certifica la correttezza dell’intera traduzione e non è citato a sostegno di una modifica specifica.'if it else'To gradivo ne potrjuje pravilnosti celotnega prevoda in ni navedeno kot podpora posamezni spremembi.')
+            if rows is contextual:yield 'body',('Questo materiale non è una prova della correttezza dell’intero testo. Non è conservato un collegamento a specifiche scelte terminologiche.'if it else'To gradivo ni potrditev pravilnosti celotnega besedila. Povezava s posameznimi terminološkimi odločitvami ni shranjena.')
             for source in rows:
                 title=' '.join(str(source.get('title')or source.get('source_label')or'').split())
                 number=source.get('local_number')or next(i+1 for i,s in enumerate(sources)if s is source)
                 yield 'body','['+str(number)+'] '+title
-                if source.get('url'):yield 'body',str(source['url'])
+                if rows is contextual:
+                    roles={'writer_input_context':('Fonte inclusa nell’input conservato del modello; uso in una specifica conclusione non attestato.','Vir je v shranjenem vhodu modela; uporaba pri posameznem sklepu ni potrjena.'),
+                           'retrieval_context':('Materiale trovato, escluso dall’input conservato del modello.','Najdeno gradivo, ki ni bilo v shranjenem vhodu modela.'),
+                           'selection_unknown':('Selezione per l’input del modello sconosciuta.','Izbor za vhod modela ni znan.')}
+                    yield 'body',roles.get(source.get('report_role'),roles['selection_unknown'])[0 if it else 1]
+                if source.get('frozen_source_url'):
+                    yield 'body',('Fonte congelata richiede accesso allo stesso account'if it else'Zamrznjeni vir zahteva prijavo z istim računom')
+                    yield 'body',source['frozen_source_url']
+                else:
+                    if source.get('evidence_id'):yield 'body',('ID fonte 'if it else'ID vira ')+source['evidence_id']
+                    if source.get('source_revision'):yield 'body',('Revisione 'if it else'Revizija ')+source['source_revision']
+                    if source.get('locator'):
+                        yield 'body',('Localizzatore 'if it else'Lokator ')+json.dumps(source['locator'],ensure_ascii=False,sort_keys=True)
+                if source.get('url'):yield 'body',('Indirizzo della pubblicazione 'if it else'Naslov objave ')+str(source['url'])
 
 
 def _report_lines(report):
@@ -491,7 +526,8 @@ def draft_blocks(report):
     blocks=[]
     for section in report['sections']:
         result=section.get('document_result')or{}
-        if section.get('state')!='complete'or result.get('status')!='draft'or not isinstance(result.get('proposed_text'),str):
+        if (section.get('state')!='complete'or result.get('status')!='draft'
+                or failed_document_operation(section)or not isinstance(result.get('proposed_text'),str)):
             _invalid('document_draft_unavailable',409)
         proposed,_=draft_section_text(section)
         location=section['location'].rsplit('@',1)[0]
@@ -503,6 +539,29 @@ def draft_blocks(report):
 
 def draft_text(report):
     return '\n\n'.join(draft_blocks(report)).encode('utf-8')
+
+
+def partial_review_document(report):
+    """Assemble a separate partial export copy; never change saved results."""
+    mode=report.get('mode',(report.get('options')or{}).get('mode'))
+    sections=report.get('sections')or[]
+    if (mode!='review'or report.get('state')not in {'complete','failed','cancelled'}or not sections
+            or any(s.get('state')in {'queued','running','pending'}for s in sections)):
+        _invalid('document_draft_unavailable',409)
+    copies=[]
+    for section in sections:
+        result=section.get('document_result')or{}
+        valid=(section.get('state')=='complete'and result.get('status')=='draft'
+               and result.get('mode')=='review'and isinstance(result.get('proposed_text'),str))
+        if valid:
+            proposed={**result,'edits':[dict(edit)for edit in result.get('edits',[])]}
+        else:
+            source=_valid_text(section['text'])
+            proposed={'mode':'review','status':'draft','proposed_text':source,'edits':[],
+                      'source_sha256':hashlib.sha256(source.encode()).hexdigest()}
+        copies.append({**section,'state':'complete','limitations':[],
+                       'document_result':proposed,'partial_original_preserved':not valid})
+    return {**report,'state':'complete','sections':copies}
 
 
 def draft_docx(report):

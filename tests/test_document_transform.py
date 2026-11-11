@@ -601,6 +601,24 @@ def test_mixed_review_keeps_independent_noncomma_edit_and_source_bound_comma(mon
         'deterministic_result']['applied_unit_receipts'] == comma['deterministic_result']['applied_unit_receipts']
     assert value['execution']['inference_performed'] is True
     assert value['answer_kind'] == 'mixed'
+    def unavailable(*args):raise Failure('source_timeout',503)
+    monkeypatch.setattr(doc,'_generate_general',unavailable)
+    incomplete=doc._mixed_document_answer(gateway,bundle,'answer','auto',None)
+    assert incomplete['document_result']['status']=='draft'
+    assert any(r['code']=='document_transform_failed'for r in incomplete['limitations'])
+
+
+@pytest.mark.parametrize('canonical,surface',[('pouk na daljavo','pouku na daljavo'),('učni načrt','učnem načrtu')])
+def test_native_pinned_morphology_surface_is_relevant_without_fabricated_query_match(canonical,surface):
+    row={'capture_kind':'terminology_record','capture':{'standardized_terms':[canonical],
+        'matched_forms':[{'language':'sl','term':canonical,'matched_query':surface,
+            'match_tier':'morphology_exact','normalization':'morphology',
+            'lexicon_release_id':'fixture-lexicon','query_signature':'native-signature','ambiguity_cost':4}]}}
+    text='Informacije o '+surface+'.'
+    assert doc._native_review_cue(row,text)==2
+    assert doc._literal_term_length(row,text)==len(surface)
+    row['capture']['matched_forms'][0].update(match_tier='contained',normalization='raw',matched_query=text)
+    assert doc._native_review_cue(row,text)==0
 
 
 def test_original_native_sentence_spans_are_bound_and_proposed_only_offsets_are_refused():

@@ -266,19 +266,9 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
             unified.expand_request_reference_rules(gateway, discovery_family, definitions,
                 found, coverage, details, pool, exact_heading_only=True)
     found = unified.merge_source_matches(found)
-    def priority(row):
-        cue = _native_review_cue(row, task['source_text'])
-        if cue >= 2:
-            return (0, -_literal_term_length(row, task['source_text']))
-        original = ' '.join((row.get('capture', {}).get('original_text') or '').split())
-        if task['mode'] == 'review' and row.get('source_slug') == 'sp2001' and row.get('capture_kind') == 'resource_record':
-            for index, heading in enumerate(REVIEW_REFERENCE_HEADINGS):
-                if heading in original:
-                    return (1, index)
-        return (2 if cue else 3, 0)
     # Exact source-owned term/advice matches precede generic large headings.
     # Every original remains frozen; this changes fitting order, not authority.
-    found.sort(key=priority)
+    found.sort(key=lambda row:_writer_source_priority(row,task))
     for row in found:
         row['evidence_id'] = capture_id(row)
         # Identify this exact captured record, independently of its mutable URL
@@ -329,7 +319,7 @@ def _native_review_cue(row, text):
     if row.get('capture_kind') == 'terminology_record':
         return 2 if any(isinstance(term, str) and len(term) >= 4
             and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', folded)
-            for key in ('original_terms', 'standardized_terms') for term in raw.get(key, [])) else 0
+            for term in _native_term_surfaces(raw)) else 0
     original = raw.get('original_text') or ''
     words = set(re.findall(r'[^\W\d_]{4,}', folded))
     common = {'kako', 'tudi', 'lahko', 'samo', 'zato', 'medtem', 'oziroma', 'kadar', 'torej'}
@@ -354,9 +344,31 @@ def _native_review_cue(row, text):
 
 def _literal_term_length(row, text):
     raw = row.get('capture') or {}
-    return max((len(term) for key in ('original_terms', 'standardized_terms')
-        for term in raw.get(key, []) if isinstance(term, str) and len(term) >= 4
+    return max((len(term) for term in _native_term_surfaces(raw) if isinstance(term, str) and len(term) >= 4
         and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text.casefold())), default=0)
+
+
+def _native_term_surfaces(capture):
+    for key in ('original_terms','standardized_terms'):
+        yield from capture.get(key,[])
+    for entry in capture.get('term_entries',[]):
+        if isinstance(entry,dict):yield entry.get('term')
+    for nomination in capture.get('matched_forms',[]):
+        if (isinstance(nomination,dict)and nomination.get('language')in {'sl','it'}
+                and nomination.get('match_tier')=='morphology_exact'and nomination.get('normalization')=='morphology'
+                and isinstance(nomination.get('lexicon_release_id'),str)and nomination['lexicon_release_id']
+                and isinstance(nomination.get('query_signature'),str)and nomination['query_signature']):
+            yield nomination.get('matched_query')
+
+
+def _writer_source_priority(row,task):
+    cue=_native_review_cue(row,task['source_text'])
+    if cue>=2:return (0,-_literal_term_length(row,task['source_text']))
+    original=' '.join((row.get('capture',{}).get('original_text')or'').split())
+    if task['mode']=='review'and row.get('source_slug')=='sp2001'and row.get('capture_kind')=='resource_record':
+        for index,heading in enumerate(REVIEW_REFERENCE_HEADINGS):
+            if heading in original:return (1,index)
+    return (2 if cue else 3,0)
 
 
 def _review_writer_selection(task, matches):
@@ -913,6 +925,9 @@ def _mixed_document_answer(gateway, bundle, tier, model, parent):
             if status == 'draft' else 'not_reviewed_no_supported_comma_application'}
     checked_result(document)
     out = deepcopy(generic)
+    if generic.get('status')=='failed'and not any(r.get('code')=='document_transform_failed'
+            for r in out.get('limitations',[])if isinstance(r,dict)):
+        out.setdefault('limitations',[]).append({'code':'document_transform_failed','scope':'answer'})
     evidence = {r['evidence_id']: deepcopy(r) for result in [generic, *component_results]
                 for r in result.get('evidence', [])}
     used = set(eid for edit in edits for eid in edit['evidence_ids'])

@@ -245,15 +245,20 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/documents/{identifier}/export/{fmt}')
     async def export_document(identifier:str,fmt:str,request:Request):
         u=document_user(request)
-        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt)
+        origin=str(request.base_url).rstrip('/')
+        if origin not in config['allowed_origins']:
+            trusted=[o for o in config['allowed_origins']if urlsplit(o).netloc==request.headers.get('host')]
+            origin=trusted[0]if len(trusted)==1 else None
+        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt,False,origin,api)
         media='application/vnd.openxmlformats-officedocument.wordprocessingml.document'if fmt=='docx'else'text/plain; charset=utf-8'
         return Response(data,media_type=media,headers={'Content-Disposition':'attachment; filename="klikai-report.'+fmt+'"'})
     @app.get(api+'/documents/{identifier}/draft/{fmt}')
-    async def draft_document(identifier:str,fmt:str,request:Request):
+    async def draft_document(identifier:str,fmt:str,request:Request,partial:bool=False):
         u=document_user(request)
-        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt,True)
+        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt,True,None,api,partial)
         media='application/vnd.openxmlformats-officedocument.wordprocessingml.document'if fmt=='docx'else'text/plain; charset=utf-8'
-        return Response(data,media_type=media,headers={'Content-Disposition':'attachment; filename="klikai-draft.'+fmt+'"'})
+        filename='klikai-partial-draft.'if partial else'klikai-draft.'
+        return Response(data,media_type=media,headers={'Content-Disposition':'attachment; filename="'+filename+fmt+'"'})
     @app.get(api+'/capabilities')
     async def capabilities(request:Request):
         u=user(request);result=capability_result(u)

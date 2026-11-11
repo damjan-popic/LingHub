@@ -18,15 +18,17 @@ const api=async(path,options={})=>{
   doc.state='running';doc.options=options.body;saved[0].state='running';return structuredClone(doc);
  }
  if(path==='/documents/doc-1'){
-  doc.state='complete';doc.processed=1;saved[0].state='complete';Object.assign(doc.sections[0],{state:'complete',family_id:'family-1',output:'Predlog: Čebelica.',document_result:{status:'draft',proposed_text:'Čebelica.',requires_human_review:true}});return structuredClone(doc);
+  doc.state=window.partialFixture?'failed':'complete';doc.processed=1;saved[0].state=doc.state;Object.assign(doc.sections[0],{state:'complete',family_id:'family-1',output:'Predlog: Čebelica.',document_result:{status:'draft',proposed_text:'Čebelica.',requires_human_review:true},limitations:window.partialFixture?[{code:'document_transform_failed'}]:[]});return structuredClone(doc);
  }
  if(path.endsWith('/delete')){saved=[];doc=null;return {acknowledged:true};}
  if(path.includes('/export/'))return new Blob(['Source-linked report fixture']);
+ if(path.endsWith('/draft/docx?partial=true'))return new Blob(['Explicit partial draft fixture']);
  throw Error('Unexpected '+path);
 };
 const ui=documentUploads({root:document.getElementById('workspace'),api,locale:()=>locale,openFamily:async id=>{window.sourceOpened=id;},errorText:error=>error.message||'Napaka'});
 window.ui=ui;window.changeLocale=value=>{locale=value;ui.locale();};
 window.showReplayWarning=()=>{doc.warnings.push('document_repeated_translation');document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
+window.showPartialReview=()=>{window.partialFixture=true;doc.options.mode='review';doc.warnings=[];document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
 ui.session({documents:{enabled:true}});
 `;
 (async()=>{
@@ -59,6 +61,10 @@ ui.session({documents:{enabled:true}});
   await page.evaluate(()=>window.showReplayWarning());
   await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Word')&&document.querySelectorAll('.document-actions .secondary').length===0);
   assert((await page.locator('[data-document-detail]').innerText()).includes(locale==='sl'?'Wordov osnutek ni na voljo; preverite poročilo.':'La bozza Word non è disponibile; controlla il rapporto.'));
+  await page.evaluate(()=>window.showPartialReview());await page.locator('[data-partial-draft]').waitFor();
+  assert((await page.locator('[data-document-detail]').innerText()).includes(locale==='sl'?'Delni osnutek ohrani izvirnik':'La bozza parziale conserva l’originale'));
+  const partialDownload=page.waitForEvent('download');await page.locator('[data-partial-draft]').click();
+  assert.equal((await partialDownload).suggestedFilename(),'klikai-partial-draft.docx');
   if(process.env.KLIKAI_DOCUMENT_UI_OUTPUT){fs.mkdirSync(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,{recursive:true});await page.locator('#workspace').screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,`documents-${locale}-${width}.png`)});}
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(errors,[]);
   await page.evaluate(()=>window.ui.reset());assert(await page.locator('#workspace').isHidden());assert.equal(await page.locator('#workspace').textContent(),'');

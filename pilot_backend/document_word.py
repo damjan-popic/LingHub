@@ -384,6 +384,7 @@ def _rewrite(original_docx_bytes, sections):
     anchor_map=source_anchors(original_docx_bytes)
     if not isinstance(sections,list)or not 1<=len(sections)<=files.MAX_BLOCKS:
         _unavailable()
+    if files.repeated_translation_sections(sections):_unavailable()
     proposals = {}
     paragraph_mappings={};paragraph_modes={};paragraph_edits={}
     output_size = 0

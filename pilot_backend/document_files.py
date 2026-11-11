@@ -294,6 +294,25 @@ def report_location(location, locale='sl'):
     return part+(' · '+' · '.join(positions)if positions else'')
 
 
+def repeated_translation_sections(sections):
+    """Flag exact draft replay across different slices of one paragraph.
+
+    This is a conservative export check, not a semantic translation judge.
+    Identical source slices and independent paragraphs remain valid repeats.
+    """
+    seen={};repeated=set()
+    for position,section in enumerate(sections):
+        result=section.get('document_result')or{}
+        location=section.get('location');source=section.get('text');proposed=result.get('proposed_text')
+        if (section.get('state')!='complete'or result.get('status')!='draft'or result.get('mode')!='translate'
+                or not isinstance(location,str)or '@'not in location or not isinstance(source,str)
+                or not isinstance(proposed,str)or not proposed.strip()):continue
+        key=(location.rsplit('@',1)[0],result.get('source_language'),result.get('target_language'),proposed.strip())
+        if key in seen and seen[key]!=source.strip():repeated.add(position)
+        else:seen[key]=source.strip()
+    return repeated
+
+
 def _report_blocks(report):
     it=report.get('locale')=='it';mode=report.get('mode')
     title=('Rapporto di traduzione'if it else'Poročilo o prevodu')if mode=='translate'else(
@@ -308,16 +327,19 @@ def _report_blocks(report):
         'Poročilo primerja izvirnik in predlog, opiše obseg obdelave ter loči vire sprememb od gradiva za kontekst. Predloge mora preveriti človek.')
     yield 'body',('Il rapporto usa una propria impaginazione. La bozza Word è un file separato.'if it else'Poročilo uporablja svojo postavitev. Wordov osnutek je ločena datoteka.')
     sections=report.get('sections',[])
-    if mode in {'review','translate'} and (report.get('state')!='complete' or not sections or any(
+    repeated=repeated_translation_sections(sections)
+    if mode in {'review','translate'} and (repeated or report.get('state')!='complete' or not sections or any(
             s.get('state')!='complete' or (s.get('document_result')or{}).get('status')!='draft'for s in sections)):
         yield 'body',('Il documento non ha ancora una bozza completa. Il rapporto conserva anche le sezioni non completate o non revisionate.'if it else
             'Dokument še nima popolnega osnutka. Poročilo ohrani tudi odseke, ki niso bili dokončani ali pregledani.')
+    if repeated:yield 'body',('Una parte ripete la bozza di un’altra parte dello stesso paragrafo, anche se l’originale è diverso. La bozza Word non è disponibile; controlla il contenuto.'if it else
+        'Del odstavka ponovi osnutek drugega dela istega odstavka, čeprav je izvirnik drugačen. Wordov osnutek ni na voljo; preverite vsebino.')
     for warning in report.get('warnings',[]):
         if warning=='document_images_not_reviewed':yield 'body',('Le immagini sono conservate dove possibile, ma il loro contenuto non è stato revisionato né tradotto.'if it else'Slike se po možnosti ohranijo, njihova vsebina pa ni bila jezikovno pregledana ali prevedena.')
     parts={};seen={}
     for section in sections:
         key=str(section.get('location','')).rsplit('@',1)[0];parts[key]=parts.get(key,0)+1
-    for section in sections:
+    for position,section in enumerate(sections):
         number=int(section.get('index',0))+1
         yield 'heading',('Sezione 'if it else'Odsek ')+str(number)
         key=str(section.get('location','')).rsplit('@',1)[0];seen[key]=seen.get(key,0)+1
@@ -325,7 +347,9 @@ def _report_blocks(report):
         if parts[key]>1:label+=(' · parte 'if it else' · del ')+str(seen[key])+'/'+str(parts[key])
         yield 'body',label
         result=section.get('document_result')or{};state=section.get('state',section.get('status','unknown'))
-        if result.get('status')=='not_reviewed':
+        if position in repeated:
+            status='Bozza ripetuta da un’altra parte; traduzione da verificare.'if it else'Ponovljen osnutek drugega dela; prevod je treba preveriti.'
+        elif result.get('status')=='not_reviewed':
             status='Non revisionato; originale conservato senza modifiche.'if it else'Ni pregledano; izvirnik je ohranjen brez sprememb.'
         elif state=='complete'and result.get('status')=='draft':
             status=('Bozza di traduzione preparata.'if it else'Prevodni osnutek je pripravljen.')if mode=='translate'else(
@@ -360,7 +384,8 @@ def _report_blocks(report):
         for rows,heading in [(claimed,'Fonti delle modifiche'if it else'Viri sprememb'),(contextual,'Materiale di contesto'if it else'Gradivo za kontekst')]:
             if not rows:continue
             if rows is contextual and result:
-                yield 'body',('Le altre fonti trovate restano consultabili nel risultato salvato. Non sono presentate come prova di modifiche o della correttezza dell’intera traduzione.'if it else'Drugi najdeni viri ostajajo na voljo ob shranjenem rezultatu. Niso prikazani kot potrditev sprememb ali pravilnosti celotnega prevoda.')
+                subject=('traduzione'if mode=='translate'else'revisione')if it else('prevoda'if mode=='translate'else'pregleda')
+                yield 'body',('Le altre fonti trovate restano consultabili nel risultato salvato. Non sono presentate come prova di modifiche o della correttezza dell’intera '+subject+'.'if it else'Drugi najdeni viri ostajajo na voljo ob shranjenem rezultatu. Niso prikazani kot potrditev sprememb ali pravilnosti celotnega '+subject+'.')
                 continue
             yield 'subheading',heading
             if rows is contextual:yield 'body',('Questo materiale non certifica la correttezza dell’intera traduzione e non è citato a sostegno di una modifica specifica.'if it else'To gradivo ne potrjuje pravilnosti celotnega prevoda in ni navedeno kot podpora posamezni spremembi.')
@@ -462,6 +487,7 @@ def draft_blocks(report):
     """Return a complete proposed text, only after every section has a draft."""
     if report.get('state')!='complete' or not report.get('sections'):
         _invalid('document_draft_unavailable',409)
+    if repeated_translation_sections(report['sections']):_invalid('document_draft_unavailable',409)
     blocks=[]
     for section in report['sections']:
         result=section.get('document_result')or{}

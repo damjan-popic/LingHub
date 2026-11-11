@@ -109,6 +109,22 @@ Valid independent dotted dates can vary padding and spacing while retaining
 the same ordered day, month and year. Changed values, identifiers, URLs and
 other protected numerals retain their strict checks.
 
+Exact replay of an earlier translation for a different slice of the same
+source paragraph blocks Word export and appears in the report and interface.
+The stored model response is retained unchanged. Identical source slices and
+independent source paragraphs are not rejected merely for repeated wording.
+This guard does not establish semantic equivalence, completeness or correct
+attachment of emphasis and links: even a structurally valid whole-phrase
+mapping can point to the wrong translated expression.
+
+The private November 2026 product pass is not linguistically accepted. It
+demonstrates valid source-bound comma correction and usable file/report
+mechanics, but the current writer still misses supported non-comma changes,
+can return invalid reviews, leave labels untranslated, repeat earlier content
+and assign an inline link to unrelated text. Those results are retained as
+failed product evidence. Source advice without an existing executable
+application is not converted into a new automatic correction rule.
+
 ## Validation
 
 Focused tests cover bounded file parsing, Unicode, unsafe ZIP/XML content,

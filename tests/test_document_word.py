@@ -14,6 +14,18 @@ from pilot_backend.security import Failure
 W = files.W
 
 
+def test_word_export_rejects_replayed_translation_of_different_paragraph_slice():
+    original='Primo brano. Secondo brano.'
+    data=package('<w:p><w:r><w:t>'+original+'</w:t></w:r></w:p>')
+    location=files.extract(data,'source.docx')['blocks'][0]['location'].rsplit('@',1)[0]
+    proposed='Prevod prvega dela.'
+    split=original.index('Secondo')
+    rows=[{'index':i,'location':f'{location}@{a}:{b}','text':original[a:b],'state':'complete',
+           'document_result':{'mode':'translate','status':'draft','source_language':'it','target_language':'sl',
+                              'proposed_text':proposed}}for i,(a,b)in enumerate([(0,split),(split,len(original))])]
+    with pytest.raises(Failure,match='document_draft_unavailable'):rewrite(data,rows)
+
+
 def package(body, extras=None):
     output = io.BytesIO()
     with ZipFile(output, 'w', ZIP_DEFLATED) as archive:

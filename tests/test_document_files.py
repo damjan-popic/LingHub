@@ -184,3 +184,22 @@ def test_clean_drafts_require_every_section_and_rejoin_split_source_paragraphs()
     assert files.extract(files.draft_docx(report),'draft.docx')['blocks'][0]['text']==' A\nB '
     report['sections'][1]['document_result']['status']='not_reviewed'
     with pytest.raises(Failure,match='document_draft_unavailable'):files.draft_docx(report)
+
+
+def test_translated_paragraph_replay_blocks_export_and_is_visible_in_report():
+    result={'mode':'translate','status':'draft','source_language':'it','target_language':'sl',
+            'proposed_text':'Prevod prejšnjega dela.','edits':[],'notes':[]}
+    report={'name':'letter.txt','mode':'translate','state':'complete','locale':'sl',
+        'source_language':'it','target_language':'sl','sections':[
+        {'index':0,'location':'text@0:7','text':'Primo. ','state':'complete','document_result':dict(result)},
+        {'index':1,'location':'text@7:15','text':'Secondo.','state':'complete','document_result':dict(result)}]}
+    with pytest.raises(Failure,match='document_draft_unavailable'):files.draft_docx(report)
+    rendered=files.report_text(report).decode()
+    assert 'Wordov osnutek ni na voljo'in rendered
+    assert rendered.count('Ponovljen osnutek drugega dela; prevod je treba preveriti.')==1
+    assert 'Primo.'in rendered and'Secondo.'in rendered
+    # Independent locations and genuinely repeated source text are legitimate.
+    report['sections'][1]['location']='other@0:8'
+    assert files.draft_docx(report)
+    report['sections'][1].update(location='text@7:14',text='Primo. ')
+    assert files.draft_docx(report)

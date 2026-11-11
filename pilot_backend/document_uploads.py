@@ -174,10 +174,12 @@ class Documents:
                 'limitations': result.get('limitations', []),
                 'sources': [{k: e[k] for k in ('local_number', 'evidence_id', 'title', 'source_label', 'url')
                              if k in e} for e in result.get('evidence', []) if isinstance(e, dict)]})
+        warnings=json.loads(row['warnings'])
+        if document_files.repeated_translation_sections(sections):warnings.append('document_repeated_translation')
         return {'document_id': identifier, 'name': row['name'], 'state': row['state'],
                 'has_word_original':original_word,
                 'created': row['created'], 'options': json.loads(row['options'] or '{}'),
-                'warnings': json.loads(row['warnings']), 'sections': sections,
+                'warnings': warnings, 'sections': sections,
                 'processed': sum(s['state'] in TERMINAL for s in sections), 'total': len(sections)}
 
     def list(self, owner):

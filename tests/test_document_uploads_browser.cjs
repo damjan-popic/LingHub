@@ -26,6 +26,7 @@ const api=async(path,options={})=>{
 };
 const ui=documentUploads({root:document.getElementById('workspace'),api,locale:()=>locale,openFamily:async id=>{window.sourceOpened=id;},errorText:error=>error.message||'Napaka'});
 window.ui=ui;window.changeLocale=value=>{locale=value;ui.locale();};
+window.showReplayWarning=()=>{doc.warnings.push('document_repeated_translation');document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
 ui.session({documents:{enabled:true}});
 `;
 (async()=>{
@@ -55,10 +56,13 @@ ui.session({documents:{enabled:true}});
   const start=await page.evaluate(()=>window.calls.find(c=>c.path.endsWith('/start')).body);
   assert.deepEqual({mode:start.mode,source:start.source_language,target:start.target_language},{mode:'translate',source:'it',target:'sl'});
   const download=page.waitForEvent('download');await page.locator('.document-actions button').filter({hasText:locale==='sl'?'TXT':'TXT'}).click();assert.equal((await download).suggestedFilename(),'klikai-report.txt');
+  await page.evaluate(()=>window.showReplayWarning());
+  await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Word')&&document.querySelectorAll('.document-actions .secondary').length===0);
+  assert((await page.locator('[data-document-detail]').innerText()).includes(locale==='sl'?'Wordov osnutek ni na voljo; preverite poročilo.':'La bozza Word non è disponibile; controlla il rapporto.'));
   if(process.env.KLIKAI_DOCUMENT_UI_OUTPUT){fs.mkdirSync(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,{recursive:true});await page.locator('#workspace').screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,`documents-${locale}-${width}.png`)});}
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(errors,[]);
   await page.evaluate(()=>window.ui.reset());assert(await page.locator('#workspace').isHidden());assert.equal(await page.locator('#workspace').textContent(),'');
-  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,logout_clears_text:true});await context.close();
+  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,replayed_translation_blocks_word:true,logout_clears_text:true});await context.close();
  }}finally{await browser.close();}
  console.log(JSON.stringify({status:'PASS',scope:'UI protocol fixtures only; no source or model calls',checks}));
 })().catch(error=>{console.error(error.stack);process.exit(1);});

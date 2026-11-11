@@ -337,7 +337,7 @@ def _report_blocks(report):
         yield 'body',('La bozza parziale di revisione, se scaricata, contiene le proposte disponibili e conserva invariato l’originale dove manca una proposta. Non costituisce una revisione completa; richiede un controllo umano.'if it else'Delni osnutek pregleda, če ga prenesete, vsebuje razpoložljive predloge; kjer predloga ni, ohrani izvirnik brez sprememb. To ni popoln jezikovni pregled; zahteva človeški pregled.')
     if report.get('saved_result_url'):
         yield 'body',('Risultato salvato sul servizio KLIKai originale; richiede l’accesso con lo stesso account.'if it else'Shranjeni rezultat na izvornem primerku KLIKai; potrebna je prijava z istim računom.')
-        yield 'body',report['saved_result_url']
+        yield 'link',('Apri documento salvato'if it else'Odpri shranjeni dokument',report['saved_result_url'])
     sections=report.get('sections',[])
     repeated=repeated_translation_sections(sections)
     failed_operations=any(failed_document_operation(s)for s in sections)
@@ -361,7 +361,7 @@ def _report_blocks(report):
         yield 'body',label
         if section.get('saved_result_url'):
             yield 'body',('Risposta salvata e identità delle fonti'if it else'Shranjeni odgovor in identitete virov')
-            yield 'body',section['saved_result_url']
+            yield 'link',('Apri risposta salvata'if it else'Odpri shranjeni odgovor',section['saved_result_url'])
         result=section.get('document_result')or{};state=section.get('state',section.get('status','unknown'))
         if failed_document_operation(section):
             status='Una sotto-operazione richiesta non è riuscita; la bozza completa non è disponibile.'if it else'Del zahtevane obdelave ni uspel; popoln osnutek ni na voljo.'
@@ -422,17 +422,17 @@ def _report_blocks(report):
                     yield 'body',roles.get(source.get('report_role'),roles['selection_unknown'])[0 if it else 1]
                 if source.get('frozen_source_url'):
                     yield 'body',('Fonte congelata richiede accesso allo stesso account'if it else'Zamrznjeni vir zahteva prijavo z istim računom')
-                    yield 'body',source['frozen_source_url']
+                    yield 'link',('Apri fonte congelata'if it else'Odpri zamrznjeni vir',source['frozen_source_url'])
                 else:
                     if source.get('evidence_id'):yield 'body',('ID fonte 'if it else'ID vira ')+source['evidence_id']
                     if source.get('source_revision'):yield 'body',('Revisione 'if it else'Revizija ')+source['source_revision']
                     if source.get('locator'):
                         yield 'body',('Localizzatore 'if it else'Lokator ')+json.dumps(source['locator'],ensure_ascii=False,sort_keys=True)
-                if source.get('url'):yield 'body',('Indirizzo della pubblicazione 'if it else'Naslov objave ')+str(source['url'])
+                if source.get('url'):yield 'link',('Pubblicazione originale'if it else'Izvirna objava',str(source['url']))
 
 
 def _report_lines(report):
-    return (text for _,text in _report_blocks(report))
+    return (text[0]+': '+text[1]if kind=='link'else text for kind,text in _report_blocks(report))
 
 
 def report_text(report):
@@ -447,13 +447,31 @@ def report_docx(report):
 def _text_docx(lines,styled=False):
     document = ET.Element(W + 'document')
     body = ET.SubElement(document, W + 'body')
+    rel_namespace='http://schemas.openxmlformats.org/package/2006/relationships'
+    reference_namespace='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    rels=ET.Element('{'+rel_namespace+'}Relationships')
+    if styled:ET.SubElement(rels,'{'+rel_namespace+'}Relationship',{'Id':'styles','Type':reference_namespace+'/styles','Target':'styles.xml'})
     for line in lines:
         paragraph = ET.SubElement(body, W + 'p')
         if styled:
             kind,line=line
             properties=ET.SubElement(paragraph,W+'pPr')
             ET.SubElement(properties,W+'pStyle',{W+'val':{'title':'Title','heading':'Heading1','subheading':'Heading2','quote':'Quote'}.get(kind,'Normal')})
-        run = ET.SubElement(paragraph, W + 'r')
+        parent=paragraph
+        if styled and kind=='link':
+            label,target=line
+            # Report references are links; prose from an upload never enters
+            # this branch. Unsupported schemes remain visible plain text.
+            if target.startswith(('https://','http://','/')):
+                rid='link'+str(len(rels))
+                ET.SubElement(rels,'{'+rel_namespace+'}Relationship',{'Id':rid,'Type':reference_namespace+'/hyperlink','Target':target,'TargetMode':'External'})
+                parent=ET.SubElement(paragraph,W+'hyperlink',{'{'+reference_namespace+'}id':rid})
+                line=label
+            else:line=label+': '+target
+        run = ET.SubElement(parent, W + 'r')
+        if parent is not paragraph:
+            properties=ET.SubElement(run,W+'rPr')
+            ET.SubElement(properties,W+'color',{W+'val':'0563C1'});ET.SubElement(properties,W+'u',{W+'val':'single'})
         # Represent tabs/newlines as native Word tokens and preserve whitespace.
         for token in re.split(r'(\r\n|\r|\n|\t)', line):
             if token == '\t':
@@ -492,7 +510,7 @@ def _text_docx(lines,styled=False):
                 ET.SubElement(r,W+'sz',{W+'val':size});ET.SubElement(r,W+'color',{W+'val':'000000'})
                 if bold:ET.SubElement(r,W+'b')
             archive.writestr('word/styles.xml',ET.tostring(styles,encoding='utf-8',xml_declaration=True))
-            archive.writestr('word/_rels/document.xml.rels',b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+            archive.writestr('word/_rels/document.xml.rels',ET.tostring(rels,encoding='utf-8',xml_declaration=True))
     return result.getvalue()
 
 

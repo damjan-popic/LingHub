@@ -171,7 +171,9 @@ def test_export_reports_keep_originals_outputs_and_credits_and_escape_xml():
     captured = files.extract(docx, 'porocilo.docx')
     assert original in [b['text'] for b in captured['blocks']]
     assert any(b['text'] == 'Predlog < & >' for b in captured['blocks'])
-    assert any('https://example.org/vir' in b['text'] for b in captured['blocks'])
+    assert any(b['text']=='Izvirna objava'for b in captured['blocks'])
+    with ZipFile(io.BytesIO(docx))as package:
+        assert b'Target="https://example.org/vir"'in package.read('word/_rels/document.xml.rels')
     assert any('Poročilo uporablja svojo postavitev' in b['text'] for b in captured['blocks'])
     assert report['sections'][0]['text'] == original
 
@@ -214,6 +216,23 @@ def test_complete_export_distinguishes_failed_operation_from_partial_support():
     assert 'Del zahtevane obdelave ni uspel'in files.report_text(report).decode()
     section['limitations']=[{'code':'document_draft_requires_review','scope':'answer'}]
     assert files.draft_docx(report)  # Bounded partial support is not a failed operation.
+
+
+def test_report_word_links_keep_exact_destinations_with_readable_labels():
+    from xml.etree import ElementTree as ET
+    url='https://klikai.example/api/pilot/families/f/sources/frozen%3Aid?tier=answer&v=1'
+    report={'name':'source.txt','mode':'review','state':'complete','locale':'sl','source_language':'sl',
+            'saved_result_url':url,'sections':[]}
+    assert url in files.report_text(report).decode()
+    data=files.report_docx(report)
+    with ZipFile(io.BytesIO(data))as package:
+        doc=ET.fromstring(package.read('word/document.xml'))
+        rels=ET.fromstring(package.read('word/_rels/document.xml.rels'))
+    link=doc.find('.//'+files.W+'hyperlink')
+    rid=link.attrib['{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id']
+    reference=next(r for r in rels if r.attrib['Id']==rid)
+    assert reference.attrib['Target']==url and reference.attrib['TargetMode']=='External'
+    assert ''.join(link.itertext())=='Odpri shranjeni dokument'
 
 
 def test_partial_review_keeps_valid_proposal_and_falls_back_without_changing_history():

@@ -34,6 +34,10 @@ def test_partial_label_preserves_existing_word_markup_and_other_parts():
         assert old.namelist()==new.namelist()
         assert new.read('word/media/preserved.bin')==old.read('word/media/preserved.bin')
         assert b'<w:p><w:r><w:t>Original paragraph</w:t></w:r></w:p>'in new.read('word/document.xml')
+        root=ET.fromstring(new.read('word/document.xml'))
+        title=root.find(W+'body').find(W+'p')
+        assert title.find(W+'pPr/'+W+'pStyle').attrib[W+'val']=='Title'
+        assert title.find(W+'pPr/'+W+'pBdr/'+W+'bottom').attrib[W+'val']=='nil'
     blocks,_=files._word_blocks(labelled)
     assert blocks[0][1]=='Delni osnutek jezikovnega pregleda'
     assert blocks[-1][1]=='Original paragraph'

@@ -533,7 +533,7 @@ def _label_partial_review(data, locale='sl'):
           'Vsebuje razpoložljive predloge popravkov. Drugi deli ohranijo izvirno besedilo. To ni popoln jezikovni pregled; preverite spremembe in poročilo z omejitvami ter viri.')
     namespace=files.W[1:-1]
     def paragraph(text,bold=False):
-        return ('<kp:p xmlns:kp="'+namespace+'">'+('<kp:pPr><kp:pStyle kp:val="Title"/></kp:pPr>'if bold else'')+'<kp:r>'+
+        return ('<kp:p xmlns:kp="'+namespace+'">'+('<kp:pPr><kp:pStyle kp:val="Title"/><kp:pBdr><kp:top kp:val="nil"/><kp:left kp:val="nil"/><kp:bottom kp:val="nil"/><kp:right kp:val="nil"/><kp:between kp:val="nil"/></kp:pBdr></kp:pPr>'if bold else'')+'<kp:r>'+
             ('<kp:rPr><kp:b/><kp:color kp:val="000000"/></kp:rPr>'if bold else'')+
             '<kp:t>'+escape(text)+'</kp:t></kp:r></kp:p>').encode()
     with files._package(data)as archive:

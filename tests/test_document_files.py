@@ -227,7 +227,10 @@ def test_report_word_links_keep_exact_destinations_with_readable_labels():
     data=files.report_docx(report)
     with ZipFile(io.BytesIO(data))as package:
         doc=ET.fromstring(package.read('word/document.xml'))
-        rels=ET.fromstring(package.read('word/_rels/document.xml.rels'))
+        serialized=package.read('word/_rels/document.xml.rels')
+        rels=ET.fromstring(serialized)
+        assert b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"'in serialized
+        assert b'ns0:'not in serialized
     link=doc.find('.//'+files.W+'hyperlink')
     rid=link.attrib['{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id']
     reference=next(r for r in rels if r.attrib['Id']==rid)

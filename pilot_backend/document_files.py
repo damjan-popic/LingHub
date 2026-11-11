@@ -444,6 +444,15 @@ def report_docx(report):
     return _text_docx(_report_blocks(report),styled=True)
 
 
+def _report_relationship_xml(relationships):
+    """Use the interoperable OPC default namespace without global ET state."""
+    namespace='http://schemas.openxmlformats.org/package/2006/relationships'
+    plain=ET.Element('Relationships',{'xmlns':namespace})
+    for relationship in relationships:
+        ET.SubElement(plain,'Relationship',dict(relationship.attrib))
+    return ET.tostring(plain,encoding='utf-8',xml_declaration=True)
+
+
 def _text_docx(lines,styled=False):
     document = ET.Element(W + 'document')
     body = ET.SubElement(document, W + 'body')
@@ -510,7 +519,7 @@ def _text_docx(lines,styled=False):
                 ET.SubElement(r,W+'sz',{W+'val':size});ET.SubElement(r,W+'color',{W+'val':'000000'})
                 if bold:ET.SubElement(r,W+'b')
             archive.writestr('word/styles.xml',ET.tostring(styles,encoding='utf-8',xml_declaration=True))
-            archive.writestr('word/_rels/document.xml.rels',ET.tostring(rels,encoding='utf-8',xml_declaration=True))
+            archive.writestr('word/_rels/document.xml.rels',_report_relationship_xml(rels))
     return result.getvalue()
 
 

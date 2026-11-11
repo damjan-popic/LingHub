@@ -141,6 +141,23 @@ def test_capture_hash_and_original_source_are_immutable():
     assert not any(path == '/internal/pilot/document-transform' for path, _, _ in gateway.calls)
 
 
+def test_excerpt_plan_is_server_owned_frozen_data_not_public_document_options():
+    gateway,bundle=frozen()
+    assert 'writer_source_selections'not in bundle
+    with pytest.raises(Failure,match='invalid_request'):
+        doc.task_checked({**task(),'source_selections':[{'authority':'inspected_server_selection'}]})
+    plan={'version':'document-source-selection.v1','authority':'inspected_server_selection',
+          'plan_id':'protocol-fixture-only'}
+    bundle['writer_source_selections']=[plan]
+    before=len(gateway.calls)
+    with pytest.raises(Failure,match='resource_changed'):
+        doc.generate(gateway,bundle,'answer','auto')
+    assert len(gateway.calls)==before
+    bundle['snapshot_sha256']=digest({k:v for k,v in bundle.items()if k!='snapshot_sha256'})
+    doc.generate(gateway,bundle,'answer','auto')
+    assert gateway.calls[-1][1]['source_selections']==[plan]
+
+
 def test_translation_output_is_explicit_draft_and_does_not_require_rewrite_edits():
     gateway, bundle = frozen(mode='translate')
     gateway.result = response(bundle, edits=[], proposed='Una persona ha un’ape.')

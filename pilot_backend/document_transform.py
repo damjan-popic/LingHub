@@ -740,6 +740,11 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
         request['inline_spans'] = deepcopy(task['inline_spans'])
     if 'translation_context' in task:
         request['translation_context'] = deepcopy(task['translation_context'])
+    # Only an explicitly inspected, server-owned plan in the hash-bound frozen
+    # bundle can request excerpts. The public document-task schema admits no
+    # such client field, and the writer's response cannot provide one.
+    if 'writer_source_selections' in bundle:
+        request['source_selections'] = deepcopy(bundle['writer_source_selections'])
     response = gateway.request('/internal/pilot/document-transform', request)
     if not isinstance(response, dict) or response.get('contract') != RESPONSE_CONTRACT:
         invalid()

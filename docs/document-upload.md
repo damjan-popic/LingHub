@@ -97,11 +97,35 @@ surface for input relevance and terminology hints. A whole query returned by a
 contained raw lookup is not treated as a term occurrence. These annotations
 retain native ambiguity, release pins and scope; they do not select an
 equivalent or establish that a source applies.
-When a review has exact native advice or term nominations, only those whole
-records enter its writer request; the omitted records remain in the saved
-readers and coverage is explicitly partial. Review passages are represented
-once as exact ordered segments with closed support IDs, retaining whitespace
-and complete long qualifications. Typed ready comma tasks budget the actual
+When a review has exact native advice or term nominations, only those source
+parents enter its writer request; omitted records remain in the saved readers
+and coverage is explicitly partial. Ordinary requests without an inspected
+selection plan retain complete passages as exact ordered segments with closed
+paragraph support IDs, including whitespace and long qualifications.
+
+The internal review contract also accepts an explicit `source_selections` plan
+from the server-owned, hash-bound `writer_source_selections` frozen field.
+Public document/task options and model output cannot supply this authority.
+This bounded representation work does not automatically create such plans.
+The offline CU example is a task-local inspected selection, not automatic
+discovery of all governing scope or an optimisation of ordinary requests.
+
+Each plan binds the exact document hash, parent capture and rendered-passage
+hashes, parent record revision, complete recorded advice IDs, and mandatory
+governing-context ranges. The `document-source-representation.v2` payload labels
+selected excerpts and required context explicitly; its segments need not be
+contiguous or concatenate to the full source. Exact offsets/hashes, omitted
+ranges, edition/status, complete advice annotations including `scope_note`, and
+the unchanged full frozen-reader identity remain available. Only the complete
+selected advice units receive support IDs. This creates no executable rule or
+automatic preferred equivalent; A5e remains qualified, proposed source advice.
+
+Missing governing context, invalid pins/ranges, unknown scope annotations or
+unresolved editorial dependencies retain the full passage with an explicit
+fallback reason. Hash/range checks prove identity and exact inclusion, not
+semantic completeness. Establishing the required scope dependencies is the
+explicit inspected-plan assumption; a client or model cannot self-certify it.
+Translation selections remain unavailable in this bounded version. Typed ready comma tasks budget the actual
 closed application catalogue, retaining full raw proof server-side; the
 existing input and output caps still apply.
 

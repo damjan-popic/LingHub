@@ -386,3 +386,37 @@ def test_boundary_whitespace_adjusts_inline_offsets_without_mutating_saved_propo
     assert out_anchor['text']=='didattica a distanza'
     assert out_anchor['start']==proposed.index('didattica a distanza')+2
     assert source==before
+
+
+def test_mixed_source_bound_review_accepts_exact_comma_and_space_insertions():
+    original='Če bo deževalo bomo sestanek čimprej izvedli na daljavo. Na daljavo je mogoče sodelovati tudi od doma.'
+    proposed='Če bo deževalo, bomo sestanek čim prej izvedli na daljavo. Na daljavo je mogoče sodelovati tudi od doma.'
+    data=package('<w:p><w:r><w:t>'+original+'</w:t></w:r></w:p>')
+    comma=len('Če bo deževalo');space=original.index('čimprej')+3
+    source=sections(data,{0:proposed});source[0]['document_result'].update(mode='review',edits=[
+        {'start':comma,'end':comma,'original':'','replacement':','},
+        {'start':space,'end':space,'original':'','replacement':' '}])
+    assert texts(rewrite(data,source))==[proposed]
+
+
+def test_review_insertion_inside_mark_keeps_the_whole_new_marked_phrase():
+    data=package('<w:p><w:r><w:t xml:space="preserve">Sestanek bo </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>čimprej</w:t></w:r><w:r><w:t>.</w:t></w:r></w:p>')
+    original='Sestanek bo čimprej.';position=original.index('čimprej')+3;proposed='Sestanek bo čim prej.'
+    source=sections(data,{0:proposed});source[0]['document_result'].update(mode='review',edits=[
+        {'start':position,'end':position,'original':'','replacement':' '}])
+    draft=rewrite(data,source);anchor=next(iter(source_anchors(draft).values()))[0]
+    assert anchor['text']=='čim prej'
+
+
+@pytest.mark.parametrize('edge,replacement',[('start','nov '),('end',',')])
+def test_review_boundary_insertions_remain_outside_repeated_marked_word(edge,replacement):
+    prefix,label,suffix='Ta ','rok',' in drug rok.'
+    original=prefix+label+suffix
+    data=package('<w:p><w:r><w:t xml:space="preserve">'+prefix+'</w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>'+label+'</w:t></w:r><w:r><w:t xml:space="preserve">'+suffix+'</w:t></w:r></w:p>')
+    position=len(prefix)if edge=='start'else len(prefix+label)
+    proposed=original[:position]+replacement+original[position:]
+    source=sections(data,{0:proposed});source[0]['document_result'].update(mode='review',edits=[
+        {'start':position,'end':position,'original':'','replacement':replacement}])
+    draft=rewrite(data,source);anchor=next(iter(source_anchors(draft).values()))[0]
+    assert anchor['text']=='rok'
+    assert anchor['start']==proposed.index('rok')

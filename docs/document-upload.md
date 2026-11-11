@@ -67,6 +67,15 @@ typed task, exact UTF-8 source hash and the existing immutable source-capture
 packet. Uploaded prose is data and bypasses the question interpreter. The
 existing local writer, native token counter, identity verification and shared
 provider lease are reused. No fallback model or automatic retry is added.
+Later translation sections can include up to two exact earlier completed
+source/draft pairs from the same owned document and language direction, within
+a combined 6,000-codepoint bound. Hashes bind both sides. They provide continuity
+for wording and references, are counted in the native input budget and remain
+draft context rather than source authority or a shared translation memory.
+Source lookup uses one literal contiguous snippet of at most 500 codepoints
+per section, preserving phrase adjacency within the existing capture limits.
+Direct recorded advice and term matches are fitted ahead of generic material;
+the full frozen records and their qualifications remain available in readers.
 
 Reviews propose nonoverlapping, source-located edits using exact server-owned
 support units. The server derives offsets and reconstructs the proposed text.
@@ -87,6 +96,9 @@ All output remains a draft requiring human review. Schema, source membership,
 quoted support and protected values are mechanically checked; these checks do
 not establish linguistic entailment, complete error coverage or translation
 quality. Original failures and provider observations remain preserved.
+Valid independent dotted dates can vary padding and spacing while retaining
+the same ordered day, month and year. Changed values, identifiers, URLs and
+other protected numerals retain their strict checks.
 
 ## Validation
 

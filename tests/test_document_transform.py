@@ -202,13 +202,26 @@ def test_task_hash_and_shape_reject_invalid_user_data():
         doc.task_checked(t)
 
 
-def test_lookup_keys_cover_full_section_and_never_invent_lexical_data():
-    text = ' '.join('token' + chr(0x400 + i) for i in range(200))
+def test_lookup_snippet_preserves_exact_adjacent_phrases_within_existing_bound():
+    text = ('La scuola primaria organizza la didattica a distanza per gli alunni. '
+            'La scuola informa le famiglie. ' * 35)
     query = doc.lookup_query(text)
     assert len(query) <= 500
-    assert query.split()[0] == text.split()[0]
-    assert query.split()[-1] == text.split()[-1]
-    assert all(word in text for word in query.split())
+    assert text.startswith(query)
+    assert 'didattica a distanza' in query
+    assert query.count('La scuola') > 1  # Repetition is source data, not deduplicated keys.
+    assert query[-1].isspace() is False
+    assert text[len(query)].isspace()
+
+
+@pytest.mark.parametrize('text', [' \r\nUna parola intera.\n', 'x' * 600,
+    'a ' * 224 + 'didattica a distanza' + ' seguito' * 40])
+def test_lookup_snippet_is_literal_for_whitespace_long_tokens_and_late_phrases(text):
+    query = doc.lookup_query(text)
+    assert 0 < len(query) <= 500
+    assert query in text
+    if 'didattica a distanza' in text:
+        assert 'didattica a distanza' in query
 
 
 @pytest.mark.parametrize('source_language,locale', [('sl', 'sl'), ('sl', 'it'), ('it', 'sl'), ('it', 'it')])
@@ -252,8 +265,20 @@ def test_review_prioritizes_existing_exact_headings_and_keeps_all_surface_source
 
 def test_translation_does_not_add_review_reference_lookups():
     gateway = Gateway()
-    doc.freeze(gateway, family(mode='translate'), {})
+    text = ('La scuola primaria organizza la didattica a distanza per gli alunni. '
+            'La scuola informa le famiglie. ' * 25)
+    f = family(mode='translate', text=text)
+    f['input_language'] = 'it'
+    f['request_options']['document_task'].update(source_language='it', target_language='sl')
+    bundle = doc.freeze(gateway, f, {})['bundle']
     assert len(gateway.calls) == 2
+    sent_query = parse_qs(urlsplit(gateway.calls[-1][0]).query)['q'][0]
+    assert sent_query == doc.lookup_query(text) and 'didattica a distanza' in sent_query
+    assert bundle['retrieval']['query'] == sent_query
+    assert bundle['retrieval']['discovery_basis'] == 'bounded_literal_contiguous_snippet'
+    coverage = bundle['retrieval']['coverage'][0]
+    assert coverage['query_variants'] == [sent_query] and coverage['limit'] == 10
+    assert bundle['source_bundle']['matches'][0]['capture']['original_text'] == SOURCE
     assert not any(any(heading in path for heading in doc.REVIEW_REFERENCE_HEADINGS)
                    for path, _, _ in gateway.calls)
 
@@ -614,3 +639,98 @@ def test_overlapping_source_inline_spans_are_rejected():
         {'id': 'link-2', 'kind': 'hyperlink', 'start': 3, 'end': 6, 'text': TEXT[3:6]}]
     with pytest.raises(Failure, match='invalid_request'):
         doc.task_checked(value)
+
+
+def test_translation_context_uses_only_prior_completed_matching_drafts_and_is_forwarded():
+    from pilot_backend.document_uploads import task_for
+    options = {'mode': 'translate', 'source_language': 'sl', 'target_language': 'it', 'locale': 'sl'}
+    previous = []
+    for index in range(4):
+        original, translated = 'Vir ' + str(index), 'Testo ' + str(index)
+        previous.append({'index': index, 'text': original, 'state': 'complete',
+            'document_result': {'mode': 'translate', 'source_language': 'sl', 'target_language': 'it',
+                'source_sha256': doc.sha_text(original), 'proposed_text': translated, 'status': 'draft'}})
+    previous[2]['state'] = 'failed'
+    current = {'index': 4, 'text': TEXT}
+    t = task_for(current, options, previous_sections=previous)
+    assert [r['section_index'] for r in t['translation_context']] == [0, 3]
+    assert t['translation_context'][1]['translated_text'] == 'Testo 3'
+    f = family(mode='translate')
+    f['request_options']['document_task'] = t
+    gateway = Gateway()
+    bundle = doc.freeze(gateway, f, {})['bundle']
+    gateway.result = response(bundle, edits=[], proposed='Una persona ha un’ape.')
+    doc.generate(gateway, bundle, 'answer', 'auto')
+    assert gateway.calls[-1][1]['translation_context'] == t['translation_context']
+    assert 'translation_context' not in task_for(current, {**options, 'mode': 'review'}, previous_sections=previous)
+
+
+def test_translation_context_keeps_first_and_latest_whole_pairs_without_middle_backfill():
+    from pilot_backend.document_uploads import task_for
+    options = {'mode': 'translate', 'source_language': 'sl', 'target_language': 'it', 'locale': 'sl'}
+    previous = []
+    for index, size in enumerate((2500, 20, 1000)):
+        original, translated = 'v' * size, 't' * size
+        previous.append({'index': index, 'text': original, 'state': 'complete',
+            'document_result': {'mode': 'translate', 'source_language': 'sl', 'target_language': 'it',
+                'source_sha256': doc.sha_text(original), 'proposed_text': translated, 'status': 'draft'}})
+    current = {'index': 3, 'text': TEXT}
+    context = task_for(current, options, previous_sections=previous)['translation_context']
+    assert [pair['section_index'] for pair in context] == [0]
+    assert context[0]['source_text'] == previous[0]['text']
+    assert context[0]['translated_text'] == previous[0]['document_result']['proposed_text']
+    doc.task_checked({**task(mode='translate'), 'translation_context': context})
+    context = task_for(current, options, previous_sections=previous[:1])['translation_context']
+    assert len(context) == 1  # First and immediate previous are the same section.
+
+
+@pytest.mark.parametrize('damage', ['hash', 'reversed', 'budget', 'unknown'])
+def test_translation_context_rejects_unbound_or_unbounded_pairs(damage):
+    value = task(mode='translate')
+    value['translation_context'] = [{'section_index': index, 'source_text': 'Vir ' + str(index),
+        'source_sha256': doc.sha_text('Vir ' + str(index)), 'translated_text': 'Testo ' + str(index),
+        'translated_sha256': doc.sha_text('Testo ' + str(index))} for index in (0, 1)]
+    if damage == 'hash':
+        value['translation_context'][0]['source_sha256'] = '0' * 64
+    elif damage == 'reversed':
+        value['translation_context'].reverse()
+    elif damage == 'budget':
+        for row in value['translation_context']:
+            row.update(source_text='a' * 3000, source_sha256=doc.sha_text('a' * 3000),
+                translated_text='b' * 3000, translated_sha256=doc.sha_text('b' * 3000))
+    else:
+        value['translation_context'][0]['invented_glossary'] = 'not admitted'
+    with pytest.raises(Failure, match='invalid_request'):
+        doc.task_checked(value)
+
+
+def test_direct_source_owned_advice_precedes_generic_heading_during_fitting():
+    class PriorityGateway(Gateway):
+        def request(self, path, payload, base=None):
+            if path == '/api/sources':
+                result = super().request(path, payload, base)
+                result['sources'].append({'slug': 'cu-slogovni', 'adapter_key': 'official_reference_jsonl',
+                    'display_name': 'Existing handbook', 'rights_mode': 'open',
+                    'source_type': 'reference', 'is_active': True})
+                return result
+            if path.startswith('/api/search?'):
+                params = parse_qs(urlsplit(path).query)
+                slug, query = params['sources'][0], params['q'][0]
+                result = super().request(path, payload, base)
+                hit = result['hits'][0]
+                if slug == 'cu-slogovni':
+                    quote = 'joinedform | ⇨ | separate form'
+                    hit.update(resource_id='native-advice', source_slug=slug, original_text=quote,
+                        advice_units=[{'source_span': {'char_start': 0, 'char_end': len(quote),
+                            'text_sha256': doc.sha_text(quote)}}])
+                    result['sources'] = [slug]
+                elif query in doc.REVIEW_REFERENCE_HEADINGS:
+                    hit.update(resource_id='governing-heading', original_text=query + '\n\n' + SOURCE)
+                return result
+            return super().request(path, payload, base)
+    bundle = doc.freeze(PriorityGateway(), family(text='Please check joinedform. ' + TEXT), {})['bundle']
+    rows = bundle['source_bundle']['matches']
+    assert rows[0]['external_id'] == 'native-advice'
+    assert any(row['external_id'] == 'governing-heading' for row in rows[1:])
+    assert any(row['external_id'] == 'source-1' for row in rows[1:])
+    assert rows[0]['capture']['original_text'] == 'joinedform | ⇨ | separate form'

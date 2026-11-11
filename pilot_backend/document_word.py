@@ -340,10 +340,12 @@ def _review_mappings(original,proposed,anchors,edits):
             for a,b,replacement in edits:
                 if (a<anchor['start']<b or a<anchor['end']<b):_unavailable()
             start=anchor['start']+sum(len(value)-(b-a)for a,b,value in edits if b<=anchor['start'])
-            end=anchor['end']+sum(len(value)-(b-a)for a,b,value in edits if b<=anchor['end'])
+            end=anchor['end']+sum(len(value)-(b-a)for a,b,value in edits
+                if b<=anchor['end']and not(a==b==anchor['end']))
             expected=[];last=anchor['start']
             for a,b,value in edits:
-                if anchor['start']<=a and b<=anchor['end']:
+                if (anchor['start']<=a and b<=anchor['end']
+                        and(a<b or anchor['start']<a<anchor['end'])):
                     expected.extend([original[last:a],value]);last=b
             expected.append(original[last:anchor['end']])
             if proposed[start:end]!=''.join(expected):_unavailable()
@@ -432,7 +434,7 @@ def _rewrite(original_docx_bytes, sections):
             for edit in edits:
                 if not isinstance(edit,dict):_unavailable()
                 x,y,replacement=edit.get('start'),edit.get('end'),edit.get('replacement')
-                if (type(x)is not int or type(y)is not int or not last<=x<y<=len(section['text'])
+                if (type(x)is not int or type(y)is not int or not last<=x<=y<=len(section['text'])
                         or section['text'][x:y]!=edit.get('original')or not isinstance(replacement,str)):_unavailable()
                 rendered.extend([section['text'][last:x],replacement]);last=y
                 paragraph_edits.setdefault(location,[]).append((x+a,y+a,replacement))

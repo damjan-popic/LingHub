@@ -35,7 +35,7 @@ def sha_text(text):
 
 
 def task_checked(value):
-    if not isinstance(value, dict) or set(value) - {'inline_spans'} != TASK_FIELDS:
+    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context'} != TASK_FIELDS:
         raise Failure('invalid_request')
     mode, source, target, locale = (value[k] for k in
         ('mode', 'source_language', 'target_language', 'locale'))
@@ -69,25 +69,48 @@ def task_checked(value):
             raise Failure('invalid_request')
         seen.add(span['id'])
         previous = span['end']
+    context = value.get('translation_context', [])
+    if (not isinstance(context, list) or len(context) > 2
+            or 'translation_context' in value and mode != 'translate'):
+        raise Failure('invalid_request')
+    previous, total = -1, 0
+    for pair in context:
+        if (not isinstance(pair, dict) or set(pair) != {'section_index', 'source_text',
+                'source_sha256', 'translated_text', 'translated_sha256'}
+                or type(pair['section_index']) is not int or not previous < pair['section_index'] <= 99
+                or not isinstance(pair['source_text'], str) or not 1 <= len(pair['source_text']) <= MAX_TEXT
+                or not isinstance(pair['translated_text'], str) or not 1 <= len(pair['translated_text']) <= 12000
+                or '\0' in pair['source_text'] or '\0' in pair['translated_text']):
+            raise Failure('invalid_request')
+        try:
+            if (sha_text(pair['source_text']) != pair['source_sha256']
+                    or sha_text(pair['translated_text']) != pair['translated_sha256']):
+                raise Failure('invalid_request')
+        except UnicodeError:
+            raise Failure('invalid_request') from None
+        total += len(pair['source_text']) + len(pair['translated_text'])
+        previous = pair['section_index']
+    if total > 6000:
+        raise Failure('invalid_request')
     return deepcopy(value)
 
 
 def lookup_query(text):
-    """Bound literal surface discovery, without interpreting a document's commands.
+    """Use one bounded literal snippet, preserving adjacent source terms.
 
-    These tokens are retrieval keys, never lemmas, edits or linguistic verdicts.
-    Sample across the whole section instead of silently cutting its first page.
+    This is a discovery window, not an interpretation or complete retrieval of
+    the section. Keeping the original order and repetition lets the existing
+    source adapters find multiword expressions instead of scattered unigrams.
     """
-    words = list(dict.fromkeys(re.findall(r'[^\W\d_][\w-]{1,79}', text, re.UNICODE)))
-    if len(words) > 32:
-        words = [words[round(i * (len(words) - 1) / 31)] for i in range(32)]
-    result = ''
-    for word in words:
-        candidate = (result + ' ' + word).strip()
-        if len(candidate) > 500:
-            break
-        result = candidate
-    return result or text[:500]
+    text = text.lstrip()
+    result = text[:500]
+    if len(text) > 500 and not text[500].isspace():
+        # End at a complete word when possible; an overlong unbroken token is
+        # still bounded to the existing adapter's 500-codepoint query limit.
+        boundary = max((i for i, char in enumerate(result) if char.isspace()), default=-1)
+        if boundary > 0:
+            result = result[:boundary]
+    return result.rstrip()
 
 
 def capture_id(row):
@@ -241,17 +264,19 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
             unified.expand_request_reference_rules(gateway, discovery_family, definitions,
                 found, coverage, details, pool, exact_heading_only=True)
     found = unified.merge_source_matches(found)
-    if task['mode'] == 'review':
-        def priority(row):
-            original = ' '.join((row.get('capture', {}).get('original_text') or '').split())
-            if row.get('source_slug') == 'sp2001' and row.get('capture_kind') == 'resource_record':
-                for index, heading in enumerate(REVIEW_REFERENCE_HEADINGS):
-                    if heading in original:
-                        return (0, index)
-            return (1 if _native_review_cue(row, task['source_text']) else 2, 0)
-        # Native fitting starts with governing reference sections while every
-        # surface-discovered original remains frozen and available in its reader.
-        found.sort(key=priority)
+    def priority(row):
+        cue = _native_review_cue(row, task['source_text'])
+        if cue >= 2:
+            return (0, -_literal_term_length(row, task['source_text']))
+        original = ' '.join((row.get('capture', {}).get('original_text') or '').split())
+        if task['mode'] == 'review' and row.get('source_slug') == 'sp2001' and row.get('capture_kind') == 'resource_record':
+            for index, heading in enumerate(REVIEW_REFERENCE_HEADINGS):
+                if heading in original:
+                    return (1, index)
+        return (2 if cue else 3, 0)
+    # Exact source-owned term/advice matches precede generic large headings.
+    # Every original remains frozen; this changes fitting order, not authority.
+    found.sort(key=priority)
     for row in found:
         row['evidence_id'] = capture_id(row)
         # Identify this exact captured record, independently of its mutable URL
@@ -273,7 +298,7 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
         {'partial', 'timeout', 'unavailable', 'unsupported'} else 'complete',
         'coverage': coverage, 'returned_count': len(found),
         'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
-        'discovery_basis': 'bounded_literal_surface_keys', 'query': query}
+        'discovery_basis': 'bounded_literal_contiguous_snippet', 'query': query}
     reader = {'contract': unified.CONTRACT, 'task': 'reference',
         'query': task['source_text'], 'locale': task['locale'], 'analysis': None,
         'matches': found, 'retrieval': retrieval, 'gateway_bundle': None}
@@ -295,22 +320,36 @@ def _native_review_cue(row, text):
     raw = row.get('capture') or {}
     folded = text.casefold()
     if row.get('capture_kind') == 'terminology_record':
-        return any(isinstance(term, str) and len(term) >= 4
+        return 2 if any(isinstance(term, str) and len(term) >= 4
             and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', folded)
-            for key in ('original_terms', 'standardized_terms') for term in raw.get(key, []))
+            for key in ('original_terms', 'standardized_terms') for term in raw.get(key, [])) else 0
     original = raw.get('original_text') or ''
     words = set(re.findall(r'[^\W\d_]{4,}', folded))
     common = {'kako', 'tudi', 'lahko', 'samo', 'zato', 'medtem', 'oziroma', 'kadar', 'torej'}
+    token_match = False
     for advice in raw.get('advice_units') or []:
         if not isinstance(advice, dict):
             continue
         span = advice.get('source_span') or {}
         a, b = span.get('char_start'), span.get('char_end')
-        if (type(a) is int and type(b) is int and 0 <= a < b <= len(original)
-                and sha_text(original[a:b]) == span.get('text_sha256')
-                and (words - common) & set(re.findall(r'[^\W\d_]{4,}', original[a:b].casefold()))):
-            return True
-    return False
+        if (type(a) is not int or type(b) is not int or not 0 <= a < b <= len(original)
+                or sha_text(original[a:b]) != span.get('text_sha256')):
+            continue
+        quote = original[a:b]
+        if quote.count(' | ⇨ | ') == 1:
+            left = quote.split(' | ⇨ | ', 1)[0]
+            if '\n' not in left and any(re.search(r'(?<!\w)' + re.escape(surface.strip().casefold())
+                    + r'(?!\w)', folded) for surface in left.split(',') if len(surface.strip()) >= 4):
+                return 2
+        token_match |= bool((words - common) & set(re.findall(r'[^\W\d_]{4,}', quote.casefold())))
+    return 1 if token_match else 0
+
+
+def _literal_term_length(row, text):
+    raw = row.get('capture') or {}
+    return max((len(term) for key in ('original_terms', 'standardized_terms')
+        for term in raw.get(key, []) if isinstance(term, str) and len(term) >= 4
+        and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text.casefold())), default=0)
 
 
 def _changed_sentence_spans(comma):
@@ -639,6 +678,8 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
         'unified_evidence': deepcopy(bundle['unified_evidence'])}
     if 'inline_spans' in task:
         request['inline_spans'] = deepcopy(task['inline_spans'])
+    if 'translation_context' in task:
+        request['translation_context'] = deepcopy(task['translation_context'])
     response = gateway.request('/internal/pilot/document-transform', request)
     if not isinstance(response, dict) or response.get('contract') != RESPONSE_CONTRACT:
         invalid()

@@ -50,11 +50,36 @@ def request_for(block, options):
             'model': options['model']}
 
 
-def task_for(block, options):
+def task_for(block, options, *, previous_sections=()):
     task={key:options[key]for key in ('mode','source_language','target_language','locale')}
     task.update(source_text=block['text'],source_sha256=hashlib.sha256(block['text'].encode('utf-8')).hexdigest())
     if options['mode']=='translate'and block.get('inline_spans'):
         task['inline_spans']=block['inline_spans']
+    if options['mode']=='translate':
+        candidates=[]
+        for section in sorted(previous_sections,key=lambda row:row['index']):
+            result=section.get('document_result')or{}
+            if (section['index']>=block['index']or section.get('state')!='complete'
+                    or result.get('status')!='draft'or result.get('mode')!='translate'
+                    or result.get('source_language')!=options['source_language']
+                    or result.get('target_language')!=options['target_language']
+                    or not isinstance(result.get('proposed_text'),str)or not result['proposed_text']):continue
+            source=section['text'];translated=result['proposed_text']
+            source_hash=hashlib.sha256(source.encode('utf-8')).hexdigest()
+            if result.get('source_sha256')!=source_hash:continue
+            candidates.append({'section_index':section['index'],'source_text':source,
+                'source_sha256':source_hash,'translated_text':translated,
+                'translated_sha256':hashlib.sha256(translated.encode('utf-8')).hexdigest()})
+        context=[];total=0
+        # Retain the opening draft's address/register alongside the immediate
+        # prior successful draft. Context remains fallible, hash-bound data.
+        for pair in candidates[:1]+candidates[-1:]:
+            if context and pair['section_index']==context[-1]['section_index']:continue
+            size=len(pair['source_text'])+len(pair['translated_text'])
+            if total+size>6000:continue
+            context.append(pair)
+            total+=size
+        if context:task['translation_context']=context
     return task
 
 
@@ -265,7 +290,8 @@ class Documents:
             key = 'document-' + row['id'] + '-' + str(pending['index'])
             try:
                 payload = {**request_for(pending, document['options']), 'idempotency_key': key}
-                accepted = self.domain.create_family(row['owner'], payload,document_task=task_for(pending,document['options']))
+                accepted = self.domain.create_family(row['owner'], payload,document_task=task_for(
+                    pending,document['options'],previous_sections=document['sections']))
                 fid = accepted['family']['answer_family_id']
             except Failure as error:
                 if error.code in {'queue_full', 'generation_waiting_capacity'}:

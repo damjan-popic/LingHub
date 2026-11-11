@@ -35,7 +35,7 @@ def sha_text(text):
 
 
 def task_checked(value):
-    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context'} != TASK_FIELDS:
+    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope'} != TASK_FIELDS:
         raise Failure('invalid_request')
     mode, source, target, locale = (value[k] for k in
         ('mode', 'source_language', 'target_language', 'locale'))
@@ -53,6 +53,8 @@ def task_checked(value):
     except UnicodeError:
         raise Failure('invalid_request') from None
     if actual != value['source_sha256']:
+        raise Failure('invalid_request')
+    if 'review_scope' in value and (mode != 'review' or value['review_scope'] != 'non_comma'):
         raise Failure('invalid_request')
     spans = value.get('inline_spans', [])
     if (not isinstance(spans, list) or len(spans) > 16
@@ -299,12 +301,17 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
         'coverage': coverage, 'returned_count': len(found),
         'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
         'discovery_basis': 'bounded_literal_contiguous_snippet', 'query': query}
+    selection = _review_writer_selection(task, found)
+    if selection:
+        retrieval.update(status='partial', writer_evidence_selection=deepcopy(selection))
     reader = {'contract': unified.CONTRACT, 'task': 'reference',
         'query': task['source_text'], 'locale': task['locale'], 'analysis': None,
         'matches': found, 'retrieval': retrieval, 'gateway_bundle': None}
     reader['snapshot_sha256'] = digest(reader)
     body = {'contract': CONTRACT, 'document_task': task,
             'source_bundle': reader, 'unified_evidence': packet, 'retrieval': retrieval}
+    if selection:
+        body['writer_evidence_selection'] = selection
     if comma_preflight is not None:
         body['comma_preflight'] = comma_preflight
     if len(canonical(body).encode()) > unified.MAX_FROZEN_BYTES:
@@ -350,6 +357,33 @@ def _literal_term_length(row, text):
     return max((len(term) for key in ('original_terms', 'standardized_terms')
         for term in raw.get(key, []) if isinstance(term, str) and len(term) >= 4
         and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text.casefold())), default=0)
+
+
+def _review_writer_selection(task, matches):
+    """Nominate whole source parents by exact native fields, never edit text."""
+    if task['mode'] != 'review':
+        return None
+    direct = [row['evidence_id'] for row in matches
+              if row.get('context_eligible') is not False and row.get('rights_mode') != 'linked_only'
+              and _native_review_cue(row, task['source_text']) >= 2]
+    if not direct:
+        return None
+    return {'basis': 'exact_source_owned_advice_or_term_cue', 'status': 'partial',
+        'eligible_evidence_ids': direct,
+        'excluded_evidence_ids': [row['evidence_id'] for row in matches
+                                  if row['evidence_id'] not in direct]}
+
+
+def _selection_notice(task, selection):
+    if not selection:
+        return None
+    return ('La revisione considera solo i record con una corrispondenza letterale '
+        'nei campi terminologici o nelle indicazioni della fonte. Non copre tutti '
+        'gli aspetti linguistici; gli altri record trovati restano consultabili.'
+        if task['locale'] == 'it' else
+        'Pregled upošteva le zapise z dobesednim ujemanjem v terminoloških poljih '
+        'ali napotkih vira. Ne zajema vseh jezikovnih lastnosti; drugi najdeni '
+        'zapisi ostajajo na voljo za pregled.')
 
 
 def _changed_sentence_spans(comma):
@@ -422,6 +456,9 @@ def freeze(gateway, family, policy):
         candidates.append((0, len(task['source_text']), original))
     body = general['bundle']
     body.pop('snapshot_sha256')
+    # Bind the scope before signing the shared freeze. Comma components keep
+    # their separate original tasks and source-bound application receipts.
+    body['document_task']['review_scope'] = 'non_comma'
     reader = body['source_bundle']
     reader.pop('snapshot_sha256')
     by_id = {r['evidence_id']: r for r in reader['matches']}
@@ -555,6 +592,9 @@ def validate_document_result(value, task, matches):
         a, b, ids = edit['start'], edit['end'], edit['evidence_ids']
         if (not last <= a < b <= len(text) or text[a:b] != edit['original']
                 or text.count(edit['original']) != 1
+                or edit['original'] == edit['replacement']
+                or task.get('review_scope') == 'non_comma'
+                    and edit['original'].replace(',', '') == edit['replacement'].replace(',', '')
                 or any(eid not in matches or matches[eid].get('context_eligible') is False
                     or matches[eid].get('rights_mode') == 'linked_only' for eid in ids)
                 or not any(edit['support_quote'] in source for eid in ids
@@ -676,6 +716,14 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
     request = {'text': task['source_text'], **{k: task[k] for k in
         ('mode', 'source_language', 'target_language', 'locale', 'source_sha256')},
         'unified_evidence': deepcopy(bundle['unified_evidence'])}
+    if 'review_scope' in task:
+        request['review_scope'] = task['review_scope']
+    selection = bundle.get('writer_evidence_selection') or _review_writer_selection(
+        task, bundle['unified_evidence']['matches'])
+    if selection:
+        eligible = set(selection['eligible_evidence_ids'])
+        request['unified_evidence']['matches'] = [row for row in request['unified_evidence']['matches']
+            if row['evidence_id'] in eligible]
     if 'inline_spans' in task:
         request['inline_spans'] = deepcopy(task['inline_spans'])
     if 'translation_context' in task:
@@ -699,8 +747,14 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
             if key in response:
                 result[key] = deepcopy(response[key])
         return _attach_preflight(result, bundle)
-    matches = {row['evidence_id']: row for row in bundle['source_bundle']['matches']}
+    submitted_ids = {row['evidence_id'] for row in request['unified_evidence']['matches']}
+    matches = {row['evidence_id']: row for row in bundle['source_bundle']['matches']
+               if row['evidence_id'] in submitted_ids}
     document = validate_document_result(response.get('document_result'), task, matches)
+    coverage_notice = _selection_notice(task, selection)
+    if coverage_notice:
+        document['notes'].append(coverage_notice)
+        checked_result(document)
     evidence = response.get('evidence')
     if (not isinstance(evidence, list) or len(evidence) > 100
             or any(not isinstance(row, dict) or not isinstance(row.get('evidence_id'), str)
@@ -747,6 +801,8 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
             'label': row.get('source_label', row['source_slug'])} for row in sources}.values()),
         'limitations': [{'code': 'document_draft_requires_review', 'scope': 'answer'}],
         'document_result': document, 'retrieval': deepcopy(bundle['retrieval'])}
+    if selection:
+        result['limitations'].append({'code': 'document_review_direct_source_matches_only', 'scope': 'answer'})
     for key in ('execution', 'model_identity', 'diagnostics', 'provider_attempts', 'usage', 'timings'):
         if key in response:
             result[key] = deepcopy(response[key])
@@ -837,6 +893,9 @@ def _mixed_document_answer(gateway, bundle, tier, model, parent):
         'uporabah obstoječega preverjevalnika, druge spremembe ostajajo predlogi za pregled. '
         'Nespremenjeno besedilo ni potrdilo o jezikovni pravilnosti.')
     notes = [scope]
+    coverage_notice = _selection_notice(task, bundle.get('writer_evidence_selection'))
+    if coverage_notice:
+        notes.append(coverage_notice)
     if conflicts:
         notes.append('Predlogi, ki se prekrivajo s podprto spremembo, niso bili uporabljeni.' if not it else
                      'Le proposte in conflitto con una modifica supportata non sono state applicate.')
@@ -862,6 +921,8 @@ def _mixed_document_answer(gateway, bundle, tier, model, parent):
         row['local_number'] = number
     blocks = [{'block_id': 'document-draft', 'text': scope},
               {'block_id': 'document-proposal', 'text': proposed}]
+    if coverage_notice:
+        blocks.append({'block_id': 'document-source-coverage', 'text': coverage_notice})
     for index, edit in enumerate(edits):
         blocks.append({'block_id': f'document-edit-{index}', 'text': edit['explanation'],
                        'evidence_ids': edit['evidence_ids']})

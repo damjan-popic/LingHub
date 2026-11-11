@@ -76,6 +76,13 @@ Source lookup uses one literal contiguous snippet of at most 500 codepoints
 per section, preserving phrase adjacency within the existing capture limits.
 Direct recorded advice and term matches are fitted ahead of generic material;
 the full frozen records and their qualifications remain available in readers.
+When a review has exact native advice or term nominations, only those whole
+records enter its writer request; the omitted records remain in the saved
+readers and coverage is explicitly partial. Review passages are represented
+once as exact ordered segments with closed support IDs, retaining whitespace
+and complete long qualifications. Typed ready comma tasks budget the actual
+closed application catalogue, retaining full raw proof server-side; the
+existing input and output caps still apply.
 
 Reviews propose nonoverlapping, source-located edits using exact server-owned
 support units. The server derives offsets and reconstructs the proposed text.
@@ -83,6 +90,8 @@ For Slovenian input with the existing comma checker configured, supported
 comma changes reuse the existing source-bound application graph and its
 rendered explanation. The general review also runs for independent non-comma
 issues in the same section; exact edits merge only when they do not conflict.
+That independent operation explicitly excludes comma changes, which remain
+owned by the existing checker and source-bound application graph.
 Conflicting or unexplained changes remain unapplied, and the report states
 partial coverage. An unchanged passage never certifies that the document has
 no errors. Italian review uses existing bilingual terminology support where

@@ -202,6 +202,35 @@ def test_task_hash_and_shape_reject_invalid_user_data():
         doc.task_checked(t)
 
 
+@pytest.mark.parametrize('mode,scope', [('translate', 'non_comma'), ('review', 'full'),
+    ('review', None), ('review', ['non_comma'])])
+def test_review_scope_is_one_closed_review_only_optional_value(mode, scope):
+    with pytest.raises(Failure, match='invalid_request'):
+        doc.task_checked({**task(mode=mode), 'review_scope': scope})
+
+
+def test_noncomma_scope_is_frozen_forwarded_and_rejects_comma_only_or_noop_output():
+    text = 'Prva poved, druga poved.'
+    f = family(text=text)
+    f['request_options']['document_task']['review_scope'] = 'non_comma'
+    gateway = Gateway()
+    bundle = doc.freeze(gateway, f, {})['bundle']
+    assert bundle['document_task']['review_scope'] == 'non_comma'
+    gateway.result = response(bundle, edits=[], proposed=text, status='not_reviewed')
+    doc.generate(gateway, bundle, 'answer', 'auto')
+    assert gateway.calls[-1][1]['review_scope'] == 'non_comma'
+    for replacement in ('Prva poved druga poved.', text):
+        eid = bundle['source_bundle']['matches'][0]['evidence_id']
+        gateway.result = response(bundle, edits=[{'start': 0, 'end': len(text), 'original': text,
+            'replacement': replacement, 'explanation': 'Synthetic invalid-output fixture.',
+            'evidence_ids': [eid], 'support_quote': SOURCE}], proposed=replacement)
+        with pytest.raises(Failure, match='invalid_document_result'):
+            doc.generate(gateway, bundle, 'answer', 'auto')
+    bundle['document_task'].pop('review_scope')
+    with pytest.raises(Failure, match='resource_changed'):
+        doc.generate(gateway, bundle, 'answer', 'auto')
+
+
 def test_lookup_snippet_preserves_exact_adjacent_phrases_within_existing_bound():
     text = ('La scuola primaria organizza la didattica a distanza per gli alunni. '
             'La scuola informa le famiglie. ' * 35)
@@ -423,6 +452,7 @@ def test_typed_review_reuses_real_source_bound_clause_renderer(tmp_path, monkeyp
 
     def request(path, supplied, base=None):
         if path == '/internal/pilot/document-transform':
+            assert supplied['review_scope'] == 'non_comma'
             return {'contract': doc.RESPONSE_CONTRACT, 'status': 'not_reviewed',
                 'document_result': {**{k: supplied[k] for k in ('mode', 'source_language',
                     'target_language', 'locale', 'source_sha256')}, 'status': 'not_reviewed',
@@ -448,6 +478,7 @@ def test_typed_review_reuses_real_source_bound_clause_renderer(tmp_path, monkeyp
     document = value['document_result']
     assert check_calls == [original] and len(interpretations) == 1
     assert bundle['document_task']['source_text'] == original
+    assert bundle['document_task']['review_scope'] == 'non_comma'
     assert 'Nespremenjeno besedilo ni potrdilo' in value['answer_md']
     if damage is None:
         assert document['status'] == 'draft' and document['proposed_text'] == expected
@@ -523,6 +554,11 @@ def test_native_source_cues_prioritize_exact_bound_advice_and_terms_without_appl
         'original_terms': ['didattica a distanza'], 'standardized_terms': ['pouk na daljavo']}}
     assert doc._native_review_cue(terminology, 'La scuola organizza il pouk na daljavo.')
     assert not doc._native_review_cue(terminology, 'Unrelated school text.')
+    terminology.update(evidence_id='term:restricted', rights_mode='linked_only')
+    t = task(text='La scuola organizza il pouk na daljavo.')
+    assert doc._review_writer_selection(t, [terminology]) is None
+    terminology.update(rights_mode='restricted', context_eligible=False)
+    assert doc._review_writer_selection(t, [terminology]) is None
 
 
 def test_mixed_review_keeps_independent_noncomma_edit_and_source_bound_comma(monkeypatch):
@@ -728,9 +764,73 @@ def test_direct_source_owned_advice_precedes_generic_heading_during_fitting():
                     hit.update(resource_id='governing-heading', original_text=query + '\n\n' + SOURCE)
                 return result
             return super().request(path, payload, base)
-    bundle = doc.freeze(PriorityGateway(), family(text='Please check joinedform. ' + TEXT), {})['bundle']
+    gateway = PriorityGateway()
+    bundle = doc.freeze(gateway, family(text='Please check joinedform. ' + TEXT), {})['bundle']
     rows = bundle['source_bundle']['matches']
     assert rows[0]['external_id'] == 'native-advice'
     assert any(row['external_id'] == 'governing-heading' for row in rows[1:])
     assert any(row['external_id'] == 'source-1' for row in rows[1:])
     assert rows[0]['capture']['original_text'] == 'joinedform | ⇨ | separate form'
+    selection = bundle['writer_evidence_selection']
+    assert selection['eligible_evidence_ids'] == [rows[0]['evidence_id']]
+    assert bundle['retrieval']['status'] == 'partial'
+    before = deepcopy(bundle)
+    gateway.result = response(bundle, edits=[], proposed=bundle['document_task']['source_text'], status='not_reviewed')
+    result = doc.generate(gateway, bundle, 'answer', 'auto')
+    submitted = gateway.calls[-1][1]['unified_evidence']['matches']
+    assert submitted == [bundle['unified_evidence']['matches'][0]]
+    assert bundle == before
+    assert 'Ne zajema vseh jezikovnih lastnosti' in result['answer_md']
+    assert result['document_result']['notes']
+    for row in rows:
+        assert doc.source(bundle, row['evidence_id'])['excerpt'].endswith(row['capture']['original_text'])
+    gateway.result['evidence'] = [{'evidence_id': rows[-1]['evidence_id']}]
+    with pytest.raises(Failure, match='invalid_document_result'):
+        doc.generate(gateway, bundle, 'answer', 'auto')
+
+
+def test_real_retained_cu5_capture_replay_nominates_complete_parent_and_keeps_all_readers():
+    """Optional local regression uses the retained actual product capture read-only.
+
+    The exact parent and advice hashes are the committed CU source bindings;
+    this verifies the full native object rather than a synthetic table row.
+    """
+    import json
+    import os
+    import sqlite3
+    from pathlib import Path
+    configured = os.environ.get('KLIKAI_DOCUMENT_CAPTURE_DB')
+    if not configured:
+        pytest.skip('Actual product replay requires an explicitly supplied retained capture database')
+    family_id = os.environ.get('KLIKAI_DOCUMENT_CAPTURE_FAMILY', '5f076c33-ae4c-42f7-8259-1058ffe37a80')
+    with sqlite3.connect(Path(configured).resolve().as_uri() + '?mode=ro', uri=True) as database:
+        saved = database.execute('SELECT bundle FROM families WHERE id=?', (family_id,)).fetchone()
+    assert saved is not None
+    bundle = json.loads(saved[0])
+    doc.checked(bundle)
+    rows = bundle['unified_evidence']['matches']
+    parent = next(row for row in rows if row['external_id'] == 'cu-slogovni:2021:section:1.guideline-5')
+    raw = parent['capture']
+    assert doc.sha_text(raw['original_text']) == '33b24aaf35ab944007f2fb67785c54c3424e3356475fbde7bba0d01c379c10a7'
+    advice = next(row for row in raw['advice_units']
+        if row['advice_id'] == 'cu-slogovni:2021:advice:cim-bolj-cim-prej')
+    span = advice['source_span']
+    assert (span['char_start'], span['char_end']) == (1360, 1401)
+    assert span['text_sha256'] == '326733913deea9f91bd87fce89d3a56f93e5f71a19d0e7bbf5f436c7750b3acc'
+    assert advice['recommendation_force'] == 'qualified_explanation'
+    assert advice['mapping_status'] == 'proposed_needs_review'
+    assert doc._native_review_cue(parent, bundle['document_task']['source_text']) == 2
+    before = deepcopy(bundle)
+    gateway = Gateway()
+    gateway.result = response(bundle, edits=[], proposed=bundle['document_task']['source_text'], status='not_reviewed')
+    gateway.result['evidence'] = []
+    result = doc._generate_general(gateway, bundle, 'answer', 'auto')
+    assert len(gateway.calls) == 1 and gateway.calls[0][0] == '/internal/pilot/document-transform'
+    submitted = gateway.calls[0][1]['unified_evidence']['matches']
+    assert submitted == [parent]  # Whole native parent, qualifications and original exact hashes.
+    assert submitted[0]['capture']['advice_units'] == raw['advice_units']
+    assert bundle == before and len(bundle['source_bundle']['matches']) >= len(rows)
+    assert 'Ne zajema vseh jezikovnih lastnosti' in result['answer_md']
+    for row in bundle['source_bundle']['matches']:
+        reader = doc.source(bundle, row['evidence_id'])
+        assert {key: reader.get(key) for key in row['source']} == row['source']

@@ -26,6 +26,9 @@ def render_result(value):
     if status not in {'validated','ok','no_hit','no_answer','source_only','partial','rejected','failed'}:raise Failure('invalid_answer',502)
     allowed={'status','short_answer','answer_md','source_badges','evidence','display_blocks','blocks','display_sha256','claims','citations','answer_pin','evidence_packet_hash','source_snapshot_ids','vector_snapshot_id','policy_version','locale','tier','generation_profile_id','model_identity','execution','usage','timings','family_basis_hash','limitations','correction','answer_support','answer_kind','generation_status','evidence_state','word_count','length_status','omitted_claims','deterministic_result','critical_safety_or_provenance_error','synthesis_mode','validation','quality_actions','quality_timings','clarification_code','retrieval','generation','progress','decision_sources','comma_proposal','tool_execution'}
     out={k:v for k,v in value.items()if k in allowed}
+    if 'document_result'in value:
+        from .document_transform import checked_result
+        out['document_result']=checked_result(value['document_result'])
     from .human_feedback import provider_diagnostics
     out.update(provider_diagnostics(value))
     for field in ('short_answer','answer_md'):

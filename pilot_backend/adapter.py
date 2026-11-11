@@ -26,7 +26,7 @@ class Gateway:
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
-            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base or path=='/internal/pilot/interpret'else 3600 if path=='/internal/pilot/generate'else 240,connect=5))as client:
+            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base or path=='/internal/pilot/interpret'else 3600 if path in {'/internal/pilot/generate','/internal/pilot/document-transform'}else 240,connect=5))as client:
                 editorial_auth=bool(self.editorial_operator_policy_id and base==self.klikai_url and path.startswith('/api/editorial/records/'))
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
                     if response.status_code!=200:
@@ -136,6 +136,9 @@ class Gateway:
             'question':question,'context':context,
             'input_language':input_language,'locale':locale})
     def freeze(self,family,policy):
+        if family.get('request_options',{}).get('document_task'):
+            from . import document_transform
+            return document_transform.freeze(self,family,policy)
         if family['task']=='reference'and self.unified_answers:
             prediction=comma_tasks.freeze(self,family,policy)
             if prediction is not None:return prediction
@@ -188,6 +191,9 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('contract')=='klikai.document.v1':
+            from . import document_transform
+            return document_transform.generate(self,bundle,tier,model,parent)
         if bundle.get('contract')==comma_tasks.CONTRACT:return comma_tasks.answer(self,bundle,tier,model,parent)
         if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.answer(bundle,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.generate(self,bundle,tier,model,parent)
@@ -205,6 +211,9 @@ class Gateway:
             return deterministic_answer(data,bundle.get('output_locale',bundle['lang']))
         return self.request('/internal/pilot/generate',{'bundle':bundle,'tier':tier,'model':model,'parent_answer':parent})
     def source(self,bundle,evidence_id,tier):
+        if bundle.get('contract')=='klikai.document.v1':
+            from . import document_transform
+            return document_transform.source(self,bundle,evidence_id,tier)
         if bundle.get('contract')==comma_tasks.CONTRACT:return comma_tasks.source(self,bundle,evidence_id)
         if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.source(bundle,evidence_id,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.source(bundle,evidence_id)
@@ -213,6 +222,9 @@ class Gateway:
         if bundle.get('task')=='terminology':return terminology.source(bundle,evidence_id,tier)
         return self.request('/internal/pilot/source',{'bundle':bundle,'evidence_id':evidence_id,'tier':tier,'bibliographic':True})
     def current_original(self,bundle,evidence_id):
+        if bundle.get('contract')=='klikai.document.v1':
+            from .document_transform import checked
+            checked(bundle);bundle=bundle['source_bundle']
         if bundle.get('contract')==comma_tasks.CONTRACT:
             comma_tasks.checked(bundle)
             bundle=bundle.get('explanation')or{}

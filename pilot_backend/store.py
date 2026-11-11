@@ -72,6 +72,7 @@ class ClosingConnection(sqlite3.Connection):
 
 class Store:
     def __init__(self,path):
+        from .document_uploads import SCHEMA as DOCUMENT_SCHEMA
         self.path=Path(path).absolute()
         if self.path.name in {'fulltext.sqlite','vectors.sqlite'}:raise ValueError('Use a separate pilot account store')
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -84,7 +85,7 @@ class Store:
                 row=db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()if 'meta'in tables else None
                 if not row or row[0]!='pilot-v1':raise ValueError('Existing database is not the pilot store')
             os.chmod(self.path,0o600)
-            db.execute('PRAGMA journal_mode=WAL');db.executescript('BEGIN IMMEDIATE;\n'+SCHEMA)
+            db.execute('PRAGMA journal_mode=WAL');db.executescript('BEGIN IMMEDIATE;\n'+SCHEMA+DOCUMENT_SCHEMA)
             db.execute('INSERT OR IGNORE INTO meta VALUES(?,?)',('schema','pilot-v1'))
             db.execute('INSERT OR IGNORE INTO meta VALUES(?,?)',('audit_salt',secrets.token_hex(32)))
             pid=digest(BASE_POLICY);db.execute('INSERT OR IGNORE INTO policies VALUES(?,?,?,?,?)',(pid,canonical(BASE_POLICY),None,stamp(),'baseline'))
@@ -136,6 +137,7 @@ class Store:
                 with os.fdopen(fd,'a')as out:out.write(canonical(r)+'\n');out.flush();os.fsync(out.fileno())
             self.replay_deletions()
     def _expire(self,db,cutoff):
+        db.execute("DELETE FROM uploaded_documents WHERE created<=? AND state NOT IN ('queued','running')",(cutoff,))
         db.execute('DELETE FROM feedback_events WHERE created<=?',(cutoff,))
         db.execute('DELETE FROM feedback WHERE NOT EXISTS(SELECT 1 FROM feedback_events e WHERE e.feedback_id=feedback.id)')
         db.execute('DELETE FROM votes WHERE created<=?',(cutoff,))

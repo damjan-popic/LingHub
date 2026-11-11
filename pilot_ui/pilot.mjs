@@ -1,4 +1,5 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
+import {documentUploads} from './document-uploads.mjs';
 import {publicRelease} from './public-release.mjs';
 import {appendAnswerParts} from './answer-layout.mjs';
 import {appendMorphologyTables,appendFrequencyPosition} from './morphology-tables.mjs';
@@ -11,6 +12,7 @@ import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,m
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
 const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false,followup:null,feedbackEvents:new Map(),submitting:false,composerFamily:null,composerSlot:null,composerReady:false,earlyComposerEdited:false};
+const documents=documentUploads({root:document.getElementById('document-workspace'),api,locale:()=>state.locale,openFamily:loadFamily,errorText});
 let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0, familyRequest=0, submissionRequest=0;
 let registry = {sources:[]};
 let signInResume = null;
@@ -81,14 +83,16 @@ function setLocale(locale,push=true) {
   renderGenerationNotice();renderMatches();renderSourceLegend();renderWaitMessage();renderCommaSuggestion(state.family?.short);
   if(beta()){applyBetaPresentation();sourceExplorer.render();}
   if(push)setURL();
+  documents.locale();
 }
 async function api(path, options={}) {
   const method=options.method || 'GET',controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
   const headers={'Accept':'application/json','Accept-Language':state.locale,'X-Pilot-Locale':state.locale};
-  if(method!=='GET'){headers['Content-Type']='application/json';if(state.csrf)headers['X-CSRF-Token']=state.csrf;}
+  if(method!=='GET'){headers['Content-Type']=options.blob?'application/octet-stream':'application/json';if(state.csrf)headers['X-CSRF-Token']=state.csrf;}
+  Object.assign(headers,options.headers||{});
   try {
-    const res=await fetch(base+'/api/pilot'+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',headers,body:method==='GET'?undefined:JSON.stringify(options.body||{}),signal:controller.signal});
-    const data=options.response==='text'&&res.ok?await res.text():await res.json().catch(()=>({}));
+    const res=await fetch(base+'/api/pilot'+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',headers,body:method==='GET'?undefined:options.blob||JSON.stringify(options.body||{}),signal:controller.signal});
+    const data=options.response==='blob'&&res.ok?await res.blob():options.response==='text'&&res.ok?await res.text():await res.json().catch(()=>({}));
     if(!res.ok){const err=Error(data.error?.message||t(errorKey(data.error?.code)));err.code=data.error?.code;err.localized=data.error?.locale===state.locale;err.status=res.status;
       if(res.status===401&&path!=='/login'){saveComposer();const resume=signInResume||{owner:state.user?.id,question:$('question').value,answer:familyId()||state.composerFamily,comparison:state.comparison?.comparison_id};resetPrivate();signInResume=resume;$('login-view').hidden=false;textStatus('login-error','session_expired');}throw err;}
     return data;
@@ -98,12 +102,14 @@ function errorText(error) {return !beta()&&error.localized?error.message:t(error
 async function action(button,fn,errorId='global-status') {if(button?.disabled)return;if(button)button.disabled=true;try{return await fn();}catch(error){$(errorId).textContent=errorText(error);}finally{if(button)button.disabled=false;}}
 function clearFeedbackContext() {state.feedbackTarget=null;textStatus('answer-status','');textStatus('feedback-status','');if($('feedback-dialog').open)$('feedback-dialog').close();}
 function resetPrivate() {
+  documents.reset();
   sourceRequest++;resetMatches();clearFeedbackContext();
   state.boot++;submissionRequest++;for(const cancel of state.polling.values())cancel();state.polling.clear();state.user=null;state.csrf=null;state.family=null;state.comparison=null;state.selection=null;state.feedback.clear();state.feedbackEvents.clear();state.followup=null;state.submitting=false;state.composerFamily=null;state.composerSlot=null;state.composerReady=false;state.earlyComposerEdited=false;state.feedbackDrafts.clear();state.delivered.clear();state.requestKeys.clear();state.job=null;state.longOpen=false;
   $('app-view').hidden=true;$('account-button').hidden=true;$('beta-logout').hidden=true;$('password-view').hidden=true;clear($('short-answer'));clear($('long-answer'));clear($('short-sources'));clear($('long-sources'));clear($('short-feedback'));clear($('long-feedback'));clear($('history-list'));clear($('admin-content'));clear($('source-content'));clear($('side-a-answer'));clear($('side-b-answer'));$('question').value='';document.querySelectorAll('dialog[open]').forEach(d=>d.close());setURL();
   clearClarification();$('focus').value='';$('model').value='auto';state.answerLocaleExplicit=false;state.capabilities={};$('capacity-state').hidden=true;renderSourceLegend();renderCommaSuggestion();
 }
 function authenticated(session) {
+  documents.session(session.capabilities||{});
   state.csrf=session.csrf_token;state.user=session.user;state.capabilities=session.capabilities||{};$('login-view').hidden=true;$('account-button').hidden=false;$('account-name').textContent=session.user.username;
   $('account-admin').hidden=!['admin','reviewer'].includes(session.user.role);$('password-view').hidden=!session.user.must_change_password;$('app-view').hidden=!!session.user.must_change_password;$('password-cancel').hidden=!!session.user.must_change_password;
   document.querySelectorAll('[data-admin-tab]').forEach(b=>b.hidden=session.user.role==='reviewer'&&b.dataset.adminTab!=='feedback');

@@ -83,8 +83,10 @@ class Domain:
         db.execute('INSERT INTO runs(id,family_id,tier,model,revision,parent_run_id,assignment_id,state,created)VALUES(?,?,?,?,1,?,?,?,?)',(rid,family,tier,model,parent,assignment,'queued',now))
         stored=db.execute('SELECT task,question,context,locale FROM families WHERE id=?',(family,)).fetchone()
         task=stored['task']
-        guidance=self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
-        comma_candidate=(self.unified_answers and task=='reference'
+        options=db.execute('SELECT options FROM family_request_options WHERE family_id=?',(family,)).fetchone()
+        document_task=bool(options and json.loads(options[0]).get('document_task'))
+        guidance=not document_task and self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
+        comma_candidate=(not document_task and self.unified_answers and task=='reference'
             and comma_tasks.capability(getattr(self.request_gateway,'comma_checker',None))['configured']
             and comma_tasks.candidate(stored['question'],stored['context']))
         job_model='cpu'if guidance or comma_candidate or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
@@ -98,7 +100,7 @@ class Domain:
         # Stable account/cohort allocation; no per-request reroll or existing-family mutation.
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
-    def create_family(self,owner,payload):
+    def create_family(self,owner,payload,*,document_task=None):
         fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id','parent_relation','comma_checker_consent'})
         if 'comma_checker_consent'in payload and type(payload['comma_checker_consent'])is not bool:raise Failure('invalid_request')
         relation=payload.get('parent_relation')
@@ -157,6 +159,7 @@ class Domain:
                 db.execute('INSERT INTO families VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(fid,owner,q,effective_context,task,locale,interface,input_language,model,policy,None,None,stamp()))
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 options={}
+                if document_task is not None:options['document_task']=document_task
                 if 'comma_checker_consent'in payload:options['comma_checker_consent']=payload['comma_checker_consent']
                 if comma_parent is not None:options['comma_parent']=comma_parent
                 if options:db.execute('INSERT INTO family_request_options VALUES(?,?)',(fid,canonical(options)))
@@ -165,7 +168,7 @@ class Domain:
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')
                 if relation:db.execute('INSERT INTO run_relations VALUES(?,?)',(r['run_id'],relation))
                 return dict(family_id=fid,**r)
-            saved=self.idem(db,owner,'family',payload,action)
+            saved=self.idem(db,owner,'family',payload if document_task is None else{**payload,'document_task':document_task},action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
     def expand(self,owner,fid,payload):
         with self.store.tx()as db:
@@ -205,6 +208,7 @@ class Domain:
                     saved=db.execute('SELECT bundle FROM families WHERE id=?',
                         (r['family_id'],)).fetchone()[0]
                     bundle=json.loads(saved or'{}')
+                    if bundle.get('contract')=='klikai.document.v1':bundle=bundle['source_bundle']
                     source_records={unified.evidence_id(row):row.get('source')
                         for row in bundle.get('matches',[])if isinstance(row,dict)
                         and unified.evidence_id(row)and isinstance(row.get('source'),dict)}
@@ -227,10 +231,12 @@ class Domain:
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner);out={'answer_family_id':fid,'question':f['question'],'context':f['context'],'locale':f['locale'],'input_language':f['input_language'],'task':f['task'],'model':f['model'],'created':f['created'],'short':None,'long':None}
             bundle=json.loads(f['bundle'])if f['bundle']else{}
+            is_document=bundle.get('contract')=='klikai.document.v1'
+            if is_document:bundle=bundle['source_bundle']
             out['matches_available']=bundle.get('contract')==unified.CONTRACT or (bundle.get('contract')==request_tasks.CONTRACT and bool(bundle['decision']['resources']))
             if bundle.get('contract')==comma_tasks.CONTRACT and isinstance(bundle.get('explanation'),dict):
                 out['matches_available']=bundle['explanation'].get('contract')==unified.CONTRACT
-            if bundle.get('contract')==unified.CONTRACT:
+            if bundle.get('contract')==unified.CONTRACT and not is_document:
                 from .lexical import reader
                 lexical=reader(bundle)
                 if lexical and self.frequency_reference is not None:
@@ -253,6 +259,9 @@ class Domain:
         with self.store.connect()as db:
             f=self.owned(db,'families',fid,owner)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
+            if bundle.get('contract')=='klikai.document.v1':
+                from .document_transform import checked
+                checked(bundle);bundle=bundle['source_bundle']
             if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.matches(bundle,offset,limit,source,summary)
             if bundle.get('contract')==comma_tasks.CONTRACT:
                 comma_tasks.checked(bundle)

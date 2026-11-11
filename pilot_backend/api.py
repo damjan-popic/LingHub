@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio,csv,hashlib,hmac,io,ipaddress,json,logging,os,re,secrets,sqlite3,threading
 from pathlib import Path
-from urllib.parse import urlsplit,parse_qs,urlencode
+from urllib.parse import urlsplit,parse_qs,urlencode,unquote
 from fastapi import FastAPI,Request
 from fastapi.responses import JSONResponse,HTMLResponse,FileResponse,RedirectResponse,Response
 from starlette.concurrency import run_in_threadpool
@@ -38,6 +38,8 @@ def config_checked(config):
     c.setdefault('human_testing_mode',False);c.setdefault('comparisons_enabled',not c['human_testing_mode']);c.setdefault('editorial_full_records',False)
     c.setdefault('unified_answers',False)
     c.setdefault('single_answers',c['unified_answers'])
+    c.setdefault('document_uploads',False)
+    if type(c['document_uploads'])is not bool or c['document_uploads']and not c['unified_answers']:raise ValueError('Document uploads require unified answers')
     c.setdefault('project_beta',False)
     if type(c['project_beta'])is not bool:raise ValueError('Project beta capability must be boolean')
     c['documentary_sources']=documentary_sources(c['documentary_sources'])if'documentary_sources'in c else packaged_documentary_sources()
@@ -69,19 +71,25 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             logging.getLogger(__name__).warning('Frequency-position reference unavailable; retaining source counts',exc_info=True)
     base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
+    from .document_uploads import Documents
+    documents=Documents(store,domain)
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
     @asynccontextmanager
     async def lifespan(app):
-        if start_workers:jobs.start()
+        if start_workers:
+            jobs.start()
+            if config['document_uploads']:documents.start_worker()
         yield
-        if start_workers:jobs.close()
+        if start_workers:
+            documents.close()
+            jobs.close()
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
     app.add_middleware(GZipMiddleware,minimum_size=1024,compresslevel=5)
     from .linghub_api import install as install_linghub_api
     install_linghub_api(app,config)
-    app.state.store=store;app.state.auth=auth;app.state.domain=domain;app.state.jobs=jobs;app.state.config=config
+    app.state.store=store;app.state.auth=auth;app.state.domain=domain;app.state.jobs=jobs;app.state.config=config;app.state.documents=documents
     def failure(error,locale='sl'):
         return JSONResponse({'error':{'code':error.code,'message':MESSAGES[locale].get(error.code,'Zahteva ni uspela.'if locale=='sl'else'Operazione non riuscita.'),'locale':locale}},status_code=error.status)
     @app.exception_handler(Failure)
@@ -100,16 +108,21 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if request.method=='POST':
             if not request.url.path.startswith('/api/linghub/v1/') and (request.headers.get('origin')not in config['allowed_origins']or urlsplit(request.headers.get('origin','')).netloc!=request.headers.get('host')):return early(Failure('forbidden',403))
             content_type=request.headers.get('content-type','').split(';')[0]
+            document_upload=request.url.path==api+'/documents/upload'and config['document_uploads']
+            if document_upload:
+                try:user(request)
+                except Failure as error:return early(error)
             native_login=request.url.path==api+'/login'and content_type=='application/x-www-form-urlencoded'
-            if content_type!='application/json'and not native_login:return early(Failure('invalid_request',415))
+            if content_type!=('application/octet-stream'if document_upload else'application/json')and not native_login:return early(Failure('invalid_request',415))
+            body_limit=2*1024*1024 if document_upload else 65536
             try:
-                if int(request.headers.get('content-length','0'))>65536:return early(Failure('request_too_large',413))
+                if int(request.headers.get('content-length','0'))>body_limit:return early(Failure('document_too_large'if document_upload else'request_too_large',413))
             except ValueError:return early(Failure('invalid_request'))
             # Bound chunked bodies too, before JSON parsing or expensive password work.
             body=bytearray()
             async for chunk in request.stream():
                 body.extend(chunk)
-                if len(body)>65536:return early(Failure('request_too_large',413))
+                if len(body)>body_limit:return early(Failure('document_too_large'if document_upload else'request_too_large',413))
             request._body=bytes(body)
         response=await call_next(request)
         return secure_headers(response)
@@ -145,6 +158,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         from .comma_tasks import capability
         checker=capability(config.get('comma_checker'))
         extra={'comma_checker':checker}if checker['configured']else{}
+        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl','it'],'outputs':['report_txt','report_docx','draft_docx']}
         if beta(s):return {**extra,'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':config['single_answers'],'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {**extra,'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'single_answers':config['single_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
@@ -203,6 +217,43 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.get(api+'/families')
     async def families(request:Request):
         u=user(request);return present(u,domain.families(u['id']))
+    def document_user(request):
+        u=user(request)
+        if not config['document_uploads']:raise Failure('not_found',404)
+        return u
+    @app.post(api+'/documents/upload')
+    async def upload_document(request:Request):
+        u=document_user(request)
+        try:name=unquote(request.headers.get('X-Document-Name',''),encoding='utf-8',errors='strict')
+        except UnicodeError:raise Failure('invalid_request')from None
+        return await run_in_threadpool(documents.upload,u['id'],await request.body(),name,request.headers.get('X-Upload-Key'))
+    @app.get(api+'/documents')
+    async def list_documents(request:Request):
+        u=document_user(request);return documents.list(u['id'])
+    @app.get(api+'/documents/{identifier}')
+    async def get_document(identifier:str,request:Request):
+        u=document_user(request);return documents.get(u['id'],identifier)
+    @app.post(api+'/documents/{identifier}/start')
+    async def start_document(identifier:str,request:Request):
+        u=document_user(request);return await run_in_threadpool(documents.start,u['id'],identifier,await payload(request))
+    @app.post(api+'/documents/{identifier}/cancel')
+    async def cancel_document(identifier:str,request:Request):
+        u=document_user(request);return await run_in_threadpool(documents.cancel,u['id'],identifier)
+    @app.post(api+'/documents/{identifier}/delete')
+    async def delete_document(identifier:str,request:Request):
+        u=document_user(request);return await run_in_threadpool(documents.delete,u['id'],identifier)
+    @app.get(api+'/documents/{identifier}/export/{fmt}')
+    async def export_document(identifier:str,fmt:str,request:Request):
+        u=document_user(request)
+        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt)
+        media='application/vnd.openxmlformats-officedocument.wordprocessingml.document'if fmt=='docx'else'text/plain; charset=utf-8'
+        return Response(data,media_type=media,headers={'Content-Disposition':'attachment; filename="klikai-report.'+fmt+'"'})
+    @app.get(api+'/documents/{identifier}/draft/{fmt}')
+    async def draft_document(identifier:str,fmt:str,request:Request):
+        u=document_user(request)
+        data=await run_in_threadpool(documents.export,u['id'],identifier,fmt,True)
+        media='application/vnd.openxmlformats-officedocument.wordprocessingml.document'if fmt=='docx'else'text/plain; charset=utf-8'
+        return Response(data,media_type=media,headers={'Content-Disposition':'attachment; filename="klikai-draft.'+fmt+'"'})
     @app.get(api+'/capabilities')
     async def capabilities(request:Request):
         u=user(request);result=capability_result(u)
@@ -264,6 +315,9 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             else:r=db.execute('SELECT *FROM runs WHERE family_id=?AND tier=?AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1',(fid,stored_tier)).fetchone()
             if r:tier=answer_mode.source_tier(db,r)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
+            if bundle.get('contract')=='klikai.document.v1':
+                from .document_transform import checked
+                checked(bundle);bundle=bundle['source_bundle']
             is_unified=bundle.get('contract')==unified.CONTRACT and aid is None
             if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)
             run_result=json.loads(r['result']or'{}')
@@ -490,7 +544,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     ui=Path(config.get('ui_root',Path(__file__).resolve().parent.parent/'pilot_ui')).resolve()
     @app.get(base+'/assets/{asset:path}')
     async def asset(asset:str):
-        if asset not in {'comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','answer-layout.mjs','morphology-tables.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
+        if asset not in {'document-uploads.mjs','comma-proposal.mjs','pilot.css','pilot.mjs','core.mjs','submission.mjs','source-explorer.mjs','interface-details.mjs','answer-layout.mjs','morphology-tables.mjs','public-release.mjs','i18n/sl.json','i18n/it.json','source-presentation.json','brand/regione-fvg.jpg','brand/slori.png','brand/social-icons.svg'}:raise Failure('not_found',404)
         target=ui/asset
         if not target.is_file()or target.resolve().parent not in {ui,ui/'i18n',ui/'brand'}:raise Failure('not_found',404)
         return FileResponse(target)

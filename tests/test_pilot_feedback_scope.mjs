@@ -34,7 +34,7 @@ function harness(handler){
     renderCommaSuggestion(){},commaCheckerControls(){},resetMatches(){},setURL(){},clearClarification(){},renderSourceLegend(){},captureSelection(){},renderFeedback:(tier,kind)=>renders.push({run:tier.run_id,kind}),
     ordinaryFamilyView,modelText:()=>'',renderGenerationNotice(){},syncMatches(){},renderLexical(){},renderText(){},sourceButtons(){},
     jobState:t=>t?.state,tierBlocks:()=>[],acceptedStates:new Set(['complete']),pendingStates:new Set(['pending']),isCpuTask:()=>false,
-    sourceExplorer:{render(){}},unwrapFamily:x=>x.family||x,keyFor:()=> 'synthetic-key',pollJob(){},taskControls(){},showClarification(){},
+    sourceExplorer:{render(){}},documents:{reset(){}},unwrapFamily:x=>x.family||x,keyFor:()=> 'synthetic-key',pollJob(){},taskControls(){},showClarification(){},
   };
   vm.createContext(context);
   vm.runInContext([

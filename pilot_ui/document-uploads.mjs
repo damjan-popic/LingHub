@@ -9,6 +9,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  const values={mode:'review',source_language:'sl',target_language:'it'};
  const tr=key=>messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
  const stateLabel=state=>({sl:{draft:'Pripravljeno',queued:'Čaka',running:'V obdelavi',complete:'Končano',failed:'Ni uspelo',cancelled:'Ustavljeno',pending:'Čaka',unknown:'Ni obdelano'},it:{draft:'Pronto',queued:'In attesa',running:'In corso',complete:'Terminato',failed:'Non riuscito',cancelled:'Interrotto',pending:'In attesa',unknown:'Non elaborato'}}[locale()==='it'?'it':'sl'][state]||tr(state));
+ const sectionLabel=section=>section.document_result?.status==='not_reviewed'?(locale()==='it'?'Non revisionato':'Ni pregledano'):stateLabel(section.state);
  const el=(tag,text,attrs={})=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;};
  const label=(parent,text,input)=>{const n=el('label',text);n.append(input);parent.append(n);return input;};
  const select=(choices,value)=>{const n=el('select');for(const[v,title]of choices){const option=el('option',title,{value:v});n.append(option);}n.value=value;return n;};
@@ -41,8 +42,8 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    panel.append(el('p',draftNote,{class:'qualified-note'}));
   }
   panel.append(el('p',tr('report'),{class:'small muted'}));
-  for(const warning of current.warnings)panel.append(el('p',warning==='document_images_not_reviewed'?(locale()==='it'?'Le immagini non sono state elaborate.':'Slike niso bile obdelane.'):tr('document_unsupported'),{class:'qualified-note'}));
-  for(const section of current.sections){const item=el('details',undefined,{class:'document-section'});if(current.total===1)item.open=true;item.append(el('summary',tr('section')+' '+(section.index+1)+' · '+stateLabel(section.state)));item.append(el('h4',tr('original')),el('pre',section.text,{class:'document-text'}));if(section.output){item.append(el('h4',tr('result')),el('div',section.output,{class:'document-text'}));}if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));if(section.family_id)button(item,'view',()=>openFamily(section.family_id));panel.append(item);}
+  for(const warning of current.warnings)panel.append(el('p',warning==='document_images_not_reviewed'?(locale()==='it'?'Il contenuto delle immagini non è revisionato né tradotto.':'Vsebina slik ni pregledana ali prevedena.'):tr('document_unsupported'),{class:'qualified-note'}));
+  for(const section of current.sections){const item=el('details',undefined,{class:'document-section'});if(current.total===1)item.open=true;item.append(el('summary',tr('section')+' '+(section.index+1)+' · '+sectionLabel(section)));item.append(el('h4',tr('original')),el('pre',section.text,{class:'document-text'}));if(section.output){item.append(el('h4',tr('result')),el('div',section.output,{class:'document-text'}));}if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));if(section.family_id)button(item,'view',()=>openFamily(section.family_id));panel.append(item);}
  }
  function render(){root.replaceChildren();root.hidden=!enabled;if(!enabled)return;
   const outer=el('details');outer.append(el('summary',tr('open')));root.append(outer);outer.append(el('h2',tr('title')),el('p',tr('hint'),{class:'small muted'}));

@@ -19,6 +19,7 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_TEXT = 200_000
 MAX_BLOCKS = 100
 MAX_SECTION = 3000
+SECTION_TARGET = 1500
 MAX_MEMBERS = 512
 MAX_EXPANDED = 16 * 1024 * 1024
 MAX_XML = 4 * 1024 * 1024
@@ -68,14 +69,32 @@ def _valid_text(value):
     return value
 
 
-def _split(value):
-    """Yield exact adjacent slices; joining them reproduces the original."""
-    while len(value) > MAX_SECTION:
-        cut = max((m.end() for m in re.finditer(r'\s+', value[:MAX_SECTION])), default=0)
+def _split(value,protected=()):
+    """Keep whole sentences where possible within the document operation budget.
+
+    This is text packaging, not a linguistic sentence analysis. Every slice is
+    exact and adjacent; the full source and its original offsets are retained.
+    """
+    offset=0
+    while len(value) > SECTION_TARGET:
+        prefix=value[:SECTION_TARGET]
+        boundaries=[m.end()for m in re.finditer(r'[.!?][»”"\')\]]*\s+|\r?\n[ \t]*\r?\n',prefix)
+                    if m.end()>=SECTION_TARGET//2]
+        cut=max(boundaries,default=0)
+        if not cut:cut=max((m.end() for m in re.finditer(r'\s+',prefix)),default=0)
         if cut == 0:
-            cut = MAX_SECTION
+            cut = SECTION_TARGET
+        for mark in protected:
+            if mark['start']<offset+cut<mark['end']:
+                before,after=mark['start']-offset,mark['end']-offset
+                if before>=SECTION_TARGET//2:cut=before
+                elif after<=MAX_SECTION:cut=after
+                else:_invalid('document_unsupported')
+                break
+        if value[cut-1:cut+1]=='\r\n':cut+=1
         yield value[:cut]
         value = value[cut:]
+        offset+=cut
     if value:
         yield value
 
@@ -217,6 +236,7 @@ def extract(data: bytes, filename: str):
             or any(ord(c) < 32 for c in filename)):
         _invalid()
     suffix = PurePosixPath(filename).suffix.lower()
+    anchors={}
     if suffix == '.txt':
         try:
             value = data.decode('utf-8-sig')
@@ -227,6 +247,11 @@ def extract(data: bytes, filename: str):
     elif suffix == '.docx':
         try:
             source, warnings = _word_blocks(data)
+            from .document_word import source_anchors
+            try:anchors=source_anchors(data)
+            except Failure as error:
+                if error.code=='document_draft_unavailable':_invalid('document_unsupported')
+                raise
         except Failure:
             raise
         except (BadZipFile, KeyError, RuntimeError, OSError, ValueError, NotImplementedError):
@@ -240,9 +265,13 @@ def extract(data: bytes, filename: str):
     blocks = []
     for location, value in source:
         offset = 0
-        for part in _split(value):
+        marks=anchors.get(location,[])
+        for part in _split(value,marks):
+            spans=[{**mark,'start':mark['start']-offset,'end':mark['end']-offset}for mark in marks
+                if offset<=mark['start']and mark['end']<=offset+len(part)]
+            if len(spans)>16:_invalid('document_unsupported')
             blocks.append({'index': len(blocks), 'location': f'{location}@{offset}:{offset + len(part)}',
-                           'text': part})
+                           'text': part,**({'inline_spans':spans}if spans else{})})
             offset += len(part)
             if len(blocks) > MAX_BLOCKS:
                 _invalid('document_too_large', 413)
@@ -250,37 +279,100 @@ def extract(data: bytes, filename: str):
             'blocks': blocks, 'warnings': warnings}
 
 
-def _report_lines(report):
-    it = report.get('locale') == 'it'
-    yield ('Rapporto KLIKai: ' if it else 'Poročilo KLIKai: ') + str(report.get('name', ''))
-    yield ('Questo rapporto contiene proposte e fonti. Non conserva l’impaginazione del file originale.'
-           if it else 'Poročilo vsebuje predloge in vire. Ne ohranja postavitve izvirne datoteke.')
-    yield f"{report.get('mode', '')}: {report.get('source_language', '')} → {report.get('target_language', '')}"
+def report_location(location, locale='sl'):
+    """Human locations, derived from the retained native locator without guessing."""
+    it=locale=='it'
+    location=str(location).rsplit('@',1)[0]
+    if location=='text':return 'Testo'if it else'Besedilo'
+    part=('Intestazione'if it else'Glava')if re.search(r'/header\d+\.xml',location)else(
+        'Piè di pagina'if it else'Noga')if re.search(r'/footer\d+\.xml',location)else(
+        'Nota'if it else'Opomba')if '/footnotes.xml'in location or'/endnotes.xml'in location else(
+        'Commento originale'if it else'Izvirna pripomba')if '/comments.xml'in location else(
+        'Testo'if it else'Besedilo')
+    labels={'tbl':('tabella','tabela'),'tr':('riga','vrstica'),'tc':('cella','celica'),'p':('paragrafo','odstavek')}
+    positions=[labels[k][0 if it else 1]+' '+v for k,v in re.findall(r'/(tbl|tr|tc|p)\[(\d+)\]',location)]
+    return part+(' · '+' · '.join(positions)if positions else'')
+
+
+def _report_blocks(report):
+    it=report.get('locale')=='it';mode=report.get('mode')
+    title=('Rapporto di traduzione'if it else'Poročilo o prevodu')if mode=='translate'else(
+        'Rapporto di revisione'if it else'Poročilo jezikovnega pregleda')
+    yield 'title',title
+    yield 'body',('Documento 'if it else'Dokument ')+str(report.get('name',''))
+    languages={'sl':'Slovenščina'if not it else'Sloveno','it':'Italijanščina'if not it else'Italiano'}
+    if mode=='translate':
+        yield 'body',('Direzione 'if it else'Smer ')+languages.get(report.get('source_language'),'')+' → '+languages.get(report.get('target_language'),'')
+    else:yield 'body',('Lingua 'if it else'Jezik ')+languages.get(report.get('source_language'),'')
+    yield 'body',('Il rapporto confronta originale e proposta, indica la copertura e distingue le fonti delle modifiche dal materiale di contesto. Le proposte richiedono una revisione umana.'if it else
+        'Poročilo primerja izvirnik in predlog, opiše obseg obdelave ter loči vire sprememb od gradiva za kontekst. Predloge mora preveriti človek.')
+    yield 'body',('Il rapporto usa una propria impaginazione. La bozza Word è un file separato.'if it else'Poročilo uporablja svojo postavitev. Wordov osnutek je ločena datoteka.')
+    sections=report.get('sections',[])
+    if mode in {'review','translate'} and (report.get('state')!='complete' or not sections or any(
+            s.get('state')!='complete' or (s.get('document_result')or{}).get('status')!='draft'for s in sections)):
+        yield 'body',('Il documento non ha ancora una bozza completa. Il rapporto conserva anche le sezioni non completate o non revisionate.'if it else
+            'Dokument še nima popolnega osnutka. Poročilo ohrani tudi odseke, ki niso bili dokončani ali pregledani.')
     for warning in report.get('warnings',[]):
-        if warning=='document_images_not_reviewed':
-            yield 'Le immagini non sono state elaborate.'if it else'Slike niso bile obdelane.'
-    for section in report.get('sections', []):
-        yield ''
-        yield f"{int(section.get('index', 0)) + 1}. {section.get('location', '')}"
-        yield ('Stato: ' if it else 'Stanje: ') + str(section.get('status', ''))
-        yield ('Originale:' if it else 'Izvirnik:')
-        yield str(section.get('text', ''))
-        yield ('Risultato:' if it else 'Rezultat:')
-        yield str(section.get('output', ''))
-        sources = section.get('sources') or []
-        numbers={source.get('evidence_id'):source.get('local_number',index+1)
-                 for index,source in enumerate(sources)}
-        for edit in (section.get('document_result')or{}).get('edits',[]):
-            yield ('Modifica proposta:'if it else'Predlagana sprememba:')
-            yield str(edit['original'])+' → '+str(edit['replacement'])
-            yield str(edit['explanation'])
-            yield ('Fonti: 'if it else'Viri: ')+', '.join('['+str(numbers[eid])+']'
-                for eid in edit['evidence_ids']if eid in numbers)
-        if sources:
-            yield ('Fonti:' if it else 'Viri:')
-            for index,source in enumerate(sources):
-                yield '['+str(source.get('local_number',index+1))+'] '+' · '.join(
-                    str(source.get(k, '')) for k in ('title', 'url') if source.get(k))
+        if warning=='document_images_not_reviewed':yield 'body',('Le immagini sono conservate dove possibile, ma il loro contenuto non è stato revisionato né tradotto.'if it else'Slike se po možnosti ohranijo, njihova vsebina pa ni bila jezikovno pregledana ali prevedena.')
+    parts={};seen={}
+    for section in sections:
+        key=str(section.get('location','')).rsplit('@',1)[0];parts[key]=parts.get(key,0)+1
+    for section in sections:
+        number=int(section.get('index',0))+1
+        yield 'heading',('Sezione 'if it else'Odsek ')+str(number)
+        key=str(section.get('location','')).rsplit('@',1)[0];seen[key]=seen.get(key,0)+1
+        label=report_location(section.get('location',''),report.get('locale','sl'))
+        if parts[key]>1:label+=(' · parte 'if it else' · del ')+str(seen[key])+'/'+str(parts[key])
+        yield 'body',label
+        result=section.get('document_result')or{};state=section.get('state',section.get('status','unknown'))
+        if result.get('status')=='not_reviewed':
+            status='Non revisionato; originale conservato senza modifiche.'if it else'Ni pregledano; izvirnik je ohranjen brez sprememb.'
+        elif state=='complete'and result.get('status')=='draft':
+            status=('Bozza di traduzione preparata.'if it else'Prevodni osnutek je pripravljen.')if mode=='translate'else(
+                'Modifiche proposte nel testo della bozza.'if it else'Spremembe so vključene v predlagano besedilo.')if result.get('edits')else(
+                'Nessuna modifica proposta nell’ambito supportato; non è una conferma dell’assenza di errori.'if it else'V podprtem obsegu ni predlaganih sprememb; to ni potrditev, da besedilo nima napak.')
+        else:status=({'complete':('Elaborazione terminata.','Obdelava je zaključena.'),'failed':('Elaborazione non riuscita.','Obdelava ni uspela.'),
+            'cancelled':('Elaborazione interrotta.','Obdelava je ustavljena.'),'queued':('In attesa.','Čaka na obdelavo.'),
+            'running':('Elaborazione in corso.','Obdelava poteka.')} .get(state,('Non elaborato.','Ni obdelano.')))[0 if it else 1]
+        yield 'body',status
+        yield 'subheading','Originale'if it else'Izvirnik'
+        yield 'body',str(section.get('text',''))
+        yield 'subheading','Proposta'if it else'Predlagano besedilo'
+        yield 'body',str(result.get('proposed_text',section.get('output','')))
+        for note in dict.fromkeys(result.get('notes',[])):
+            known={'evidence_excluded_from_writer':('Parte delle fonti trovate non è stata inclusa per limiti di spazio; la copertura è quindi parziale.','Del najdenih virov zaradi omejenega prostora ni bil uporabljen; obseg obdelave je zato delen.'),
+                'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.')}
+            yield 'body',known.get(note,(note,note))[0 if it else 1]
+        sources=section.get('sources')or[]
+        numbers={source.get('evidence_id'):source.get('local_number',i+1)for i,source in enumerate(sources)}
+        used=set()
+        for edit in result.get('edits',[]):
+            used.update(edit['evidence_ids'])
+            yield 'subheading','Modifica proposta'if it else'Predlagana sprememba'
+            yield 'body',str(edit['original'])+' → '+str(edit['replacement'])
+            yield 'body',str(edit['explanation'])
+            yield 'body',('Fonti 'if it else'Viri ')+', '.join('['+str(numbers[eid])+']'for eid in edit['evidence_ids']if eid in numbers)
+            if edit.get('support_quote'):
+                yield 'subheading','Passaggio a sostegno'if it else'Podporni odlomek'
+                yield 'quote',edit['support_quote']
+        claimed=[s for s in sources if s.get('evidence_id')in used]
+        contextual=[s for s in sources if s.get('evidence_id')not in used]
+        for rows,heading in [(claimed,'Fonti delle modifiche'if it else'Viri sprememb'),(contextual,'Materiale di contesto'if it else'Gradivo za kontekst')]:
+            if not rows:continue
+            if rows is contextual and result:
+                yield 'body',('Le altre fonti trovate restano consultabili nel risultato salvato. Non sono presentate come prova di modifiche o della correttezza dell’intera traduzione.'if it else'Drugi najdeni viri ostajajo na voljo ob shranjenem rezultatu. Niso prikazani kot potrditev sprememb ali pravilnosti celotnega prevoda.')
+                continue
+            yield 'subheading',heading
+            if rows is contextual:yield 'body',('Questo materiale non certifica la correttezza dell’intera traduzione e non è citato a sostegno di una modifica specifica.'if it else'To gradivo ne potrjuje pravilnosti celotnega prevoda in ni navedeno kot podpora posamezni spremembi.')
+            for source in rows:
+                title=' '.join(str(source.get('title')or source.get('source_label')or'').split())
+                number=source.get('local_number')or next(i+1 for i,s in enumerate(sources)if s is source)
+                yield 'body','['+str(number)+'] '+title
+                if source.get('url'):yield 'body',str(source['url'])
+
+
+def _report_lines(report):
+    return (text for _,text in _report_blocks(report))
 
 
 def report_text(report):
@@ -289,14 +381,18 @@ def report_text(report):
 
 def report_docx(report):
     """A new Word report, retaining exact original strings beside each result."""
-    return _text_docx(_report_lines(report))
+    return _text_docx(_report_blocks(report),styled=True)
 
 
-def _text_docx(lines):
+def _text_docx(lines,styled=False):
     document = ET.Element(W + 'document')
     body = ET.SubElement(document, W + 'body')
     for line in lines:
         paragraph = ET.SubElement(body, W + 'p')
+        if styled:
+            kind,line=line
+            properties=ET.SubElement(paragraph,W+'pPr')
+            ET.SubElement(properties,W+'pStyle',{W+'val':{'title':'Title','heading':'Heading1','subheading':'Heading2','quote':'Quote'}.get(kind,'Normal')})
         run = ET.SubElement(paragraph, W + 'r')
         # Represent tabs/newlines as native Word tokens and preserve whitespace.
         for token in re.split(r'(\r\n|\r|\n|\t)', line):
@@ -306,12 +402,16 @@ def _text_docx(lines):
                 ET.SubElement(run, W + 'br')
             elif token:
                 ET.SubElement(run, W + 't', {XML_SPACE: 'preserve'}).text = token
+    if styled:
+        section=ET.SubElement(body,W+'sectPr')
+        ET.SubElement(section,W+'pgSz',{W+'w':'11906',W+'h':'16838'})
+        ET.SubElement(section,W+'pgMar',{W+'top':'1134',W+'bottom':'1134',W+'left':'1134',W+'right':'1134',W+'header':'567',W+'footer':'567'})
     content_types = (b'<?xml version="1.0" encoding="UTF-8"?>'
         b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         b'<Default Extension="xml" ContentType="application/xml"/>'
         b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-        b'</Types>')
+        +(b'<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'if styled else b'')+b'</Types>')
     relationships = (b'<?xml version="1.0" encoding="UTF-8"?>'
         b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
@@ -321,7 +421,41 @@ def _text_docx(lines):
         archive.writestr('[Content_Types].xml', content_types)
         archive.writestr('_rels/.rels', relationships)
         archive.writestr('word/document.xml', ET.tostring(document, encoding='utf-8', xml_declaration=True))
+        if styled:
+            styles=ET.Element(W+'styles')
+            for name,size,bold,spacing in [('Normal','22',False,'100'),('Title','32',True,'240'),('Heading1','26',True,'180'),('Heading2','22',True,'100'),('Quote','20',False,'100')]:
+                style=ET.SubElement(styles,W+'style',{W+'type':'paragraph',W+'styleId':name})
+                ET.SubElement(style,W+'name',{W+'val':name});p=ET.SubElement(style,W+'pPr')
+                ET.SubElement(p,W+'spacing',{W+'after':spacing})
+                if name in {'Title','Heading1','Heading2'}:ET.SubElement(p,W+'keepNext')
+                r=ET.SubElement(style,W+'rPr');ET.SubElement(r,W+'rFonts',{W+'ascii':'Arial',W+'hAnsi':'Arial'})
+                ET.SubElement(r,W+'sz',{W+'val':size});ET.SubElement(r,W+'color',{W+'val':'000000'})
+                if bold:ET.SubElement(r,W+'b')
+            archive.writestr('word/styles.xml',ET.tostring(styles,encoding='utf-8',xml_declaration=True))
+            archive.writestr('word/_rels/document.xml.rels',b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
     return result.getvalue()
+
+
+def draft_section_text(section):
+    """Keep source boundary whitespace when joining translated sections.
+
+    The model's saved proposal stays immutable. The returned shift translates
+    its inline target offsets into the layout-preserving exported section.
+    """
+    result=section.get('document_result')or{}
+    proposed=result.get('proposed_text');source=section.get('text')
+    if not isinstance(proposed,str):_invalid('document_draft_unavailable',409)
+    if result.get('mode')!='translate':return proposed,0
+    if not isinstance(source,str):_invalid('document_draft_unavailable',409)
+    if not source.strip():
+        if proposed.strip():_invalid('document_draft_unavailable',409)
+        return source,0
+    core=proposed.strip()
+    if not core:_invalid('document_draft_unavailable',409)
+    leading=re.match(r'\s*',source).group()
+    trailing=re.search(r'\s*$',source).group()
+    removed=len(proposed)-len(proposed.lstrip())
+    return leading+core+trailing,len(leading)-removed
 
 
 def draft_blocks(report):
@@ -333,10 +467,11 @@ def draft_blocks(report):
         result=section.get('document_result')or{}
         if section.get('state')!='complete'or result.get('status')!='draft'or not isinstance(result.get('proposed_text'),str):
             _invalid('document_draft_unavailable',409)
+        proposed,_=draft_section_text(section)
         location=section['location'].rsplit('@',1)[0]
         if blocks and blocks[-1][0]==location:
-            blocks[-1]=(location,blocks[-1][1]+result['proposed_text'])
-        else:blocks.append((location,result['proposed_text']))
+            blocks[-1]=(location,blocks[-1][1]+proposed)
+        else:blocks.append((location,proposed))
     return [text for _,text in blocks]
 
 

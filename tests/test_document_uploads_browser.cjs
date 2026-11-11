@@ -45,7 +45,7 @@ ui.session({documents:{enabled:true}});
   await file.setInputFiles({name:'vloga.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer:Buffer.from('test upload fixture')});
   await page.locator('#workspace form button[type=submit]').first().click();
   await page.locator('[data-document-detail] h3').waitFor();assert.equal(await page.locator('[data-document-detail] h3').textContent(),'vloga.docx');
-  assert((await page.locator('#workspace').innerText()).includes(locale==='sl'?'Slike niso bile obdelane.':'Le immagini non sono state elaborate.'));
+  assert((await page.locator('#workspace').innerText()).includes(locale==='sl'?'Vsebina slik ni pregledana ali prevedena.':'Il contenuto delle immagini non è revisionato né tradotto.'));
   const controls=page.locator('.document-options select');await controls.nth(0).selectOption('translate');await controls.nth(1).selectOption('it');assert.equal(await controls.nth(2).inputValue(),'sl');
   await page.locator('.document-options button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Predlog: Čebelica.'));

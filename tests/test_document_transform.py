@@ -397,6 +397,13 @@ def test_typed_review_reuses_real_source_bound_clause_renderer(tmp_path, monkeyp
         return deepcopy(observed)
 
     def request(path, supplied, base=None):
+        if path == '/internal/pilot/document-transform':
+            return {'contract': doc.RESPONSE_CONTRACT, 'status': 'not_reviewed',
+                'document_result': {**{k: supplied[k] for k in ('mode', 'source_language',
+                    'target_language', 'locale', 'source_sha256')}, 'status': 'not_reviewed',
+                    'proposed_text': supplied['text'], 'edits': [], 'notes': [],
+                    'requires_human_review': True, 'validation_scope': 'not_reviewed_no_eligible_sources'},
+                'evidence': [], 'execution': {'inference_performed': False}}
         assert path == '/internal/pilot/interpret'
         interpretations.append(deepcopy(supplied))
         return interpret(**supplied)
@@ -416,10 +423,10 @@ def test_typed_review_reuses_real_source_bound_clause_renderer(tmp_path, monkeyp
     document = value['document_result']
     assert check_calls == [original] and len(interpretations) == 1
     assert bundle['document_task']['source_text'] == original
-    assert 'Druge jezikovne lastnosti' in value['answer_md']
+    assert 'Nespremenjeno besedilo ni potrdilo' in value['answer_md']
     if damage is None:
         assert document['status'] == 'draft' and document['proposed_text'] == expected
-        assert document['validation_scope'] == 'source_bound_comma_applications_only'
+        assert document['validation_scope'] == 'mixed_source_bound_document_review'
         assert document['edits'][0]['explanation'] == explained['display_blocks'][0]['text']
         assert '325' in document['edits'][0]['explanation']
         assert 'odvisni stavek »Če bo deževalo«' in document['edits'][0]['explanation']
@@ -475,3 +482,135 @@ def test_no_comma_changes_continues_general_typed_review_and_retains_observation
     assert value['document_result']['status'] == 'draft'
     assert value['deterministic_result']['document_comma_preflight']['observation']['edits'] == []
     assert value['tool_execution']['attempted'] is True
+
+
+def test_native_source_cues_prioritize_exact_bound_advice_and_terms_without_applying_rules():
+    quote = 'joined form | ⇨ | separate form'
+    row = {'capture_kind': 'resource_record', 'capture': {'original_text': quote,
+        'advice_units': [{'source_span': {'char_start': 0, 'char_end': len(quote),
+                                         'text_sha256': doc.sha_text(quote)}}]}}
+    before = deepcopy(row)
+    assert doc._native_review_cue(row, 'The joined form occurs here.')
+    assert row == before
+    row['capture']['advice_units'][0]['source_span']['text_sha256'] = '0' * 64
+    assert not doc._native_review_cue(row, 'The joined form occurs here.')
+    terminology = {'capture_kind': 'terminology_record', 'capture': {
+        'original_terms': ['didattica a distanza'], 'standardized_terms': ['pouk na daljavo']}}
+    assert doc._native_review_cue(terminology, 'La scuola organizza il pouk na daljavo.')
+    assert not doc._native_review_cue(terminology, 'Unrelated school text.')
+
+
+def test_mixed_review_keeps_independent_noncomma_edit_and_source_bound_comma(monkeypatch):
+    """Merge mechanism fixture; linguistic evidence is tested separately above."""
+    text = 'Če dežuje bomo čimprej doma. Na daljavo ostaja enako.'
+    first = text[:text.index('.') + 1]
+    gateway = Gateway()
+    bundle = doc.freeze(gateway, family(text=text), {})['bundle']
+    eid = bundle['source_bundle']['matches'][0]['evidence_id']
+    point = len('Če dežuje')
+    comma = {'document_result': {'status': 'draft'},
+        'comma_proposal': {'edits': [{'start': point, 'end': point, 'original': '', 'replacement': ','}]},
+        'deterministic_result': {'explanation_connection': {'links': [
+            {'edit_index': 0, 'block_id': 'B1', 'evidence_ids': [eid]}]},
+            'applied_unit_receipts': [{'bound_proof': 'preserved unchanged'}]},
+        'display_blocks': [{'block_id': 'B1', 'text': 'Existing source-bound comma explanation.'}],
+        'citations': [{'evidence_id': eid, 'snippet': SOURCE}],
+        'evidence': [{'evidence_id': eid, 'source_slug': 'sp2001', 'title': 'Retained source'}],
+        'execution': {'inference_performed': False}}
+    # The generic whole-section proposal contains an incorrect comma. Its
+    # punctuation cannot replace the independent established comma proof.
+    generic = {'status': 'partial', 'document_result': {
+        'status': 'draft', 'edits': [{'start': 0, 'end': len(text), 'original': text,
+            'replacement': text.replace('Če dežuje', 'Če, dežuje').replace('čimprej', 'čim prej'),
+            'explanation': 'Independent spelling proposal.', 'evidence_ids': [eid],
+            'support_quote': SOURCE}]}, 'evidence': comma['evidence'],
+        'execution': {'inference_performed': True}}
+    monkeypatch.setattr(doc, '_component_body', lambda *args: {})
+    monkeypatch.setattr(doc, '_comma_document_answer', lambda *args: deepcopy(comma))
+    monkeypatch.setattr(doc, '_generate_general', lambda *args: deepcopy(generic))
+    bundle['comma_components'] = [{'start': 0, 'end': len(first)}]
+    bundle['comma_parent_observation'] = {'edits': [{'start': point, 'end': point}]}
+    value = doc._mixed_document_answer(gateway, bundle, 'answer', 'auto', None)
+    result = value['document_result']
+    assert result['proposed_text'] == text.replace('Če dežuje', 'Če dežuje,').replace('čimprej', 'čim prej')
+    assert 'Na daljavo ostaja enako.' in result['proposed_text']
+    assert len(result['edits']) == 2
+    assert result['edits'][0]['explanation'] == 'Existing source-bound comma explanation.'
+    assert value['deterministic_result']['document_review_components']['comma_results'][0][
+        'deterministic_result']['applied_unit_receipts'] == comma['deterministic_result']['applied_unit_receipts']
+    assert value['execution']['inference_performed'] is True
+    assert value['answer_kind'] == 'mixed'
+
+
+def test_original_native_sentence_spans_are_bound_and_proposed_only_offsets_are_refused():
+    import re
+    text = 'Prva poved. Druga poved.'
+    t = task(text=text)
+    sentence, words = 1, []
+    for token in re.finditer(r'\w+|[^\w\s]', text):
+        words.append({'text': token.group(), 'start': token.start(), 'end': token.end(),
+                      'sentence_id': sentence})
+        if token.group() == '.':
+            sentence += 1
+    native = {'status': 'ok', 'input_text': text, 'input_sha256': doc.sha_text(text),
+        'analysis': {'text': text, 'offset_convention': 'unicode_codepoint_half_open', 'words': words}}
+    reader = doc._empty_source_bundle(t)
+    reader.pop('snapshot_sha256')
+    reader['analysis'] = {'captures': [{'operation': 'syntax', 'response': native}]}
+    reader['snapshot_sha256'] = digest(reader)
+    frame = 'Preveri vejice: '
+    captured = {'contract': doc.comma_tasks.CONTRACT, 'question': frame + text,
+        'task': {'target': {'text': text, 'scope': 'question', 'start': len(frame), 'end': len(frame + text)}},
+        'explanation': reader, 'observation': {'edits': [{'start': 4, 'end': 4}]}}
+    captured['snapshot_sha256'] = digest(captured)
+    stored = deepcopy(captured)
+    stored.pop('explanation')
+    body = {'document_task': t, 'comma_capture': stored,
+        'comma_explanation_present': True, 'source_bundle': reader}
+    assert doc._changed_sentence_spans(body) == [(0, text.index('.') + 1)]
+    native['input_sha256'] = '0' * 64
+    # Update the test envelope to keep the malformed observation explicit;
+    # exact native input identity still prevents using its offsets.
+    reader['snapshot_sha256'] = digest({k: v for k, v in reader.items() if k != 'snapshot_sha256'})
+    captured['explanation'] = reader
+    captured['snapshot_sha256'] = digest({k: v for k, v in captured.items() if k != 'snapshot_sha256'})
+    body['comma_capture']['snapshot_sha256'] = captured['snapshot_sha256']
+    assert doc._changed_sentence_spans(body) == []
+
+
+@pytest.mark.parametrize('damage', [None, 'unknown_id', 'missing', 'wrong_range'])
+def test_translation_inline_mapping_is_exact_and_bound_to_source_annotation(damage):
+    gateway = Gateway()
+    f = family(mode='translate')
+    start = TEXT.index('čebelo')
+    f['request_options']['document_task']['inline_spans'] = [
+        {'id': 'link-1', 'kind': 'hyperlink', 'start': start, 'end': start + len('čebelo'), 'text': 'čebelo'}]
+    bundle = doc.freeze(gateway, f, {})['bundle']
+    translated = 'Una persona ha un’ape.'
+    value = response(bundle, edits=[], proposed=translated)
+    left = translated.index('ape')
+    value['document_result']['inline_mappings'] = [
+        {'id': 'link-1', 'target_start': left, 'target_end': left + 3, 'target_text': 'ape'}]
+    if damage == 'unknown_id':
+        value['document_result']['inline_mappings'][0]['id'] = 'invented-link'
+    elif damage == 'missing':
+        value['document_result'].pop('inline_mappings')
+    elif damage == 'wrong_range':
+        value['document_result']['inline_mappings'][0]['target_end'] -= 1
+    gateway.result = value
+    if damage:
+        with pytest.raises(Failure, match='invalid_document_result'):
+            doc.generate(gateway, bundle, 'answer', 'auto')
+    else:
+        result = doc.generate(gateway, bundle, 'answer', 'auto')
+        assert result['document_result']['inline_mappings'] == value['document_result']['inline_mappings']
+        assert gateway.calls[-1][1]['inline_spans'] == f['request_options']['document_task']['inline_spans']
+
+
+def test_overlapping_source_inline_spans_are_rejected():
+    value = task(mode='translate')
+    value['inline_spans'] = [
+        {'id': 'emphasis-1', 'kind': 'emphasis', 'start': 0, 'end': 6, 'text': TEXT[:6]},
+        {'id': 'link-2', 'kind': 'hyperlink', 'start': 3, 'end': 6, 'text': TEXT[3:6]}]
+    with pytest.raises(Failure, match='invalid_request'):
+        doc.task_checked(value)

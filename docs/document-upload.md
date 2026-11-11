@@ -21,19 +21,31 @@ cancelled or unreviewed section blocks the complete draft download; partial
 reports remain available and identify missing work.
 
 Word drafts use the uploaded package to retain paragraph styles, tables,
-images and relationships. Changed inline text styles follow the source runs
-as closely as possible; translated word order can require a formatting check.
+images and relationships. Body paragraphs, table cells, headers, footers,
+footnotes, endnotes and original comments are processed as text; retention of
+an image or package part does not mean its content was reviewed or translated.
+Translation attaches supported inline emphasis and hyperlinks to exact,
+explicitly mapped translated expressions. Missing or ambiguous mappings block
+Word export instead of guessing where a link or emphasis belongs. Overlapping
+or complex inline structures are rejected before processing. Formatting still
+requires a human check after translation.
 Plain-text input produces a new Word text document. Reports use their own
 layout. Images are retained where applicable but are not linguistically
-reviewed. Unsupported fields, tracked changes, embedded objects and complex
+reviewed or translated. Existing comments are retained text, not newly generated
+review comments. Clean drafts and separate reports do not contain generated
+tracked revisions. Unsupported fields, tracked changes, embedded objects and complex
 text constructs are rejected before processing rather than discarded.
 
 ## Boundaries and storage
 
 Uploads are limited to 2 MiB, 200,000 codepoints and 100 sections of at most
 3,000 codepoints. Accounts can retain 20 documents within 20 MiB of source
-uploads and process one document at a time. Large source paragraphs are split
-at whitespace into adjacent exact slices and rejoined for draft export.
+uploads and process one document at a time. Large source paragraphs target
+1,500-codepoint sections, preferring sentence boundaries and otherwise using
+whitespace. Protected inline expressions stay together within the 3,000-codepoint
+hard limit. Adjacent exact slices retain all original characters and are rejoined
+for draft export. This bounded packaging does not guarantee that a provider
+operation will finish; failures retain partial reports and block a complete draft.
 
 Original text, original Word packages, task options, section links and frozen
 results live in the existing protected account SQLite store and its existing
@@ -60,10 +72,12 @@ Reviews propose nonoverlapping, source-located edits using exact server-owned
 support units. The server derives offsets and reconstructs the proposed text.
 For Slovenian input with the existing comma checker configured, supported
 comma changes reuse the existing source-bound application graph and its
-rendered explanation. That result explicitly identifies its comma-only scope.
-Conflicting or unexplained changes remain unapplied. A zero-change prediction
-continues through general source-supported draft review; it never certifies
-that the document has no errors.
+rendered explanation. The general review also runs for independent non-comma
+issues in the same section; exact edits merge only when they do not conflict.
+Conflicting or unexplained changes remain unapplied, and the report states
+partial coverage. An unchanged passage never certifies that the document has
+no errors. Italian review uses existing bilingual terminology support where
+applicable; it does not offer comprehensive Italian grammar checking.
 Translations return a complete generated draft without claiming that a
 dictionary source attests an entire translated paragraph. Sources admitted to
 the writer remain distinct from additional retrieved sources. Unsupported

@@ -38,6 +38,37 @@ def test_exact_unicode_newlines_and_splitting():
     assert len(captured['sha256']) == 64
 
 
+def test_operation_slices_prefer_complete_sentence_and_keep_boundary_whitespace():
+    paragraph=('Una comunicazione completa per le famiglie. '*30+
+               'La didattica a distanza rimane disponibile. Le famiglie riceveranno una sintesi. '*22)
+    parts=list(files._split(paragraph))
+    assert ''.join(parts)==paragraph
+    assert len(parts)>1 and all(len(part)<=files.SECTION_TARGET+1 for part in parts)
+    assert all(part.rstrip().endswith('.')for part in parts[:-1])
+    assert not any(part.endswith('Le ')for part in parts[:-1])
+    text='A '*749+'\r\n'+'B '*900
+    parts=list(files._split(text))
+    assert ''.join(parts)==text
+    assert all(not(part.endswith('\r')and following.startswith('\n'))for part,following in zip(parts,parts[1:]))
+
+
+@pytest.mark.parametrize('locale',['sl','it'])
+def test_reports_have_human_locations_localized_status_and_exact_support(locale):
+    original='Če dežuje ostanemo doma.';proposed='Če dežuje, ostanemo doma.'
+    edit={'original':original,'replacement':proposed,'explanation':'Existing supported explanation.',
+          'evidence_ids':['rule'],'support_quote':'Exact governing source passage.'}
+    report={'name':'school.docx','mode':'review','source_language':'sl','target_language':None,'locale':locale,
+        'sections':[{'index':0,'location':'word/document.xml/body[1]/tbl[1]/tr[2]/tc[1]/p[1]@0:24',
+          'text':original,'state':'complete','document_result':{'status':'draft','proposed_text':proposed,'notes':[], 'edits':[edit]},
+          'sources':[{'evidence_id':'rule','local_number':1,'title':'  A recorded\n  rule  ','url':'https://example.org/rule'}]}]}
+    rendered=files.report_text(report).decode()
+    assert 'word/document.xml'not in rendered and 'None'not in rendered and 'Stanje: complete'not in rendered
+    assert ('tabela 1 · vrstica 2 · celica 1'if locale=='sl'else'tabella 1 · riga 2 · cella 1')in rendered
+    assert proposed in rendered and edit['support_quote']in rendered and '[1] A recorded rule'in rendered
+    report['sections'][0]['document_result']={'status':'not_reviewed','proposed_text':original,'notes':[],'edits':[]}
+    assert ('Ni pregledano'if locale=='sl'else'Non revisionato')in files.report_text(report).decode()
+
+
 def test_docx_paragraph_table_header_notes_and_unchanged_boundaries():
     body = '<w:p><w:r><w:t xml:space="preserve"> A 🧑‍🏫 č </w:t><w:tab/><w:t>B</w:t><w:br/><w:t>C</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell 1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>cell 2</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
     header = '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>header</w:t></w:r></w:p></w:hdr>'
@@ -141,7 +172,7 @@ def test_export_reports_keep_originals_outputs_and_credits_and_escape_xml():
     assert original in [b['text'] for b in captured['blocks']]
     assert any(b['text'] == 'Predlog < & >' for b in captured['blocks'])
     assert any('https://example.org/vir' in b['text'] for b in captured['blocks'])
-    assert any('Ne ohranja postavitve' in b['text'] for b in captured['blocks'])
+    assert any('Poročilo uporablja svojo postavitev' in b['text'] for b in captured['blocks'])
     assert report['sections'][0]['text'] == original
 
 

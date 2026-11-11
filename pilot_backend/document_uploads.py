@@ -53,6 +53,8 @@ def request_for(block, options):
 def task_for(block, options):
     task={key:options[key]for key in ('mode','source_language','target_language','locale')}
     task.update(source_text=block['text'],source_sha256=hashlib.sha256(block['text'].encode('utf-8')).hexdigest())
+    if options['mode']=='translate'and block.get('inline_spans'):
+        task['inline_spans']=block['inline_spans']
     return task
 
 

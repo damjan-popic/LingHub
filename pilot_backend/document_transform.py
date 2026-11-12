@@ -10,9 +10,8 @@ import hashlib
 import re
 import time
 import threading
-import unicodedata
 
-from . import unified, comma_tasks, terminology, morphology
+from . import unified, comma_tasks, terminology, morphology, document_surface
 from .security import Failure
 from .store import canonical, digest
 
@@ -318,15 +317,7 @@ def _collect_document_source(gateway, family, definition, details, discovery):
 
 
 def _surface_occurrences(surface, text):
-    def word(char):
-        return char.isalnum() or char == '_' or unicodedata.category(char).startswith('M')
-    if not isinstance(surface, str) or not surface.strip():
-        return
-    for match in re.finditer(re.escape(surface), text, re.I):
-        a, b = match.span()
-        if (a and word(text[a-1])) or (b < len(text) and word(text[b])):
-            continue
-        yield {'start': a, 'end': b, 'text': match.group()}
+    yield from document_surface.occurrences(surface,text)
 
 
 def _freeze_document_lexical_context(gateway, task, matches):
@@ -634,8 +625,7 @@ def _literal_term_length(row, text, source_language=None):
 def _native_term_surfaces(capture, source_language=None):
     recorded = []
     for entry in capture.get('term_entries',[]):
-        if isinstance(entry,dict) and entry.get('lang') in {'sl','it'} and isinstance(entry.get('term'),str):
-            recorded.append((entry['term'],entry['lang']))
+        recorded.extend((form['text'],form['language']) for form in document_surface.entry_forms(entry))
     if not recorded and capture.get('record_kind') == 'terminology_decision':
         for key, language in [('original_terms','it'),('standardized_terms','sl'),('proposals','sl')]:
             recorded.extend((term,language) for term in capture.get(key,[]) if isinstance(term,str))

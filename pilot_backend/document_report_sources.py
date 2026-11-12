@@ -3,12 +3,35 @@ import hashlib
 import json
 import re
 from urllib.parse import quote
+from .store import digest,canonical
 
 
 def retained_writer_ids(snapshot, source_text):
     generation=(snapshot or {}).get('stages',{}).get('generation')or{}
     native=(generation.get('writer')or{}).get('native_translation')
     if isinstance(native,dict):
+        trace=generation.get('writer')or{}
+        packet=trace.get('guidance_packet')
+        if isinstance(packet,dict):
+            prepared=trace.get('prepared_input')or{};prompt=prepared.get('rendered_prompt');span=prepared.get('original_span')or{}
+            ids=packet.get('admitted_evidence_ids')
+            if (packet.get('version')!='klikai.document-guidance.v1'
+                    or packet.get('packet_sha256')!=digest({k:v for k,v in packet.items()if k!='packet_sha256'})
+                    or packet.get('source_sha256')!=hashlib.sha256(source_text.encode()).hexdigest()
+                    or native.get('source_sha256')!=packet['source_sha256']
+                    or native.get('translation_profile_sha256')!=packet.get('profile_sha256')
+                    or not isinstance(ids,list)or len(ids)!=len(set(ids))or native.get('source_evidence_ids')!=ids):return None
+            if not trace.get('requests'):return [] # Prepared guidance never dispatched.
+            if (not isinstance(prompt,str)or prepared.get('guidance_packet_sha256')!=packet['packet_sha256']
+                    or prepared.get('rendered_prompt_sha256')!=hashlib.sha256(prompt.encode()).hexdigest()
+                    or type(span.get('start'))is not int or type(span.get('end'))is not int
+                    or prompt[span['start']:span['end']]!=source_text
+                    or len(trace['requests'])!=1 or trace['requests'][0].get('rendered_prompt')!=prompt):return None
+            from .private_translation import native_references
+            references=native_references(packet)
+            block='BEGIN QUALIFIED KLIKAI REFERENCES\n'+canonical(references)+'\nEND QUALIFIED KLIKAI REFERENCES'
+            if block not in prompt[:span['start']]:return None
+            return ids
         if (native.get('source_sha256')==hashlib.sha256(source_text.encode()).hexdigest()
                 and native.get('source_evidence_ids')==[]
                 and isinstance(native.get('translation_profile_sha256'),str)

@@ -35,7 +35,7 @@ def sha_text(text):
 
 
 def task_checked(value):
-    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope','translation_profile','translation_request_id'} != TASK_FIELDS:
+    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope','translation_profile','translation_request_id','document_binding'} != TASK_FIELDS:
         raise Failure('invalid_request')
     mode, source, target, locale = (value[k] for k in
         ('mode', 'source_language', 'target_language', 'locale'))
@@ -54,6 +54,13 @@ def task_checked(value):
         raise Failure('invalid_request') from None
     if actual != value['source_sha256']:
         raise Failure('invalid_request')
+    if 'document_binding' in value:
+        binding=value['document_binding']
+        if (not isinstance(binding,dict)or set(binding)!={'document_id','section_index'}
+                or not isinstance(binding['document_id'],str)
+                or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',binding['document_id'])
+                or type(binding['section_index'])is not int or not 0<=binding['section_index']<=99):
+            raise Failure('invalid_request')
     if 'review_scope' in value and (mode != 'review' or value['review_scope'] != 'non_comma'):
         raise Failure('invalid_request')
     spans = value.get('inline_spans', [])
@@ -391,6 +398,11 @@ def _review_writer_selection(task, matches):
 def _selection_notice(task, selection):
     if not selection:
         return None
+    if task['mode']=='translate':
+        return ('Il traduttore riceve solo i record interi selezionati nell’input conservato. '
+            'Gli altri risultati e le incertezze restano disponibili; non è una verifica linguistica completa.'
+            if task['locale']=='it'else'Prevajalnik prejme le izbrane cele zapise iz shranjenega vhoda. '
+            'Drugi zadetki in negotovosti ostanejo na voljo; to ni celovito jezikovno preverjanje.')
     return ('La revisione considera solo i record con una corrispondenza letterale '
         'nei campi terminologici o nelle indicazioni della fonte. Non copre tutti '
         'gli aspetti linguistici; gli altri record trovati restano consultabili.'
@@ -724,6 +736,69 @@ def _attach_preflight(result, bundle):
     return result
 
 
+def _checked_guidance_delivery(response, task, matches, unified_evidence):
+    """Verify contextual delivery; no source-enforcement or meaning verdict."""
+    execution=response.get('execution')or{}
+    trace=(response.get('diagnostics')or{}).get('writer')or{}
+    packet=trace.get('guidance_packet');delivery=execution.get('guidance_delivery')
+    expected={key:task[key]for key in ('mode','source_language','target_language','locale','source_sha256')}
+    for key in ('translation_request_id','document_binding'):
+        if key in task:expected[key]=task[key]
+    if (not isinstance(packet,dict)or not isinstance(delivery,dict)
+            or packet.get('version')!='klikai.document-guidance.v1'
+            or packet.get('packet_sha256')!=digest({k:v for k,v in packet.items()if k!='packet_sha256'})
+            or packet.get('task_binding')!=expected or packet.get('source_sha256')!=task['source_sha256']
+            or packet.get('profile_sha256')!=task['translation_profile']['profile_sha256']
+            or packet.get('capture_envelope_sha256')!=digest(unified_evidence)
+            or packet.get('compliance')!='unproven'or packet.get('support_claims')!=[]
+            or packet.get('independently_checked_support')!=[]):invalid()
+    admitted=packet.get('admitted_evidence_ids');retrieved=packet.get('retrieved_evidence_ids')
+    omitted=packet.get('omitted');sources=packet.get('sources')
+    expected_ids=[row['evidence_id']for row in unified_evidence['matches']]
+    if (not isinstance(admitted,list)or not admitted or any(not isinstance(eid,str)for eid in admitted)
+            or len(admitted)!=len(set(admitted))or retrieved!=expected_ids
+            or not isinstance(omitted,list)or not isinstance(sources,list)
+            or any(not isinstance(item,dict)or not isinstance(item.get('reason'),str)
+                or not item['reason']or item.get('evidence_id')not in retrieved for item in omitted)
+            or len({item['evidence_id']for item in omitted})!=len(omitted)
+            or set(admitted)&{item['evidence_id']for item in omitted}
+            or set(admitted)|{item['evidence_id']for item in omitted}!=set(retrieved)
+            or [item.get('evidence_id')for item in sources if isinstance(item,dict)]!=admitted):invalid()
+    for index,item in enumerate(sources,1):
+        row=matches.get(item['evidence_id']);source=item.get('model_source')
+        if (not row or row.get('context_eligible')is False
+                or row.get('rights_mode')not in {'owned','open','restricted'}
+                or (item.get('parent')or{}).get('source_revision')!=row['capture_sha256']
+                or not isinstance(source,dict)or source.get('passage_id')!=item['evidence_id']
+                or source.get('source_slug')!=row['source_slug']):invalid()
+    from .private_translation import native_references
+    references=native_references(packet)
+    keys=('version','task_binding','source_sha256','profile_sha256','packet_sha256','capture_envelope_sha256',
+          'admitted_evidence_ids','retrieved_evidence_ids','omitted','coverage','compliance','independently_checked_support')
+    if any(delivery.get(key)!=packet.get(key)for key in keys):invalid()
+    if delivery.get('delivery_state')!='response_received'or delivery.get('support_claims')!=[]:invalid()
+    native=trace.get('native_translation')or{}
+    prepared=trace.get('prepared_input')or{};rendered=prepared.get('rendered_prompt');span=prepared.get('original_span')or{}
+    observed=trace.get('requests')
+    if (native.get('source_evidence_ids')!=admitted
+            or [row.get('evidence_id')for row in response.get('evidence',[])if isinstance(row,dict)]!=admitted
+            or not isinstance(rendered,str)or prepared.get('rendered_prompt_sha256')!=sha_text(rendered)
+            or prepared.get('guidance_packet_sha256')!=packet['packet_sha256']
+            or prepared.get('guidance_payload')!=references
+            or prepared.get('guidance_payload_sha256')!=digest(references)
+            or type(span.get('start'))is not int or type(span.get('end'))is not int
+            or not 0<=span['start']<span['end']<=len(rendered)
+            or rendered[span['start']:span['end']]!=task['source_text']
+            or span.get('sha256')!=task['source_sha256']
+            or span.get('utf8_byte_start')!=len(rendered[:span['start']].encode())
+            or span.get('utf8_byte_end')!=len(rendered[:span['end']].encode())
+            or not isinstance(observed,list)or len(observed)!=1
+            or observed[0].get('rendered_prompt')!=rendered):invalid()
+    reference_block='BEGIN QUALIFIED KLIKAI REFERENCES\n'+canonical(references)+'\nEND QUALIFIED KLIKAI REFERENCES'
+    if reference_block not in rendered[:span['start']]:invalid()
+    return deepcopy(delivery)
+
+
 def _generate_general(gateway, bundle, tier, model, parent=None):
     checked(bundle)
     if tier not in {'short', 'answer'} or parent is not None:
@@ -746,6 +821,8 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
         request['inline_spans'] = deepcopy(task['inline_spans'])
     if 'translation_context' in task:
         request['translation_context'] = deepcopy(task['translation_context'])
+    if 'document_binding' in task:
+        request['document_binding']=deepcopy(task['document_binding'])
     if 'translation_profile' in task:
         request['translation_profile']=deepcopy(task['translation_profile'])
         request['translation_request_id']=task['translation_request_id']
@@ -774,23 +851,26 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
                 result[key] = deepcopy(response[key])
         return _attach_preflight(result, bundle)
     if 'translation_profile' in task:
-        from .private_translation import profile_hash
+        from .private_translation import profile_hash,guided
         expected=profile_hash(task['translation_profile'])
         execution=response.get('execution')or{}
         receipt=((response.get('diagnostics')or{}).get('writer')or{}).get('native_translation')or{}
         if (execution.get('translation_profile')!=task['translation_profile']
                 or execution.get('profile_hash')!=expected
                 or receipt.get('source_sha256')!=task['source_sha256']
-                or receipt.get('source_evidence_ids')!=[]
                 or receipt.get('translation_profile_sha256')!=expected
-                or response.get('evidence')!=[]):invalid()
+                or not guided(task['translation_profile'])and(receipt.get('source_evidence_ids')!=[]or response.get('evidence')!=[])):invalid()
     submitted_ids = {row['evidence_id'] for row in request['unified_evidence']['matches']}
     matches = {row['evidence_id']: row for row in bundle['source_bundle']['matches']
                if row['evidence_id'] in submitted_ids}
+    if 'translation_profile'in task and guided(task['translation_profile']):
+        _checked_guidance_delivery(response,task,matches,request['unified_evidence'])
     document = validate_document_result(response.get('document_result'), task, matches)
     if 'translation_profile'in task and (document.get('validation_scope')!='translation_structure_and_protected_content_only'
             or document['status']!='draft' or document['edits']or document.get('inline_mappings')
-            or set(document['notes'])!={'private_translation_candidate','terminology_sources_not_supplied','semantic_inline_alignment_not_supported'}):invalid()
+            or set(document['notes'])!={'private_translation_candidate',
+                'qualified_source_guidance_supplied'if guided(task['translation_profile'])else'terminology_sources_not_supplied',
+                'semantic_inline_alignment_not_supported'}):invalid()
     coverage_notice = _selection_notice(task, selection)
     if coverage_notice:
         document['notes'].append(coverage_notice)
@@ -832,6 +912,7 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
             'Del najdenega gradiva je presegal razpoložljivi prostor za to obdelavo in ni bil uporabljen. Izvirni viri so še vedno na voljo za pregled.'),
         'private_translation_candidate':('Traduzione privata sperimentale: controlla integralmente il significato e lo stile.'if it else'Zasebni preizkus prevoda: preverite celoten pomen in slog.'),
         'terminology_sources_not_supplied':('Nessuna fonte terminologica KLIKai è stata inviata al traduttore. Le fonti eventualmente elencate sono solo materiale aggiuntivo da consultare.'if it else'Prevajalniku niso bili poslani terminološki viri KLIKai. Morebitni navedeni viri so le dodatno gradivo za vpogled.'),
+        'qualified_source_guidance_supplied':('Il traduttore ha ricevuto i brani KLIKai indicati con le loro qualificazioni. La consegna non dimostra che ogni scelta segua le fonti; il rispetto delle indicazioni e il significato richiedono verifica.'if it else'Prevajalnik je prejel navedene odlomke KLIKai z njihovimi omejitvami. Posredovanje gradiva ne potrjuje uporabe pri vsaki izbiri; upoštevanje virov in pomen je treba preveriti.'),
         'semantic_inline_alignment_not_supported':('Questo percorso non collega il testo tradotto a collegamenti o enfasi nel testo originale.'if it else'Ta pot ne povezuje prevedenih izrazov s povezavami ali poudarki v izvirniku.')}
     for index, note in enumerate(document['notes']):
         blocks.append({'block_id': f'document-note-{index}', 'text': fixed_notes.get(note, note)})

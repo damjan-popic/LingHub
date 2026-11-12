@@ -51,9 +51,11 @@ def request_for(block, options):
             'model': options['model']}
 
 
-def task_for(block, options, *, previous_sections=()):
+def task_for(block, options, *, previous_sections=(), document_id=None):
     task={key:options[key]for key in ('mode','source_language','target_language','locale')}
     task.update(source_text=block['text'],source_sha256=hashlib.sha256(block['text'].encode('utf-8')).hexdigest())
+    if document_id is not None:
+        task['document_binding']={'document_id':document_id,'section_index':block['index']}
     if translation.selected(options):
         task['translation_profile']=translation.profile_checked(options['translation_profile'])
         task['translation_request_id']='document-'+options['translation_document_id']+'-'+str(block['index'])
@@ -217,6 +219,8 @@ class Documents:
                 'answer_support': result.get('answer_support'),
                 'answer_method': result.get('answer_method'),
                 'document_result': result.get('document_result'),
+                **({'guidance_delivery':result['execution']['guidance_delivery']}
+                   if (result.get('execution')or{}).get('guidance_delivery')else{}),
                 'limitations': result.get('limitations', []),
                 'sources': [{k: e[k] for k in ('local_number', 'evidence_id', 'title', 'source_label', 'url','source_id','source_revision','locator')
                              if k in e} for e in result.get('evidence', []) if isinstance(e, dict)]})
@@ -226,7 +230,9 @@ class Documents:
         if row['state']=='draft'and options.get('translation_failed_preflight'):
             warnings.append(options['translation_failed_preflight']['error_code'])
         public_options={k:v for k,v in options.items() if not k.startswith('translation_') or k=='translation_provider'}
-        if translation.selected(options):public_options['translation_profile_sha256']=translation.profile_hash(options['translation_profile'])
+        if translation.selected(options):
+            public_options['translation_profile_sha256']=translation.profile_hash(options['translation_profile'])
+            public_options['translation_guidance']=translation.guided(options['translation_profile'])
         return {'document_id': identifier, 'name': row['name'], 'state': row['state'],
                 'has_word_original':original_word,
                 'created': row['created'], 'options': options if internal else public_options,
@@ -403,8 +409,17 @@ class Documents:
             key = 'document-' + row['id'] + '-' + str(pending['index'])
             try:
                 payload = {**request_for(pending, document['options']), 'idempotency_key': key}
-                accepted = self.domain.create_family(row['owner'], payload,document_task=task_for(
-                    pending,document['options'],previous_sections=document['sections']))
+                task=task_for(pending,document['options'],previous_sections=document['sections'],document_id=row['id'])
+                # A family accepted before linking may predate document_binding.
+                # Recover its original contract; Domain still checks every
+                # task/input field through the existing idempotency key.
+                with self.store.connect()as db:
+                    prior=db.execute("SELECT f.options FROM request_keys k JOIN family_request_options f "
+                        "ON f.family_id=json_extract(k.response,'$.family_id') WHERE k.owner=? "
+                        "AND k.scope='family' AND k.key=?",(row['owner'],key)).fetchone()
+                if prior and 'document_binding'not in (json.loads(prior[0]or'{}').get('document_task')or{}):
+                    task.pop('document_binding',None)
+                accepted = self.domain.create_family(row['owner'], payload,document_task=task)
                 fid = accepted['family']['answer_family_id']
             except Failure as error:
                 if error.code in {'queue_full', 'generation_waiting_capacity'}:

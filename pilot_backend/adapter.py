@@ -142,8 +142,19 @@ class Gateway:
                 or result.get('configured')is not True):raise Failure('document_translation_unavailable',503)
         return profile_checked(result.get('profile'))
     def translation_preflight(self,profile,texts):
-        from .private_translation import profile_hash
+        from .private_translation import profile_hash,guided
         result=self.request('/internal/pilot/translation-preflight',{'translation_profile':profile,'texts':texts})
+        if guided(profile):
+            if (not isinstance(result,dict)or result.get('contract')!=profile['version']
+                    or result.get('profile_hash')!=profile_hash(profile)
+                    or result.get('status')!='pending_guidance'or result.get('guidance_complete')is not False
+                    or result.get('scope')!='source_text_only_guidance_checked_before_section_dispatch'
+                    or not isinstance(result.get('sections'),list)or len(result['sections'])!=len(texts)
+                    or any(not isinstance(section,dict)or section.get('source_sha256')!=source['source_sha256']
+                        or section.get('native_input_tokens')is not None or section.get('fits')is not None
+                        or section.get('input_limit')!=2048 for source,section in zip(texts,result['sections']))):
+                raise Failure('document_translation_preflight_failed',503)
+            return result
         if (not isinstance(result,dict) or result.get('contract')!='klikai.private-translation-profile.v1'
                 or result.get('profile_hash')!=profile_hash(profile) or result.get('status')not in {'ready','unsupported'}
                 or not isinstance(result.get('sections'),list) or len(result['sections'])!=len(texts)):

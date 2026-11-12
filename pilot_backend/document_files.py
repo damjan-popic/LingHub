@@ -379,6 +379,14 @@ def _report_blocks(report):
             'cancelled':('Elaborazione interrotta.','Obdelava je ustavljena.'),'queued':('In attesa.','Čaka na obdelavo.'),
             'running':('Elaborazione in corso.','Obdelava poteka.')} .get(state,('Non elaborato.','Ni obdelano.')))[0 if it else 1]
         yield 'body',status
+        delivery=section.get('guidance_delivery')
+        if isinstance(delivery,dict):
+            states={'prepared_not_dispatched':('Materiale KLIKai preparato, non inviato al modello.','Gradivo KLIKai je pripravljeno, ni bilo poslano modelu.'),
+                'possible_dispatch':('Input KLIKai conservato per una richiesta forse inviata; consegna non confermata.','Vhod z gradivom KLIKai je shranjen za morda poslano zahtevo; dostava ni potrjena.'),
+                'response_received':('Ricevuta una risposta alla richiesta con il materiale KLIKai conservato.','Prejet je odgovor na zahtevo s shranjenim gradivom KLIKai.')}
+            if delivery.get('delivery_state')in states:
+                yield 'body',states[delivery['delivery_state']][0 if it else 1]
+            yield 'body',('La consegna delle fonti non dimostra il loro rispetto. Le modifiche citano il supporto dichiarato; la verifica linguistica indipendente resta distinta.'if it else'Posredovanje virov ne dokazuje njihovega upoštevanja. Pri spremembah je navedena zatrjevana podpora; neodvisno jezikovno preverjanje ostaja ločeno.')
         if mode=='review':
             available=section.get('state')=='complete'and result.get('status')=='draft'and isinstance(result.get('proposed_text'),str)
             yield 'body',(('Nella bozza parziale: proposta disponibile; controlla le modifiche.'if available else'Nella bozza parziale: originale conservato senza modifiche.')if it else(
@@ -392,6 +400,7 @@ def _report_blocks(report):
                 'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.'),
                 'private_translation_candidate':('Traduzione privata sperimentale; controlla integralmente significato e stile.','Zasebni preizkus prevoda; preverite celoten pomen in slog.'),
                 'terminology_sources_not_supplied':('Nessuna fonte terminologica KLIKai è stata inviata al traduttore.','Prevajalniku niso bili poslani terminološki viri KLIKai.'),
+                'qualified_source_guidance_supplied':('Il traduttore ha ricevuto i brani KLIKai con le loro qualificazioni; l’applicazione e il significato richiedono verifica.','Prevajalnik je prejel odlomke KLIKai z njihovimi omejitvami; uporabo in pomen je treba preveriti.'),
                 'semantic_inline_alignment_not_supported':('Questo percorso non associa espressioni tradotte a collegamenti o enfasi originali.','Ta pot ne povezuje prevedenih izrazov s povezavami ali poudarki v izvirniku.')}
             yield 'body',known.get(note,(note,note))[0 if it else 1]
         sources=section.get('sources')or[]

@@ -13,7 +13,10 @@ import sqlite3, sys, time, subprocess
 def population_rows(pop):
     if 'population_sql' in pop:
         conn=sqlite3.connect('file:'+pop['path']+'?mode=ro',uri=True)
-        try:yield from conn.execute(pop['population_sql'])
+        try:
+            for row in conn.execute(pop['population_sql']):
+                if (not pop.get('identity_reserved_only')or heldout(
+                        pop.get('identity_population_id',pop['id']),row[0])):yield row
         finally:conn.close()
     else:
         with open(pop['path']) as source:

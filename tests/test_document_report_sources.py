@@ -34,3 +34,16 @@ def test_missing_or_different_operand_trace_does_not_invent_selection():
     result=report_section(section,{},snapshot('Other',['writer']),'/api/pilot')
     assert result['writer_input_selection']=='unknown'
     assert result['sources'][0]['report_role']=='selection_unknown'
+
+
+def test_native_receipt_explicitly_records_no_admitted_source_without_fake_json_request():
+    text='Exact original'
+    native={'source_sha256':hashlib.sha256(text.encode()).hexdigest(),
+        'source_evidence_ids':[],'translation_profile_sha256':'a'*64}
+    receipt={'stages':{'generation':{'writer':{'native_translation':native,'requests':[{'request':{'prompt':[2,3,4]}}]}}}}
+    assert retained_writer_ids(receipt,text)==[]
+    assert retained_writer_ids(receipt,'Different original')is None
+    section={'text':text,'family_id':'family-1','sources':[{'evidence_id':'extra','title':'Additional retrieved record'}]}
+    result=report_section(section,{},receipt,'/api/pilot')
+    assert result['writer_input_selection']=='retained'
+    assert result['sources'][0]['report_role']=='retrieval_context'

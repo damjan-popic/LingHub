@@ -135,6 +135,36 @@ class Gateway:
         return self.request('/internal/pilot/interpret',{
             'question':question,'context':context,
             'input_language':input_language,'locale':locale})
+    def translation_profile(self):
+        from .private_translation import profile_checked
+        result=self.request('/internal/pilot/translation-profile',None)
+        if (not isinstance(result,dict) or result.get('contract')!='klikai.private-translation-profile.v1'
+                or result.get('configured')is not True):raise Failure('document_translation_unavailable',503)
+        return profile_checked(result.get('profile'))
+    def translation_preflight(self,profile,texts):
+        from .private_translation import profile_hash
+        result=self.request('/internal/pilot/translation-preflight',{'translation_profile':profile,'texts':texts})
+        if (not isinstance(result,dict) or result.get('contract')!='klikai.private-translation-profile.v1'
+                or result.get('profile_hash')!=profile_hash(profile) or result.get('status')not in {'ready','unsupported'}
+                or not isinstance(result.get('sections'),list) or len(result['sections'])!=len(texts)):
+            raise Failure('document_translation_preflight_failed',503)
+        for source,section in zip(texts,result['sections']):
+            if (not isinstance(section,dict) or section.get('source_sha256')!=source['source_sha256']
+                    or type(section.get('native_input_tokens'))is not int
+                    or not 1<=section['native_input_tokens']<=1000000 or section.get('input_limit')!=2048
+                    or type(section.get('fits'))is not bool):raise Failure('document_translation_preflight_failed',503)
+        if result['status']=='unsupported' or any(not s['fits']or s['native_input_tokens']>2048 for s in result['sections']):
+            error=Failure('document_translation_input_limit',422)
+            error.preflight={'profile_hash':profile_hash(profile),'status':'unsupported','sections':[
+                {k:s[k]for k in ('source_sha256','native_input_tokens','input_limit','fits')}for s in result['sections']]}
+            raise error
+        return result
+    def translation_cancel(self,translation_profile,translation_request_id,source_sha256):
+        result=self.request('/internal/pilot/translation-cancel',{'translation_profile':translation_profile,
+            'translation_request_id':translation_request_id,'source_sha256':source_sha256})
+        if not isinstance(result,dict)or result.get('status')not in {'cancelled','not_active'}:
+            raise Failure('document_translation_cancel_pending',503)
+        return result
     def freeze(self,family,policy):
         if family.get('request_options',{}).get('document_task'):
             from . import document_transform

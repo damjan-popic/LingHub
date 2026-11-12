@@ -84,12 +84,17 @@ class Domain:
         stored=db.execute('SELECT task,question,context,locale FROM families WHERE id=?',(family,)).fetchone()
         task=stored['task']
         options=db.execute('SELECT options FROM family_request_options WHERE family_id=?',(family,)).fetchone()
-        document_task=bool(options and json.loads(options[0]).get('document_task'))
+        document_value=json.loads(options[0]).get('document_task') if options else None
+        document_task=bool(document_value)
         guidance=not document_task and self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
         comma_candidate=(not document_task and self.unified_answers and task=='reference'
             and comma_tasks.capability(getattr(self.request_gateway,'comma_checker',None))['configured']
             and comma_tasks.candidate(stored['question'],stored['context']))
         job_model='cpu'if guidance or comma_candidate or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
+        if document_value and document_value.get('translation_profile'):
+            from .private_translation import RESOURCE,task_profile
+            task_profile(document_value)
+            job_model=RESOURCE
         db.execute('INSERT INTO jobs(id,run_id,owner,kind,model,state,created)VALUES(?,?,?,?,?,?,?)',(jid,rid,owner,tier,job_model,'queued',now))
         human_feedback.accepted(db,rid,owner,automated=automated,release=self.release)
         return {'run_id':rid,'job_id':jid}

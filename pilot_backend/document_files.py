@@ -348,6 +348,8 @@ def _report_blocks(report):
     if repeated:yield 'body',('Una parte ripete la bozza di un’altra parte dello stesso paragrafo, anche se l’originale è diverso. La bozza Word non è disponibile; controlla il contenuto.'if it else
         'Del odstavka ponovi osnutek drugega dela istega odstavka, čeprav je izvirnik drugačen. Wordov osnutek ni na voljo; preverite vsebino.')
     for warning in report.get('warnings',[]):
+        if warning=='document_translation_expired':yield 'body',('Il tempo della traduzione privata è scaduto; le parti non completate restano esplicite.'if it else'Čas zasebnega prevoda je potekel; nedokončani deli ostanejo izrecno označeni.')
+        if warning=='document_translation_cancel_pending':yield 'body',('Si attende la conferma di arresto del traduttore. Un risultato tardivo non sarà utilizzato.'if it else'Čakamo na potrditev ustavitve prevajalnika. Pozni rezultat ne bo uporabljen.')
         if warning=='document_images_not_reviewed':yield 'body',('Le immagini sono conservate dove possibile, ma il loro contenuto non è stato revisionato né tradotto.'if it else'Slike se po možnosti ohranijo, njihova vsebina pa ni bila jezikovno pregledana ali prevedena.')
     parts={};seen={}
     for section in sections:
@@ -387,7 +389,10 @@ def _report_blocks(report):
         yield 'body',str(result.get('proposed_text',section.get('output','')))
         for note in dict.fromkeys(result.get('notes',[])):
             known={'evidence_excluded_from_writer':('Parte delle fonti trovate non è stata inclusa per limiti di spazio; la copertura è quindi parziale.','Del najdenih virov zaradi omejenega prostora ni bil uporabljen; obseg obdelave je zato delen.'),
-                'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.')}
+                'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.'),
+                'private_translation_candidate':('Traduzione privata sperimentale; controlla integralmente significato e stile.','Zasebni preizkus prevoda; preverite celoten pomen in slog.'),
+                'terminology_sources_not_supplied':('Nessuna fonte terminologica KLIKai è stata inviata al traduttore.','Prevajalniku niso bili poslani terminološki viri KLIKai.'),
+                'semantic_inline_alignment_not_supported':('Questo percorso non associa espressioni tradotte a collegamenti o enfasi originali.','Ta pot ne povezuje prevedenih izrazov s povezavami ali poudarki v izvirniku.')}
             yield 'body',known.get(note,(note,note))[0 if it else 1]
         sources=section.get('sources')or[]
         if section.get('writer_input_selection')=='unknown':

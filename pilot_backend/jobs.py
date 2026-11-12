@@ -81,6 +81,11 @@ class Jobs:
         with self.store.tx()as db:
             rows=list(db.execute("SELECT j.*,r.family_id FROM jobs j JOIN runs r ON r.id=j.run_id WHERE j.state='queued'ORDER BY CASE WHEN j.created<?THEN 0 WHEN j.kind='short'THEN 1 ELSE 2 END,j.created",(stamp()-60,)))
             rows=[r for r in rows if pool is None or(pool=='cpu')==(r['model']=='cpu')]
+            # Ordinary writer work keeps priority over the explicitly selected
+            # private candidate between section operations. The resource key
+            # remains distinct from the small deterministic CPU task lane.
+            from .private_translation import RESOURCE
+            rows.sort(key=lambda r:r['model']==RESOURCE)
             busy=list(db.execute("SELECT j.owner,j.model,r.family_id FROM jobs j JOIN runs r ON r.id=j.run_id WHERE j.state='running'"))
             # One job/account and one/model prevents a comparison or long expansion monopolizing GPUs.
             row=next((r for r in rows if all((r['owner']!=b['owner']or'cpu'in {r['model'],b['model']})and r['model']!=b['model']and r['family_id']!=b['family_id']for b in busy)),None)

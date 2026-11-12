@@ -180,6 +180,52 @@ application is not converted into a new automatic correction rule.
 
 ## Validation
 
+### Explicit private SL→IT candidate
+
+The separate `private_translation: true` WEB capability is off by default and
+requires document uploads. It exposes a deliberate `translategemma_sl_it`
+selection only for translation from Slovenian to Italian; ordinary writing,
+review and default translation requests retain their routes. The browser can
+submit this choice, but cannot supply its provider profile, origin or model
+settings. CORE's configured native profile is fetched and the exact complete
+server-owned pin is saved at document Start and included in every section's
+frozen task. The browser receives only the choice and opaque profile hash.
+Changed configuration cannot substitute a different profile in that document.
+
+Start performs one token-count-only preflight of all original sections before
+any completion. Native input is limited to 2,048 tokens including BOS; original
+source hashes retain outer whitespace even where the native template trims it.
+No previous generated draft is attached on this route. Frozen reader records
+may remain available as additional material, but the native model receives no
+KLIKai evidence, glossary, source-excerpt plan or requested JSON schema. A
+source-bound native receipt records the empty admitted-evidence list without
+inventing a legacy writer request. Its plain-text result remains an unverified
+draft; terminology consultation and semantic inline alignment are not claimed.
+
+Initial containment defaults are four extracted sections, one active candidate
+document with at most two waiting documents, 1,800 seconds waiting and 1,500
+seconds for the document. Optional `private_translation_limits` may tighten
+`max_sections`, `waiting_documents`, `queue_seconds` and `document_seconds`.
+These limits are private safeguards, not measured throughput. Candidate jobs
+use a distinct resource key in the existing durable queue and remain serial;
+ordinary writer jobs take priority between candidate operations. Cancellation
+records a source/profile/request-ID-bound cancellation at CORE as well as the
+existing durable job cancellation. Late results cannot complete cancelled jobs.
+Queue/runtime expiry is an explicit failure. Recovery never replays a job that
+may already have dispatched a completion.
+
+Hyperlink/emphasis spans make this selection ineligible before dispatch. Its
+complete clean TXT and simple Word drafts reuse `draft_blocks`, `draft_text`,
+`draft_docx` and the existing original-package rewrite path: no replacement
+export engine or fabricated range mappings. The UI distinguishes clean
+translation TXT/Word from comparison reports. All sections must pass the
+existing complete-draft predicate; no partial translation download or silent
+original-text fill is added. Complete/partial proofreading policy is unchanged.
+The existing empty-edit review result means no proposal within the processed
+scope, while absent and no-op edits remain rejected. Broader Italian grammar,
+long-document translation quality and concurrent writer performance remain
+unproven. The overall product is not linguistically accepted.
+
 Focused tests cover bounded file parsing, Unicode, unsafe ZIP/XML content,
 typed task isolation, native output validation, exact source bindings, queue
 idempotency/recovery, cancellation, deletion, exports and Word structure.

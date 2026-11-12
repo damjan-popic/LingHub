@@ -1,11 +1,20 @@
 """Report-only provenance from retained inputs; never infer linguistic use."""
 import hashlib
 import json
+import re
 from urllib.parse import quote
 
 
 def retained_writer_ids(snapshot, source_text):
     generation=(snapshot or {}).get('stages',{}).get('generation')or{}
+    native=(generation.get('writer')or{}).get('native_translation')
+    if isinstance(native,dict):
+        if (native.get('source_sha256')==hashlib.sha256(source_text.encode()).hexdigest()
+                and native.get('source_evidence_ids')==[]
+                and isinstance(native.get('translation_profile_sha256'),str)
+                and re.fullmatch(r'[0-9a-f]{64}',native['translation_profile_sha256'])):
+            return []
+        return None
     requests=(generation.get('writer')or{}).get('requests')
     if not isinstance(requests,list):return None
     matched=[]

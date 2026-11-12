@@ -35,7 +35,7 @@ def sha_text(text):
 
 
 def task_checked(value):
-    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope'} != TASK_FIELDS:
+    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope','translation_profile','translation_request_id'} != TASK_FIELDS:
         raise Failure('invalid_request')
     mode, source, target, locale = (value[k] for k in
         ('mode', 'source_language', 'target_language', 'locale'))
@@ -94,6 +94,8 @@ def task_checked(value):
         previous = pair['section_index']
     if total > 6000:
         raise Failure('invalid_request')
+    from .private_translation import task_profile
+    task_profile(value)
     return deepcopy(value)
 
 
@@ -537,8 +539,12 @@ def checked_result(value):
                            'not_reviewed_no_bounded_support_units', 'not_reviewed_no_supported_comma_application'}
             if value['status'] == 'not_reviewed' else
             {'structure_exact_source_spans_source_membership_and_protected_content_only',
+             'translation_structure_and_protected_content_only',
              'source_bound_comma_applications_only', 'mixed_source_bound_document_review'})
         if not isinstance(value['validation_scope'], str) or value['validation_scope'] not in allowed_scopes:
+            invalid()
+        if value['validation_scope']=='translation_structure_and_protected_content_only'and(
+                value['mode']!='translate'or value['source_language']!='sl'or value['target_language']!='it'):
             invalid()
     for edit in value['edits']:
         if not isinstance(edit, dict) or set(edit) != {
@@ -740,6 +746,9 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
         request['inline_spans'] = deepcopy(task['inline_spans'])
     if 'translation_context' in task:
         request['translation_context'] = deepcopy(task['translation_context'])
+    if 'translation_profile' in task:
+        request['translation_profile']=deepcopy(task['translation_profile'])
+        request['translation_request_id']=task['translation_request_id']
     # Only an explicitly inspected, server-owned plan in the hash-bound frozen
     # bundle can request excerpts. The public document-task schema admits no
     # such client field, and the writer's response cannot provide one.
@@ -764,10 +773,24 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
             if key in response:
                 result[key] = deepcopy(response[key])
         return _attach_preflight(result, bundle)
+    if 'translation_profile' in task:
+        from .private_translation import profile_hash
+        expected=profile_hash(task['translation_profile'])
+        execution=response.get('execution')or{}
+        receipt=((response.get('diagnostics')or{}).get('writer')or{}).get('native_translation')or{}
+        if (execution.get('translation_profile')!=task['translation_profile']
+                or execution.get('profile_hash')!=expected
+                or receipt.get('source_sha256')!=task['source_sha256']
+                or receipt.get('source_evidence_ids')!=[]
+                or receipt.get('translation_profile_sha256')!=expected
+                or response.get('evidence')!=[]):invalid()
     submitted_ids = {row['evidence_id'] for row in request['unified_evidence']['matches']}
     matches = {row['evidence_id']: row for row in bundle['source_bundle']['matches']
                if row['evidence_id'] in submitted_ids}
     document = validate_document_result(response.get('document_result'), task, matches)
+    if 'translation_profile'in task and (document.get('validation_scope')!='translation_structure_and_protected_content_only'
+            or document['status']!='draft' or document['edits']or document.get('inline_mappings')
+            or set(document['notes'])!={'private_translation_candidate','terminology_sources_not_supplied','semantic_inline_alignment_not_supported'}):invalid()
     coverage_notice = _selection_notice(task, selection)
     if coverage_notice:
         document['notes'].append(coverage_notice)
@@ -806,7 +829,10 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
             'Za preverjanje tega odseka ni gradiva iz dovoljenih virov. Morebitni prevod je osnutek brez terminološke potrditve.'),
         'evidence_excluded_from_writer': (
             'Parte del materiale trovato non rientrava nello spazio disponibile per questa elaborazione ed è rimasta esclusa. Le fonti originali restano consultabili.' if it else
-            'Del najdenega gradiva je presegal razpoložljivi prostor za to obdelavo in ni bil uporabljen. Izvirni viri so še vedno na voljo za pregled.')}
+            'Del najdenega gradiva je presegal razpoložljivi prostor za to obdelavo in ni bil uporabljen. Izvirni viri so še vedno na voljo za pregled.'),
+        'private_translation_candidate':('Traduzione privata sperimentale: controlla integralmente il significato e lo stile.'if it else'Zasebni preizkus prevoda: preverite celoten pomen in slog.'),
+        'terminology_sources_not_supplied':('Nessuna fonte terminologica KLIKai è stata inviata al traduttore. Le fonti eventualmente elencate sono solo materiale aggiuntivo da consultare.'if it else'Prevajalniku niso bili poslani terminološki viri KLIKai. Morebitni navedeni viri so le dodatno gradivo za vpogled.'),
+        'semantic_inline_alignment_not_supported':('Questo percorso non collega il testo tradotto a collegamenti o enfasi nel testo originale.'if it else'Ta pot ne povezuje prevedenih izrazov s povezavami ali poudarki v izvirniku.')}
     for index, note in enumerate(document['notes']):
         blocks.append({'block_id': f'document-note-{index}', 'text': fixed_notes.get(note, note)})
     result = {'status': 'source_only' if unreviewed else 'partial',

@@ -11,6 +11,7 @@ from .store import canonical, stamp, uid
 from .domain import checked_key, fields
 from .security import Failure
 from . import document_files
+from . import private_translation as translation
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS uploaded_documents(
@@ -53,9 +54,12 @@ def request_for(block, options):
 def task_for(block, options, *, previous_sections=()):
     task={key:options[key]for key in ('mode','source_language','target_language','locale')}
     task.update(source_text=block['text'],source_sha256=hashlib.sha256(block['text'].encode('utf-8')).hexdigest())
+    if translation.selected(options):
+        task['translation_profile']=translation.profile_checked(options['translation_profile'])
+        task['translation_request_id']='document-'+options['translation_document_id']+'-'+str(block['index'])
     if options['mode']=='translate'and block.get('inline_spans'):
         task['inline_spans']=block['inline_spans']
-    if options['mode']=='translate':
+    if options['mode']=='translate'and not translation.selected(options):
         candidates=[]
         for section in sorted(previous_sections,key=lambda row:row['index']):
             result=section.get('document_result')or{}
@@ -84,11 +88,13 @@ def task_for(block, options, *, previous_sections=()):
 
 
 class Documents:
-    def __init__(self, store, domain):
+    def __init__(self, store, domain, *, private_translation=False, translation_limits=None):
         self.store, self.domain = store, domain
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
         self.thread = None
+        self.private_translation=private_translation
+        self.translation_limits={**translation.DEFAULT_LIMITS,**(translation_limits or {})}
 
     def owned(self, db, owner, identifier):
         row = db.execute('SELECT * FROM uploaded_documents WHERE id=? AND owner=?',
@@ -119,7 +125,7 @@ class Documents:
 
     @serialized
     def start(self, owner, identifier, payload):
-        fields(payload, {'mode', 'source_language', 'target_language', 'locale', 'idempotency_key'})
+        fields(payload, {'mode', 'source_language', 'target_language', 'locale', 'idempotency_key','translation_provider'})
         checked_key(payload.get('idempotency_key'))
         mode = payload.get('mode')
         source, target = payload.get('source_language'), payload.get('target_language')
@@ -133,6 +139,41 @@ class Documents:
             raise Failure('invalid_request')
         options = {'mode': mode, 'source_language': source, 'target_language': target,
                    'locale': locale, 'model': self.domain.default_model}
+        provider=payload.get('translation_provider')
+        if provider is not None:
+            if (provider!=translation.PROVIDER or not self.private_translation
+                    or mode!='translate' or source!='sl' or target!='it'):
+                raise Failure('document_translation_ineligible',422)
+            # Idempotent re-delivery reuses the original profile. New network
+            # preflight happens before the write transaction, not under its lock.
+            with self.store.connect() as db: current=self.owned(db,owner,identifier)
+            if current['state']=='draft':
+                blocks=json.loads(current['blocks'])
+                if len(blocks)>self.translation_limits['max_sections']:
+                    raise Failure('document_translation_section_limit',422)
+                if any(block.get('inline_spans') for block in blocks):
+                    raise Failure('document_translation_inline_unsupported',422)
+                gateway=self.domain.request_gateway
+                if not gateway or not hasattr(gateway,'translation_profile') or not hasattr(gateway,'translation_preflight'):
+                    raise Failure('document_translation_unavailable',503)
+                profile=translation.profile_checked(gateway.translation_profile())
+                texts=[{'text':b['text'],'source_sha256':hashlib.sha256(b['text'].encode()).hexdigest()} for b in blocks]
+                try:preflight=gateway.translation_preflight(profile,texts)
+                except Failure as error:
+                    if hasattr(error,'preflight'):
+                        with self.store.tx()as db:
+                            observation=self.owned(db,owner,identifier)
+                            if observation['state']=='draft':
+                                previous=json.loads(observation['options']or'{}')
+                                previous['translation_failed_preflight']={**error.preflight,'error_code':error.code,'recorded':stamp()}
+                                db.execute('UPDATE uploaded_documents SET options=? WHERE id=?',(canonical(previous),identifier))
+                    raise
+                options.update(translation_provider=provider,translation_profile=profile,
+                    translation_preflight=preflight,translation_queued_at=stamp(),translation_limits=dict(self.translation_limits),
+                    translation_document_id=identifier)
+                previous=json.loads(current['options']or'{}')
+                if previous.get('translation_failed_preflight'):
+                    options['translation_failed_preflight']=previous['translation_failed_preflight']
         with self.store.tx() as db:
             def action():
                 row = self.owned(db, owner, identifier)
@@ -142,13 +183,18 @@ class Documents:
                                     "AND state IN ('queued','running')", (owner,)).fetchone()[0]
                 if active:
                     raise Failure('queue_full', 429)
+                if provider is not None:
+                    candidate=[json.loads(r[0]or'{}') for r in db.execute(
+                        "SELECT options FROM uploaded_documents WHERE state IN ('queued','running')")]
+                    if sum(translation.selected(o) for o in candidate)>=1+self.translation_limits['waiting_documents']:
+                        raise Failure('queue_full',429)
                 db.execute("UPDATE uploaded_documents SET state='queued',options=? WHERE id=?",
                            (canonical(options), identifier))
                 return {'document_id': identifier}
             self.domain.idem(db, owner, 'document-start:' + identifier, payload, action)
         return self.get(owner, identifier)
 
-    def get(self, owner, identifier):
+    def get(self, owner, identifier, *, internal=False):
         with self.store.connect() as db:
             row = self.owned(db, owner, identifier)
             original_word=bool(db.execute('SELECT 1 FROM document_originals WHERE document_id=?',(identifier,)).fetchone())
@@ -176,9 +222,14 @@ class Documents:
                              if k in e} for e in result.get('evidence', []) if isinstance(e, dict)]})
         warnings=json.loads(row['warnings'])
         if document_files.repeated_translation_sections(sections):warnings.append('document_repeated_translation')
+        options=json.loads(row['options']or'{}')
+        if row['state']=='draft'and options.get('translation_failed_preflight'):
+            warnings.append(options['translation_failed_preflight']['error_code'])
+        public_options={k:v for k,v in options.items() if not k.startswith('translation_') or k=='translation_provider'}
+        if translation.selected(options):public_options['translation_profile_sha256']=translation.profile_hash(options['translation_profile'])
         return {'document_id': identifier, 'name': row['name'], 'state': row['state'],
                 'has_word_original':original_word,
-                'created': row['created'], 'options': json.loads(row['options'] or '{}'),
+                'created': row['created'], 'options': options if internal else public_options,
                 'warnings': warnings, 'sections': sections,
                 'processed': sum(s['state'] in TERMINAL for s in sections), 'total': len(sections)}
 
@@ -190,8 +241,10 @@ class Documents:
 
     @serialized
     def cancel(self, owner, identifier):
+        candidate_cancellations=[]
         with self.store.tx() as db:
             row = self.owned(db, owner, identifier)
+            options=json.loads(row['options']or'{}')
             # Recover any accepted section whose linking transaction was
             # interrupted. Cancellation also covers that already queued work.
             for block in json.loads(row['blocks']):
@@ -204,7 +257,7 @@ class Documents:
             if row['state'] in ACTIVE or row['state'] == 'draft':
                 db.execute("UPDATE uploaded_documents SET state='cancelled',finished=? WHERE id=?",
                            (stamp(), identifier))
-                jobs = list(db.execute('SELECT j.id,j.state,j.run_id FROM document_sections d '
+                jobs = list(db.execute('SELECT j.id,j.state,j.run_id,d.ordinal FROM document_sections d '
                     'JOIN jobs j ON j.run_id IN (SELECT id FROM runs WHERE family_id=d.family_id) '
                     "WHERE d.document_id=? AND j.state IN ('queued','running')", (identifier,)))
                 for job in jobs:
@@ -217,6 +270,20 @@ class Documents:
                                    (result, display, stamp(), job['run_id']))
                     else:
                         db.execute('UPDATE jobs SET cancel_requested=1 WHERE id=?', (job['id'],))
+                    if translation.selected(options):
+                        block=next(b for b in json.loads(row['blocks'])if b['index']==job['ordinal'])
+                        candidate_cancellations.append({'translation_profile':options['translation_profile'],
+                            'translation_request_id':'document-'+identifier+'-'+str(block['index']),
+                            'source_sha256':hashlib.sha256(block['text'].encode()).hexdigest()})
+        for request in candidate_cancellations:
+            try:self.domain.request_gateway.translation_cancel(**request)
+            except Exception:
+                # The durable cancellation already prevents late completion.
+                # CORE's uncertain marker/deadline owns provider settlement.
+                with self.store.tx()as db:
+                    current=self.owned(db,owner,identifier);warnings=json.loads(current['warnings'])
+                    if 'document_translation_cancel_pending'not in warnings:warnings.append('document_translation_cancel_pending')
+                    db.execute('UPDATE uploaded_documents SET warnings=? WHERE id=?',(canonical(warnings),identifier))
         return self.get(owner, identifier)
 
     @serialized
@@ -254,7 +321,7 @@ class Documents:
     def export(self, owner, identifier, fmt, draft=False, origin=None, api_path='/api/pilot', partial=False):
         if fmt not in {'txt', 'docx'}:
             raise Failure('invalid_request')
-        document = self.get(owner, identifier)
+        document = self.get(owner, identifier,internal=True)
         if draft:
             if partial:
                 if fmt!='docx':raise Failure('invalid_request')
@@ -297,8 +364,31 @@ class Documents:
         with self.store.connect() as db:
             active = [dict(r) for r in db.execute("SELECT * FROM uploaded_documents "
                                                 "WHERE state IN ('queued','running') ORDER BY created")]
+        candidates=[r for r in active if translation.selected(json.loads(r['options']or'{}'))]
+        current_candidate=next((r['id'] for r in candidates if r['state']=='running'),None)
+        if current_candidate is None and candidates:
+            current_candidate=min(candidates,key=lambda r:json.loads(r['options'])['translation_queued_at'])['id']
         for row in active:
-            document = self.get(row['owner'], row['id'])
+            document = self.get(row['owner'], row['id'],internal=True)
+            options=document['options']
+            if translation.selected(options):
+                limits=options['translation_limits'];now=stamp()
+                queued=options['translation_queued_at'];started=options.get('translation_started_at')
+                expired=(started is None and now-queued>limits['queue_seconds'] or
+                    started is not None and now-started>limits['document_seconds'])
+                if expired:
+                    self.cancel(row['owner'],row['id'])
+                    with self.store.tx()as db:
+                        warnings=json.loads(row['warnings']);warnings.append('document_translation_expired')
+                        db.execute("UPDATE uploaded_documents SET state='failed',warnings=?,finished=? WHERE id=?",
+                            (canonical(warnings),stamp(),row['id']))
+                    continue
+                if row['id']!=current_candidate:continue
+                if started is None:
+                    options['translation_started_at']=now
+                    with self.store.tx()as db:
+                        db.execute("UPDATE uploaded_documents SET options=?,state='running' WHERE id=? AND state='queued'",
+                            (canonical(options),row['id']))
             if any(s['state'] in ACTIVE for s in document['sections']):
                 continue
             pending = next((s for s in document['sections'] if s['state'] == 'pending'), None)

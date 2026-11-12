@@ -30,7 +30,7 @@ REFERENCE_LOOKUP_REQUEST_LIMIT = 16
 TERM_ADAPTERS = {'luka_jsonl_terminology', 'luka_jsonl_decision'}
 NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source_register'}
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
-    'terminology_equivalence','comparison_synthesis','recommendation_synthesis',
+    'terminology_equivalence','terminology_explanation','comparison_synthesis','recommendation_synthesis',
     'curated_recommendation','bounded_attestation','exact_source_excerpt','grammar_slot',
     'source_advice','reviewed_answer','lexical_relations'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
@@ -1457,26 +1457,28 @@ def _generate(gateway, bundle, tier, model, parent=None):
             execution=result.get('execution',{});identity=result.get('model_identity',{})
             if not isinstance(execution,dict)or not isinstance(identity,dict):raise Failure('provider_identity_missing',502)
             selection=execution.get('selection');scope=execution.get('provider_scope')
+            accounting=result.get('generation_accounting')
+            zero_accounting_fields={
+                'primary_provider_dispatches','corrective_provider_dispatches',
+                'completed_primary_calls','completed_corrective_calls','unknown_provider_outcomes'}
+            deterministic_success=(bounded_answer_plan
+                and execution.get('runtime')=='deterministic_answer_plan'
+                and execution.get('route_reason')=='single_required_server_rendered_unit')
+            deterministic_source_view=(bounded_source_only
+                and result.get('synthesis_mode')=='abstention'
+                and result.get('generation_status')in {'returned_abstention','returned_processing_limitation'}
+                and result.get('validation',{}).get('status')=='bounded_answer_plan_rendered'
+                and result.get('validation',{}).get('semantic_entailment_certified')is False
+                and execution.get('runtime')=='source_view'
+                and execution.get('route_reason')=='forced_empty_answer_catalog')
+            no_inference=((deterministic_success or deterministic_source_view)
+                and execution.get('inference_performed')is False
+                and scope=='none'and identity.get('model_id')=='not_invoked'
+                and identity.get('inference_performed')is False
+                and result.get('provider_attempts')==[]
+                and isinstance(accounting,dict)and set(accounting)==zero_accounting_fields
+                and all(type(value)is int and value==0 for value in accounting.values()))
             if model=='auto':
-                # A configured CORE writer can return one fully supported,
-                # server-rendered unit without invoking inference. Admit only
-                # that explicit identity/accounting tuple; its complete graph
-                # and frozen citations still pass the checks below.
-                accounting=result.get('generation_accounting')
-                zero_accounting_fields={
-                    'primary_provider_dispatches','corrective_provider_dispatches',
-                    'completed_primary_calls','completed_corrective_calls',
-                    'unknown_provider_outcomes'}
-                no_inference=(bounded_answer_plan
-                    and execution.get('inference_performed')is False
-                    and execution.get('runtime')=='deterministic_answer_plan'
-                    and execution.get('route_reason')=='single_required_server_rendered_unit'
-                    and scope=='none'and identity.get('model_id')=='not_invoked'
-                    and identity.get('inference_performed')is False
-                    and result.get('provider_attempts')==[]
-                    and isinstance(accounting,dict)
-                    and set(accounting)==zero_accounting_fields
-                    and all(type(value)is int and value==0 for value in accounting.values()))
                 inference_absent=(scope=='none'or identity.get('model_id')=='not_invoked'
                     or execution.get('inference_performed')is False
                     or identity.get('inference_performed')is False)
@@ -1485,7 +1487,8 @@ def _generate(gateway, bundle, tier, model, parent=None):
                         and(identity.get('repository')or identity.get('model_id')))):
                     raise Failure('provider_identity_missing',502)
             elif selection is not None or scope is not None:
-                if selection!=model or scope!='own':raise Failure('provider_selection_mismatch',502)
+                if (selection!=model or not(scope=='own'or no_inference and deterministic_source_view)):
+                    raise Failure('provider_selection_mismatch',502)
             stage='citation_validation'
         if ((generated or excerpt) or bounded_source_only and
                 evidence_state['status'] != 'no_selected_evidence') and not evidence:

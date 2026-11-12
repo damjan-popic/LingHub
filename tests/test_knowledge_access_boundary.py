@@ -42,6 +42,34 @@ def test_actual_saved_incident_analysis_is_bound_without_a_new_analyzer_or_sourc
     assert raw['end']==current['target_spans'][0]['end']
     assert len([r for r in before['evidence']if r['kind']=='loris'])==(0 if position==0 else 1)
     assert saved['analysis']==analysis
+    # Continue the actual profile through the existing source-unit and renderer
+    # path. This verifies useful qualified advice, not only a restored hit count.
+    import hashlib
+    from tools.zrc_reference.common import value_hash
+    from tools.zrc_reference.pilot_tool_evidence import lexical_passages
+    from tools.zrc_reference.pilot_answer_plan import build_answer_unit_registry,process_answer_plan
+    from tools.zrc_reference.pilot_evidence import sign
+    passage=next(row for row in lexical_passages({'captures':[{
+        'response':after,'response_sha256':value_hash(after)}]})if row['tool_kind']=='loris')
+    selected=copy.deepcopy(passage);selected['evidence_id']='recorded-incident'
+    selected['supports']=[{'support_id':'recorded-incident.S1','text':selected['text'],
+        'char_start':0,'char_end':len(selected['text'])}]
+    key=b'offline-question-access-test-key'
+    profile=sign({'profile_id':'recorded-incident','locale':'sl',
+        'question_sha256':hashlib.sha256(q.encode()).hexdigest(),
+        'context_sha256':hashlib.sha256(saved['context'].encode()).hexdigest(),
+        'selected_evidence_sha256':value_hash([selected]),
+        'query_plan_sha256':value_hash(current),
+        'answer_plan_requirements':{'required_unit_types':['curated_recommendation']}},key)
+    registry=build_answer_unit_registry(locale='sl',question=q,context=saved['context'],
+        selected_evidence=[selected],signed_input_profile=profile,profile_signing_key=key,
+        request_plan=current)
+    unit=next(row for row in registry.units if row['unit_type']=='curated_recommendation')
+    rendered=process_answer_plan({'answer_language':'sl','blocks':[{'block_id':'B1',
+        'unit_id':unit['unit_id'],'paragraph_id':'P1'}],'no_sufficient_evidence':False},registry,locale='sl')
+    assert all(text in rendered['answer_text']for text in
+        ['LORIS priporoča','barvica, barvni svinčnik','matita colorata',raw['payload']['Vslo']])
+    assert rendered['citations'][0]['support_id']=='recorded-incident.S1'
 
 
 def test_unresolved_subject_uses_existing_clarification_route(core_plan):

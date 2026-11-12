@@ -1,0 +1,1079 @@
+[
+  {
+    "family_id": "35fa4bb7-64ae-4859-8a1c-14cb6b3ce29a",
+    "question": "Je lesenka pravilna beseda?",
+    "context": "",
+    "analysis": {
+      "alignment": [
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {
+                  "Mood": "Ind",
+                  "Number": "Sing",
+                  "Person": "3",
+                  "Polarity": "Pos",
+                  "Tense": "Pres",
+                  "VerbForm": "Fin"
+                },
+                "lemma": "biti",
+                "text": "Je",
+                "upos": "AUX",
+                "xpos": "Va-r3s-n"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 2,
+          "members": {
+            "classla": [
+              0
+            ]
+          },
+          "start": 0,
+          "text": "Je"
+        },
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "lemma": "lesenka",
+                "text": "lesenka",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 10,
+          "members": {
+            "classla": [
+              1
+            ]
+          },
+          "start": 3,
+          "text": "lesenka"
+        },
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {
+                  "Case": "Nom",
+                  "Degree": "Pos",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "lemma": "pravilen",
+                "text": "pravilna",
+                "upos": "ADJ",
+                "xpos": "Agpfsn"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 19,
+          "members": {
+            "classla": [
+              2
+            ]
+          },
+          "start": 11,
+          "text": "pravilna"
+        },
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "lemma": "beseda",
+                "text": "beseda",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 26,
+          "members": {
+            "classla": [
+              3
+            ]
+          },
+          "start": 20,
+          "text": "beseda"
+        },
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {},
+                "lemma": "?",
+                "text": "?",
+                "upos": "PUNCT",
+                "xpos": "Z"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 27,
+          "members": {
+            "classla": [
+              4
+            ]
+          },
+          "start": 26,
+          "text": "?"
+        }
+      ],
+      "analysis": {
+        "model": {
+          "actual_tensor_devices": [
+            "cpu"
+          ],
+          "dependency_exception": null,
+          "device": "cpu",
+          "engine": "classla",
+          "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+          "license": "CC-BY-SA-4.0",
+          "model_id": "classla-standard-sl-2.0",
+          "processors": [
+            "tokenize",
+            "pos",
+            "lemma"
+          ],
+          "source_handles": [
+            "11356/1767",
+            "11356/1768",
+            "11356/1769"
+          ],
+          "torch_version": "2.6.0+cpu",
+          "version": "2.2.3"
+        },
+        "sentences": [
+          {
+            "end": 27,
+            "id": 0,
+            "start": 0
+          }
+        ],
+        "tokens": [
+          {
+            "end": 2,
+            "id": 0,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 0,
+            "text": "Je",
+            "word_ids": [
+              0
+            ]
+          },
+          {
+            "end": 10,
+            "id": 1,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 3,
+            "text": "lesenka",
+            "word_ids": [
+              1
+            ]
+          },
+          {
+            "end": 19,
+            "id": 2,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 11,
+            "text": "pravilna",
+            "word_ids": [
+              2
+            ]
+          },
+          {
+            "end": 26,
+            "id": 3,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 20,
+            "text": "beseda",
+            "word_ids": [
+              3
+            ]
+          },
+          {
+            "end": 27,
+            "id": 4,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 26,
+            "text": "?",
+            "word_ids": [
+              4
+            ]
+          }
+        ],
+        "words": [
+          {
+            "end": 2,
+            "feats": {
+              "Mood": "Ind",
+              "Number": "Sing",
+              "Person": "3",
+              "Polarity": "Pos",
+              "Tense": "Pres",
+              "VerbForm": "Fin"
+            },
+            "id": 0,
+            "lemma": "biti",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 0,
+            "sentence_id": 0,
+            "start": 0,
+            "text": "Je",
+            "upos": "AUX",
+            "xpos": "Va-r3s-n"
+          },
+          {
+            "end": 10,
+            "feats": {
+              "Case": "Nom",
+              "Gender": "Fem",
+              "Number": "Sing"
+            },
+            "id": 1,
+            "lemma": "lesenka",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 1,
+            "sentence_id": 0,
+            "start": 3,
+            "text": "lesenka",
+            "upos": "NOUN",
+            "xpos": "Ncfsn"
+          },
+          {
+            "end": 19,
+            "feats": {
+              "Case": "Nom",
+              "Degree": "Pos",
+              "Gender": "Fem",
+              "Number": "Sing"
+            },
+            "id": 2,
+            "lemma": "pravilen",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 2,
+            "sentence_id": 0,
+            "start": 11,
+            "text": "pravilna",
+            "upos": "ADJ",
+            "xpos": "Agpfsn"
+          },
+          {
+            "end": 26,
+            "feats": {
+              "Case": "Nom",
+              "Gender": "Fem",
+              "Number": "Sing"
+            },
+            "id": 3,
+            "lemma": "beseda",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 3,
+            "sentence_id": 0,
+            "start": 20,
+            "text": "beseda",
+            "upos": "NOUN",
+            "xpos": "Ncfsn"
+          },
+          {
+            "end": 27,
+            "feats": {},
+            "id": 4,
+            "lemma": "?",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 4,
+            "sentence_id": 0,
+            "start": 26,
+            "text": "?",
+            "upos": "PUNCT",
+            "xpos": "Z"
+          }
+        ]
+      },
+      "cache": {
+        "scope": "client",
+        "status": "disabled_unscoped",
+        "ttl_seconds": 60
+      },
+      "degraded": false,
+      "disagreements": [],
+      "engine_requested": "klikai_classla_primary_v1",
+      "engine_used": "classla",
+      "engines_used": [
+        "classla"
+      ],
+      "failures": {},
+      "issues": [
+        {
+          "category": "paronym",
+          "end": 10,
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 3
+        }
+      ],
+      "lang": "sl",
+      "loris_status": "checked",
+      "offset_convention": "unicode_codepoint_half_open",
+      "operations": {
+        "classla_calls": 1,
+        "loris_reused_analysis_calls": 1,
+        "trained_spacy_calls": 0
+      },
+      "provenance": {
+        "analysis_profile": "klikai_classla_primary_v1",
+        "analysis_profile_revision": "classla-once-canonical-loris-v1",
+        "analysis_reused": true,
+        "loris": "canonical matcher over reused CLASSLA tokens and original-surface aliases",
+        "models": {
+          "classla": {
+            "actual_tensor_devices": [
+              "cpu"
+            ],
+            "dependency_exception": null,
+            "device": "cpu",
+            "engine": "classla",
+            "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+            "license": "CC-BY-SA-4.0",
+            "model_id": "classla-standard-sl-2.0",
+            "processors": [
+              "tokenize",
+              "pos",
+              "lemma"
+            ],
+            "source_handles": [
+              "11356/1767",
+              "11356/1768",
+              "11356/1769"
+            ],
+            "torch_version": "2.6.0+cpu",
+            "version": "2.2.3"
+          }
+        },
+        "rules_sha256": "0dee12b10298bb381f09f1b3c454a477df09f04eaafa6364a174f5b537511d1c",
+        "trained_model_invocations": 0
+      },
+      "raw_engines": {
+        "classla": {
+          "analysis": {
+            "model": {
+              "actual_tensor_devices": [
+                "cpu"
+              ],
+              "dependency_exception": null,
+              "device": "cpu",
+              "engine": "classla",
+              "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+              "license": "CC-BY-SA-4.0",
+              "model_id": "classla-standard-sl-2.0",
+              "processors": [
+                "tokenize",
+                "pos",
+                "lemma"
+              ],
+              "source_handles": [
+                "11356/1767",
+                "11356/1768",
+                "11356/1769"
+              ],
+              "torch_version": "2.6.0+cpu",
+              "version": "2.2.3"
+            },
+            "sentences": [
+              {
+                "end": 27,
+                "id": 0,
+                "start": 0
+              }
+            ],
+            "tokens": [
+              {
+                "end": 2,
+                "id": 0,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 0,
+                "text": "Je",
+                "word_ids": [
+                  0
+                ]
+              },
+              {
+                "end": 10,
+                "id": 1,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 3,
+                "text": "lesenka",
+                "word_ids": [
+                  1
+                ]
+              },
+              {
+                "end": 19,
+                "id": 2,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 11,
+                "text": "pravilna",
+                "word_ids": [
+                  2
+                ]
+              },
+              {
+                "end": 26,
+                "id": 3,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 20,
+                "text": "beseda",
+                "word_ids": [
+                  3
+                ]
+              },
+              {
+                "end": 27,
+                "id": 4,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 26,
+                "text": "?",
+                "word_ids": [
+                  4
+                ]
+              }
+            ],
+            "words": [
+              {
+                "end": 2,
+                "feats": {
+                  "Mood": "Ind",
+                  "Number": "Sing",
+                  "Person": "3",
+                  "Polarity": "Pos",
+                  "Tense": "Pres",
+                  "VerbForm": "Fin"
+                },
+                "id": 0,
+                "lemma": "biti",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 0,
+                "sentence_id": 0,
+                "start": 0,
+                "text": "Je",
+                "upos": "AUX",
+                "xpos": "Va-r3s-n"
+              },
+              {
+                "end": 10,
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "id": 1,
+                "lemma": "lesenka",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 1,
+                "sentence_id": 0,
+                "start": 3,
+                "text": "lesenka",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              },
+              {
+                "end": 19,
+                "feats": {
+                  "Case": "Nom",
+                  "Degree": "Pos",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "id": 2,
+                "lemma": "pravilen",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 2,
+                "sentence_id": 0,
+                "start": 11,
+                "text": "pravilna",
+                "upos": "ADJ",
+                "xpos": "Agpfsn"
+              },
+              {
+                "end": 26,
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "id": 3,
+                "lemma": "beseda",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 3,
+                "sentence_id": 0,
+                "start": 20,
+                "text": "beseda",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              },
+              {
+                "end": 27,
+                "feats": {},
+                "id": 4,
+                "lemma": "?",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 4,
+                "sentence_id": 0,
+                "start": 26,
+                "text": "?",
+                "upos": "PUNCT",
+                "xpos": "Z"
+              }
+            ]
+          },
+          "engine_used": "classla",
+          "issues": [],
+          "lang": "sl",
+          "spans": [],
+          "text": "Je lesenka pravilna beseda?",
+          "tokens": [
+            {
+              "end": 2,
+              "lemma": "biti",
+              "pos": "AUX",
+              "start": 0,
+              "text": "Je"
+            },
+            {
+              "end": 10,
+              "lemma": "lesenka",
+              "pos": "NOUN",
+              "start": 3,
+              "text": "lesenka"
+            },
+            {
+              "end": 19,
+              "lemma": "pravilen",
+              "pos": "ADJ",
+              "start": 11,
+              "text": "pravilna"
+            },
+            {
+              "end": 26,
+              "lemma": "beseda",
+              "pos": "NOUN",
+              "start": 20,
+              "text": "beseda"
+            },
+            {
+              "end": 27,
+              "lemma": "?",
+              "pos": "PUNCT",
+              "start": 26,
+              "text": "?"
+            }
+          ]
+        }
+      },
+      "selected_analysis_basis": {
+        "loris_basis": "canonical matcher reuses this contextual analysis and exact original-surface aliases; no second trained model",
+        "policy_revision": "classla-once-canonical-loris-v1",
+        "primary": "CLASSLA once for Slovene; existing spaCy pipeline for Italian",
+        "uncertainty": "raw predictions retained independently of supported grammatical applications"
+      },
+      "spans": [
+        {
+          "category": "paronym",
+          "end": 10,
+          "match_on": "lemma",
+          "normalized": "lesenka",
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 3,
+          "surface": "lesenka",
+          "token_end": 2,
+          "token_indexes": [
+            1
+          ],
+          "token_start": 1,
+          "trigger": "lesenka",
+          "type": "token_rule"
+        },
+        {
+          "category": "paronym",
+          "end": 10,
+          "match_on": "surface_alias",
+          "normalized": "lesenka",
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 3,
+          "surface": "lesenka",
+          "token_end": 2,
+          "token_indexes": [
+            1
+          ],
+          "token_start": 1,
+          "trigger": "lesenka",
+          "type": "token_rule"
+        }
+      ],
+      "status": "ok",
+      "text": "Je lesenka pravilna beseda?",
+      "timings": {
+        "analysis_ms": 163.248
+      },
+      "tokens": [
+        {
+          "end": 2,
+          "lemma": "biti",
+          "pos": "AUX",
+          "start": 0,
+          "text": "Je"
+        },
+        {
+          "end": 10,
+          "lemma": "lesenka",
+          "pos": "NOUN",
+          "start": 3,
+          "text": "lesenka"
+        },
+        {
+          "end": 19,
+          "lemma": "pravilen",
+          "pos": "ADJ",
+          "start": 11,
+          "text": "pravilna"
+        },
+        {
+          "end": 26,
+          "lemma": "beseda",
+          "pos": "NOUN",
+          "start": 20,
+          "text": "beseda"
+        },
+        {
+          "end": 27,
+          "lemma": "?",
+          "pos": "PUNCT",
+          "start": 26,
+          "text": "?"
+        }
+      ]
+    },
+    "historical_request_plan": {
+      "ambiguities": [],
+      "candidate_lemmas": [],
+      "confidence": "broad_routes",
+      "context": "",
+      "domain": null,
+      "interpretation_contract": "klikai.request-interpretation.v1",
+      "interpretation_version": "shared-task-evidence-v36",
+      "jurisdiction": null,
+      "operation": null,
+      "original": "Je lesenka pravilna beseda?",
+      "requested_edition": null,
+      "requested_facets": [],
+      "requested_grammar_slots": [],
+      "requested_recommendation_authority": null,
+      "requested_source": null,
+      "response_language": "sl",
+      "source_language": null,
+      "target_spans": [],
+      "translation_language": null,
+      "version": "klikai.request-plan.v1"
+    },
+    "historical_lexical_evidence_count": 0,
+    "historical_bundle_sha256": "6a0992634c0116de325f579f156855e48710243b24a10a28e28695478982888d",
+    "evidence_status": "retained actual production input/analysis, offline replay only; no new analysis or generation"
+  },
+  {
+    "family_id": "17d72286-a628-4611-bc0c-0a35e84fdc8b",
+    "question": "lesenka",
+    "context": "",
+    "analysis": {
+      "alignment": [
+        {
+          "analyses": {
+            "classla": [
+              {
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "lemma": "lesenka",
+                "text": "lesenka",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              }
+            ]
+          },
+          "disagreement": false,
+          "end": 7,
+          "members": {
+            "classla": [
+              0
+            ]
+          },
+          "start": 0,
+          "text": "lesenka"
+        }
+      ],
+      "analysis": {
+        "model": {
+          "actual_tensor_devices": [
+            "cpu"
+          ],
+          "dependency_exception": null,
+          "device": "cpu",
+          "engine": "classla",
+          "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+          "license": "CC-BY-SA-4.0",
+          "model_id": "classla-standard-sl-2.0",
+          "processors": [
+            "tokenize",
+            "pos",
+            "lemma"
+          ],
+          "source_handles": [
+            "11356/1767",
+            "11356/1768",
+            "11356/1769"
+          ],
+          "torch_version": "2.6.0+cpu",
+          "version": "2.2.3"
+        },
+        "sentences": [
+          {
+            "end": 7,
+            "id": 0,
+            "start": 0
+          }
+        ],
+        "tokens": [
+          {
+            "end": 7,
+            "id": 0,
+            "offset_mapping": "native",
+            "sentence_id": 0,
+            "start": 0,
+            "text": "lesenka",
+            "word_ids": [
+              0
+            ]
+          }
+        ],
+        "words": [
+          {
+            "end": 7,
+            "feats": {
+              "Case": "Nom",
+              "Gender": "Fem",
+              "Number": "Sing"
+            },
+            "id": 0,
+            "lemma": "lesenka",
+            "mapping_quality": "exact_surface",
+            "parent_token_id": 0,
+            "sentence_id": 0,
+            "start": 0,
+            "text": "lesenka",
+            "upos": "NOUN",
+            "xpos": "Ncfsn"
+          }
+        ]
+      },
+      "cache": {
+        "scope": "client",
+        "status": "disabled_unscoped",
+        "ttl_seconds": 60
+      },
+      "degraded": false,
+      "disagreements": [],
+      "engine_requested": "klikai_classla_primary_v1",
+      "engine_used": "classla",
+      "engines_used": [
+        "classla"
+      ],
+      "failures": {},
+      "issues": [
+        {
+          "category": "paronym",
+          "end": 7,
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 0
+        }
+      ],
+      "lang": "sl",
+      "loris_status": "checked",
+      "offset_convention": "unicode_codepoint_half_open",
+      "operations": {
+        "classla_calls": 1,
+        "loris_reused_analysis_calls": 1,
+        "trained_spacy_calls": 0
+      },
+      "provenance": {
+        "analysis_profile": "klikai_classla_primary_v1",
+        "analysis_profile_revision": "classla-once-canonical-loris-v1",
+        "analysis_reused": true,
+        "loris": "canonical matcher over reused CLASSLA tokens and original-surface aliases",
+        "models": {
+          "classla": {
+            "actual_tensor_devices": [
+              "cpu"
+            ],
+            "dependency_exception": null,
+            "device": "cpu",
+            "engine": "classla",
+            "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+            "license": "CC-BY-SA-4.0",
+            "model_id": "classla-standard-sl-2.0",
+            "processors": [
+              "tokenize",
+              "pos",
+              "lemma"
+            ],
+            "source_handles": [
+              "11356/1767",
+              "11356/1768",
+              "11356/1769"
+            ],
+            "torch_version": "2.6.0+cpu",
+            "version": "2.2.3"
+          }
+        },
+        "rules_sha256": "0dee12b10298bb381f09f1b3c454a477df09f04eaafa6364a174f5b537511d1c",
+        "trained_model_invocations": 0
+      },
+      "raw_engines": {
+        "classla": {
+          "analysis": {
+            "model": {
+              "actual_tensor_devices": [
+                "cpu"
+              ],
+              "dependency_exception": null,
+              "device": "cpu",
+              "engine": "classla",
+              "fingerprint": "6a12a8f0996bf623fa97f11455f1b1509fb06c6eaffe0c49c05a0bf8036866c1",
+              "license": "CC-BY-SA-4.0",
+              "model_id": "classla-standard-sl-2.0",
+              "processors": [
+                "tokenize",
+                "pos",
+                "lemma"
+              ],
+              "source_handles": [
+                "11356/1767",
+                "11356/1768",
+                "11356/1769"
+              ],
+              "torch_version": "2.6.0+cpu",
+              "version": "2.2.3"
+            },
+            "sentences": [
+              {
+                "end": 7,
+                "id": 0,
+                "start": 0
+              }
+            ],
+            "tokens": [
+              {
+                "end": 7,
+                "id": 0,
+                "offset_mapping": "native",
+                "sentence_id": 0,
+                "start": 0,
+                "text": "lesenka",
+                "word_ids": [
+                  0
+                ]
+              }
+            ],
+            "words": [
+              {
+                "end": 7,
+                "feats": {
+                  "Case": "Nom",
+                  "Gender": "Fem",
+                  "Number": "Sing"
+                },
+                "id": 0,
+                "lemma": "lesenka",
+                "mapping_quality": "exact_surface",
+                "parent_token_id": 0,
+                "sentence_id": 0,
+                "start": 0,
+                "text": "lesenka",
+                "upos": "NOUN",
+                "xpos": "Ncfsn"
+              }
+            ]
+          },
+          "engine_used": "classla",
+          "issues": [],
+          "lang": "sl",
+          "spans": [],
+          "text": "lesenka",
+          "tokens": [
+            {
+              "end": 7,
+              "lemma": "lesenka",
+              "pos": "NOUN",
+              "start": 0,
+              "text": "lesenka"
+            }
+          ]
+        }
+      },
+      "selected_analysis_basis": {
+        "loris_basis": "canonical matcher reuses this contextual analysis and exact original-surface aliases; no second trained model",
+        "policy_revision": "classla-once-canonical-loris-v1",
+        "primary": "CLASSLA once for Slovene; existing spaCy pipeline for Italian",
+        "uncertainty": "raw predictions retained independently of supported grammatical applications"
+      },
+      "spans": [
+        {
+          "category": "paronym",
+          "end": 7,
+          "match_on": "lemma",
+          "normalized": "lesenka",
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 0,
+          "surface": "lesenka",
+          "token_end": 1,
+          "token_indexes": [
+            0
+          ],
+          "token_start": 0,
+          "trigger": "lesenka",
+          "type": "token_rule"
+        },
+        {
+          "category": "paronym",
+          "end": 7,
+          "match_on": "surface_alias",
+          "normalized": "lesenka",
+          "payload": {
+            "Iscete": "matita colorata",
+            "Izhodisce": "lesenka",
+            "SteMislili": "barvica, barvni svinčnik",
+            "Vslo": "beseda lesenka se uporablja izključno v lokalnem okolju; govorcem, ki nimajo stika s slovenščino v Italiji, pomen te besedne zveze ni jasen"
+          },
+          "priority": 100,
+          "rule_id": "paronym_lesenka",
+          "start": 0,
+          "surface": "lesenka",
+          "token_end": 1,
+          "token_indexes": [
+            0
+          ],
+          "token_start": 0,
+          "trigger": "lesenka",
+          "type": "token_rule"
+        }
+      ],
+      "status": "ok",
+      "text": "lesenka",
+      "timings": {
+        "analysis_ms": 237.95
+      },
+      "tokens": [
+        {
+          "end": 7,
+          "lemma": "lesenka",
+          "pos": "NOUN",
+          "start": 0,
+          "text": "lesenka"
+        }
+      ]
+    },
+    "historical_request_plan": {
+      "ambiguities": [],
+      "candidate_lemmas": [],
+      "confidence": "bounded_surface",
+      "context": "",
+      "domain": null,
+      "interpretation_contract": "klikai.request-interpretation.v1",
+      "interpretation_version": "shared-task-evidence-v36",
+      "jurisdiction": null,
+      "operation": null,
+      "original": "lesenka",
+      "requested_edition": null,
+      "requested_facets": [],
+      "requested_grammar_slots": [],
+      "requested_recommendation_authority": null,
+      "requested_source": null,
+      "response_language": "sl",
+      "source_language": null,
+      "target_spans": [
+        {
+          "basis": "single lexical surface; original request",
+          "end": 7,
+          "start": 0,
+          "text": "lesenka"
+        }
+      ],
+      "translation_language": null,
+      "version": "klikai.request-plan.v1"
+    },
+    "historical_lexical_evidence_count": 1,
+    "historical_bundle_sha256": "b09a5592dfc6d400d5b160a6d969a33c6b9095a5766405659b4cce75d1628066",
+    "evidence_status": "retained actual production input/analysis, offline replay only; no new analysis or generation"
+  }
+]

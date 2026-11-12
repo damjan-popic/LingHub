@@ -68,6 +68,11 @@ def interpret(question, context='', locale='sl'):
 
 def grammar_decision(interpretation,locale):
     plan=interpretation['request_plan']
+    if 'lexical_target_binding_unresolved'in plan.get('ambiguities',[]):
+        return {'kind':'lexical_request_clarification',
+            'text':('A quale espressione si riferisce la valutazione? Scrivila tra virgolette e conserva il contesto rilevante.'if locale=='it'else
+                    'Za kateri izraz želite presojo? Navedite ga v narekovajih in ohranite pomemben kontekst.'),
+            'resources':[],'ambiguities':['lexical_target_binding_unresolved']}
     reasons=sorted(set(plan.get('ambiguities',[]))&{
         'grammar_slot_pairing_unresolved','grammar_target_binding_unresolved'})
     if not reasons:return None
@@ -108,9 +113,9 @@ def answer(bundle, tier):
             'answer_kind':'deterministic_guidance','answer_support':'supported' if refs else 'clarification', 'generation_status':'not_generated',
             'diagnostics':{'writer':{'status':'not_invoked','reason':bundle['decision']['kind']},'request_interpretation':{'kind':bundle['decision']['kind'],'original_question':bundle['question'],'explicit_context':bundle['context']}},
             'deterministic_result':deepcopy(bundle['decision']), 'limitations':[], 'synthesis_mode':'deterministic_guidance'}
-    if bundle['decision']['kind']=='grammar_request_clarification':
+    if bundle['decision']['kind']in {'grammar_request_clarification','lexical_request_clarification'}:
         result['execution']={'provider_scope':'none','inference_performed':False,
-                             'route_reason':'grammar_request_clarification'}
+                             'route_reason':bundle['decision']['kind']}
         result['model_identity']={'model_id':'not_invoked','inference_performed':False}
     return result
 

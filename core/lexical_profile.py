@@ -451,7 +451,7 @@ async def make_profile(req,request):
    if any(e['tokens']for e in engines.values()):records.append(source_record('analysis','tokens:'+str(target['start'])+':'+str(target['end']),body,{'resource_id':'linguistic-analysis','version':'analysis-layer-v1'},target['text']))
  facets['phrase_analysis']=facet('matched'if phrase_analysis else'not_applicable',phrase_analysis)
  if not targets:
-  for key in facets:facets[key]=facet('not_applicable',reason='No lexical target; URLs, numbers and identifiers are not words')
+  for key in facets:facets[key]=facet('not_applicable',reason='No lexical subject was resolved for this request; no source lookup absence is established')
  records=requested_synonym_projection(records,facets,interpretation,req.limit)
  records=requested_collocation_projection(records,facets,interpretation)
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}

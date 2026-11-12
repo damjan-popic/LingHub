@@ -1327,7 +1327,16 @@ def fallback(bundle, status, elapsed=0.0, error=None):
         'La risposta generata non è disponibile. Puoi consultare i risultati salvati.' if it else
         'Generirani odgovor ni na voljo. Pregledate lahko shranjene zadetke.')
     code = (error or {}).get('error_code')
-    if code in {'invalid_composition_envelope', 'all_claims_withheld'}:
+    if code == 'lexical_target_unresolved':
+        message = ('Non ho individuato con sufficiente certezza l’espressione oggetto della domanda. Indicala tra virgolette e conserva il contesto rilevante.' if it else
+                   'Iz vprašanja ni bilo mogoče zanesljivo določiti obravnavanega izraza. Navedite ga v narekovajih in ohranite pomemben kontekst.')
+    elif code == 'insufficient_judgment_support':
+        message = ('Il materiale disponibile non basta per la valutazione richiesta. Puoi consultare le informazioni e le qualificazioni nelle fonti salvate.' if it else
+                   'Razpoložljivo gradivo ne zadošča za zahtevano presojo. Pregledate lahko podatke in omejitve v shranjenih virih.')
+    elif code == 'no_selected_evidence':
+        message = ('Fra i risultati accessibili non è stato selezionato materiale pertinente sufficiente per rispondere. Puoi controllare le fonti salvate o precisare il contesto.' if it else
+                   'Med dostopnimi zadetki ni bilo izbranega dovolj relevantnega gradiva za odgovor. Pregledate lahko shranjene vire ali dopolnite kontekst.')
+    elif code in {'invalid_composition_envelope', 'all_claims_withheld'}:
         message = ('Non è stato possibile formulare una risposta sufficientemente supportata. Puoi consultare i risultati salvati.' if it else
                    'Ni bilo mogoče oblikovati dovolj podprtega odgovora. Pregledate lahko shranjene zadetke.')
     elif code == 'incomplete_source':
@@ -1360,8 +1369,10 @@ def undelivered_reason(result):
             and execution.get('inference_performed')is False):
         return 'failed', {'error_code': 'complete_dictionary_alternatives_exceed_selected_input',
                           'stage': 'evidence_selection'}
-    if any(reason in reasons for reason in ('empty_indexed_evidence', 'model_found_insufficient_evidence')):
-        return 'no_support', {'error_code': 'insufficient_selected_evidence', 'stage': 'evidence_selection'}
+    if 'model_found_insufficient_evidence' in reasons:
+        return 'no_support', {'error_code': 'insufficient_judgment_support', 'stage': 'answer_support'}
+    if 'empty_indexed_evidence' in reasons:
+        return 'no_support', {'error_code': 'no_selected_evidence', 'stage': 'evidence_selection'}
     return 'failed', {'error_code': 'undelivered_answer', 'stage': 'provider_result'}
 
 

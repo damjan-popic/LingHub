@@ -3,20 +3,31 @@
 Uploaded prose is a task operand. It never enters the question interpreter and
 is never admitted to the source corpus. Every returned rewrite remains a draft.
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from difflib import SequenceMatcher
 import hashlib
 import re
 import time
+import threading
+import unicodedata
 
-from . import unified, comma_tasks
+from . import unified, comma_tasks, terminology, morphology
 from .security import Failure
 from .store import canonical, digest
 
 CONTRACT = 'klikai.document.v1'
 RESPONSE_CONTRACT = 'klikai.document-transform.v1'
 MAX_TEXT = 3000
+LOOKUP_WINDOW = 500
+LOOKUP_WORDS = 12
+LOOKUP_OVERLAP_WORDS = 5
+MAX_LOOKUP_WINDOWS = 256
+MAX_SOURCE_LOOKUP_SECONDS = 30
+LITERAL_WINDOW_STEP = 250
+# Existing terminology adapter's lexical token boundary. Twelve tokens have
+# 57 spans of lengths1..6, within its native morphology cap64 and literal cap18.
+LOOKUP_WORD_RE = re.compile(r"[^\W_]+(?:[-’'][^\W_]+)*", re.UNICODE)
 TASK_FIELDS = {'mode', 'source_language', 'target_language', 'locale',
                'source_text', 'source_sha256'}
 # The same existing SP2001 section headings used by ordinary reference discovery
@@ -122,6 +133,256 @@ def lookup_query(text):
         if boundary > 0:
             result = result[:boundary]
     return result.rstrip()
+
+
+def lookup_windows(text):
+    """Bounded literal queries with global offsets, not question interpretation.
+
+    Whole whitespace-delimited tokens prevent a cut word becoming an exact
+    lexical hit. Overlap retains multiword expressions across normal window
+    boundaries. Unqueryable tokens and a work-limit tail remain explicit.
+    """
+    tokens = list(re.finditer(r'\S+', text))
+    word_counts = [len(LOOKUP_WORD_RE.findall(token.group())) for token in tokens]
+    windows, gaps, index = [], [], 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.end() - token.start() > LOOKUP_WINDOW or word_counts[index] > LOOKUP_WORDS:
+            reason = ('token_exceeds_source_query_bound' if token.end() - token.start() > LOOKUP_WINDOW
+                      else 'token_exceeds_source_word_bound')
+            gaps.append({'start': token.start(), 'end': token.end(), 'reason': reason})
+            index += 1
+            continue
+        if len(windows) == MAX_LOOKUP_WINDOWS:
+            gaps.append({'start': token.start(), 'end': len(text), 'reason': 'document_lookup_work_limit'})
+            break
+        end_index = index
+        words = word_counts[index]
+        while (end_index + 1 < len(tokens) and tokens[end_index + 1].end() - token.start() <= LOOKUP_WINDOW
+                and words + word_counts[end_index + 1] <= LOOKUP_WORDS):
+            end_index += 1
+            words += word_counts[end_index]
+        a, b = token.start(), tokens[end_index].end()
+        windows.append({'start': a, 'end': b, 'query': text[a:b], 'query_sha256': sha_text(text[a:b]),
+                        'lexical_words': words, 'query_kind': 'lexical'})
+        if end_index == len(tokens) - 1:
+            break
+        next_index, retained = end_index, word_counts[end_index]
+        while next_index > index and retained < LOOKUP_OVERLAP_WORDS:
+            next_index -= 1
+            retained += word_counts[next_index]
+        index = max(index + 1, next_index)
+    lexical_gaps = deepcopy(gaps)
+    literal_windows, index = [], 0
+    while index < len(tokens) and len(literal_windows) + len(windows) < MAX_LOOKUP_WINDOWS:
+        token = tokens[index]
+        if token.end()-token.start() > LOOKUP_WINDOW:
+            index += 1
+            continue
+        end_index = index
+        while end_index+1 < len(tokens) and tokens[end_index+1].end()-token.start() <= LOOKUP_WINDOW:
+            end_index += 1
+        a, b = token.start(), tokens[end_index].end()
+        literal_windows.append({'start':a,'end':b,'query':text[a:b], 'query_sha256':sha_text(text[a:b]),
+            'lexical_words':sum(word_counts[index:end_index+1]),'query_kind':'literal'})
+        if end_index == len(tokens)-1:
+            break
+        next_index=index
+        while next_index+1 <= end_index and tokens[next_index+1].start() <= a+LITERAL_WINDOW_STEP:
+            next_index += 1
+        index=max(index+1,next_index)
+    combined={}
+    for window in literal_windows+windows:
+        key=(window['start'],window['end'])
+        if key in combined:
+            combined[key]['query_kind']='both'
+        else:
+            combined[key]=window
+    windows=list(combined.values())
+    gaps=[gap for gap in gaps if not any(window['start']<=gap['start'] and gap['end']<=window['end'] for window in windows)]
+    return {'version': 'document-literal-windows.v2', 'source_sha256': sha_text(text),
+            'source_codepoints': len(text), 'offset_convention': 'unicode_codepoint_half_open',
+            'windows': windows, 'unqueried_ranges': gaps, 'complete_nonwhitespace_input': not gaps,
+            'lexical_unqueried_ranges':lexical_gaps,
+            'window_limit': LOOKUP_WINDOW, 'word_limit': LOOKUP_WORDS,
+            'overlap_words': LOOKUP_OVERLAP_WORDS, 'source_morphology_phrase_words': 6,
+            'literal_window_step_codepoints':LITERAL_WINDOW_STEP,
+            'guaranteed_literal_expression_span_codepoints':LITERAL_WINDOW_STEP,
+            'work_limit': MAX_LOOKUP_WINDOWS,
+            'scope': 'query_plan_coverage_only_source_execution_recorded_separately_not_applicability'}
+
+
+class _DocumentSourceCache:
+    """Reuse only identical source GETs during one freeze, including failures."""
+    def __init__(self, gateway):
+        self.gateway, self.lock, self.requests = gateway, threading.Lock(), {}
+
+    def __getattr__(self, name):
+        return getattr(self.gateway, name)
+
+    def request(self, path, payload, base=None):
+        if payload is not None:
+            raise Failure('invalid_request')
+        key = (base, path)
+        with self.lock:
+            owner = key not in self.requests
+            future = self.requests.setdefault(key, Future())
+        if owner:
+            try:
+                future.set_result(self.gateway.request(path, None, base))
+            except BaseException as error:
+                future.set_exception(error)
+        return deepcopy(future.result())
+
+
+def _merge_document_matches(matches):
+    """One complete parent per unchanged record body; keep every lookup capture.
+
+    Query scores and nominated forms are discovery metadata. Different source
+    content/revisions, senses and qualifications never merge. The original
+    lookup captures remain in the reader, separate from the aggregate parent.
+    """
+    grouped = {}
+    for row in matches:
+        capture = row['capture']
+        ignored = {'score'} | ({'matched_forms', 'accepted_matched_forms'}
+                              if row['capture_kind'] == 'terminology_record' else set())
+        body = {k: v for k, v in capture.items() if k not in ignored}
+        key = (row['source_slug'], row['capture_kind'], row['external_id'], digest(body))
+        if key not in grouped:
+            grouped[key] = deepcopy(row)
+            grouped[key]['discovery_captures'] = []
+        current = grouped[key]
+        original = {'capture_sha256': row['capture_sha256'], 'capture': deepcopy(capture),
+                    'windows': deepcopy(row.get('discovery_windows', []))}
+        previous = next((item for item in current['discovery_captures']
+            if item['capture_sha256'] == original['capture_sha256'] and item['capture'] == original['capture']), None)
+        if previous is None:
+            current['discovery_captures'].append(original)
+        else:
+            previous['windows'].extend(window for window in original['windows'] if window not in previous['windows'])
+        current['context_eligible'] = current.get('context_eligible', True) and row.get('context_eligible', True)
+        current['score'] = max(current['score'], row['score'])
+        if 'score' in current['capture']:
+            current['capture']['score'] = current['score']
+        for field in ignored - {'score'}:
+            for nomination in capture.get(field, []):
+                if nomination not in current['capture'].setdefault(field, []):
+                    current['capture'][field].append(deepcopy(nomination))
+        current['capture_sha256'] = digest(current['capture'])
+    return unified.merge_source_matches(list(grouped.values()))
+
+
+def _collect_document_source(gateway, family, definition, details, discovery):
+    found, observations = [], []
+    started = time.monotonic()
+    unqueried = []
+    for index, window in enumerate(discovery['windows']):
+        if time.monotonic() - started >= MAX_SOURCE_LOOKUP_SECONDS:
+            unqueried = [{**item, 'reason': 'source_discovery_time_limit'} for item in discovery['windows'][index:]]
+            break
+        rows, observed = unified.collect_source(gateway, family, definition, details, query_override=window['query'])
+        observed = {k: v for k, v in observed.items() if k not in {'original_question', 'request_plan'}}
+        observed['input_span'] = {'start': window['start'], 'end': window['end'], 'query_sha256': window['query_sha256']}
+        observed['possible_result_limit'] = (observed.get('has_more') is True or
+            observed.get('has_more') is not False and type(observed.get('limit')) is int
+            and observed['limit'] > 0 and observed.get('returned_count', 0) >= observed['limit'])
+        for row in rows:
+            row['discovery_windows'] = [deepcopy(observed['input_span'])]
+        found.extend(rows); observations.append(observed)
+        if observed['status'] == 'not_documentary':
+            break
+        if observed['status'] in {'timeout', 'unavailable', 'unsupported'}:
+            unqueried = [{**item, 'reason': 'source_unavailable_or_unsupported'} for item in discovery['windows'][index + 1:]]
+            break
+    merged = _merge_document_matches(found)
+    first = observations[0] if observations else {'family': definition['slug'], 'source_label': definition['display_name'],
+        'status': 'unsupported', 'reason': unqueried[0]['reason'] if unqueried else 'no_queryable_input', 'limit': 0}
+    result = deepcopy(first)
+    statuses = {item['status'] for item in observations}
+    limited = any(item['possible_result_limit'] for item in observations)
+    if statuses == {'not_documentary'}:
+        result['status'] = 'not_documentary'
+    elif unqueried or limited or statuses & {'partial', 'unavailable', 'unsupported', 'timeout'}:
+        result['status'] = 'partial' if merged or statuses & {'ok', 'no_match'} else first['status']
+    else:
+        result['status'] = 'ok' if merged else 'no_match' if observations else 'unsupported'
+    result.update(returned_count=len(merged), raw_returned_count=sum(item.get('returned_count', 0) for item in observations),
+        limit=sum(item.get('limit') or 0 for item in observations), per_query_limit=first.get('limit'),
+        has_more=True if limited else None, possible_result_limit=limited, windows=observations,
+        unqueried_windows=unqueried, processing_limit_seconds=MAX_SOURCE_LOOKUP_SECONDS,
+        query_variants=[item['query'] for item in observations],
+        elapsed_ms=sum(item.get('elapsed_ms', 0) for item in observations),
+        detail_requests=sum(item.get('detail_requests', 0) for item in observations))
+    return merged, result
+
+
+def _surface_occurrences(surface, text):
+    def word(char):
+        return char.isalnum() or char == '_' or unicodedata.category(char).startswith('M')
+    if not isinstance(surface, str) or not surface.strip():
+        return
+    for match in re.finditer(re.escape(surface), text, re.I):
+        a, b = match.span()
+        if (a and word(text[a-1])) or (b < len(text) and word(text[b])):
+            continue
+        yield {'start': a, 'end': b, 'text': match.group()}
+
+
+def _freeze_document_lexical_context(gateway, task, matches):
+    """Reuse the accepted frozen morphology API only for discovered unigrams.
+
+    Recorded POS candidates are not current-sentence analyses or source advice.
+    Every token keeps its original spans; all failures and bounds remain visible.
+    """
+    inputs = {}
+    for row in matches:
+        if (row['capture_kind'] != 'terminology_record' or row.get('context_eligible') is False
+                or row.get('rights_mode') in {'linked_only', 'metadata_only', 'unknown'}):
+            continue
+        for surface in _native_term_surfaces(row['capture'], task['source_language']):
+            if not isinstance(surface, str) or len(LOOKUP_WORD_RE.findall(surface)) != 1:
+                continue
+            for occurrence in _surface_occurrences(surface, task['source_text']):
+                spans = inputs.setdefault(occurrence['text'], [])
+                span = {key: occurrence[key] for key in ('start', 'end')}
+                if span not in spans:
+                    spans.append(span)
+    if not inputs:
+        return None
+    requested = [{'text': text, 'spans': spans} for text, spans in sorted(inputs.items(), key=lambda pair:min(s['start'] for s in pair[1]))]
+    row = {'family': 'document_lexical_context', 'contract': 'document-lexical-context.v1',
+        'source_sha256': task['source_sha256'], 'language': task['source_language'],
+        'requested_inputs': requested, 'captures': [], 'unqueried_inputs': [],
+        'status': 'unavailable', 'returned_count': 0, 'limit': 256, 'has_more': None,
+        'scope': 'recorded_lexical_candidates_not_contextual_analysis_or_source_support'}
+    eligible = []
+    for item in requested:
+        text = item['text']
+        if len(text) > 128 or any(char.isspace() for char in text):
+            row['unqueried_inputs'].append({**item, 'reason': 'morphology_token_bound'})
+        elif len(eligible) == 256:
+            row['unqueried_inputs'].append({**item, 'reason': 'document_lexical_work_limit'})
+        else:
+            eligible.append(text)
+    if not getattr(gateway, 'linghub_url', None):
+        row['reason'] = 'lexical_resource_not_configured'
+        row['unqueried_inputs'].extend({'text': text, 'reason': row['reason']} for text in eligible)
+        return row
+    for index in range(0, len(eligible), 64):
+        batch = eligible[index:index+64]
+        payload = {'lang': task['source_language'], 'tokens': batch, 'limit': 4}
+        try:
+            data = gateway.request('/v1/morphology/lemmatize', payload, gateway.linghub_url)
+            frozen = morphology.freeze(data, batch, task['source_language'], task['locale'])
+            row['captures'].append({'request': payload, 'bundle': frozen['bundle']})
+            row['returned_count'] += len(batch)
+        except Exception as error:
+            row.update(unified.diagnostic(error, 'document_lexical_context'))
+            row['unqueried_inputs'].extend({'text': text, 'reason': 'lexical_resource_failed'} for text in eligible[index:])
+            break
+    row['status'] = 'partial' if row['unqueried_inputs'] else 'ok'
+    return row
 
 
 def capture_id(row):
@@ -252,15 +513,17 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
         coverage.append({'family': 'configured_sources', 'status': 'unavailable',
             'returned_count': 0, 'limit': None, 'has_more': None,
             **unified.diagnostic(error, 'document_source_registry')})
-    query = lookup_query(task['source_text'])
+    discovery = lookup_windows(task['source_text'])
+    query = discovery['windows'][0]['query'] if discovery['windows'] else ''
+    source_gateway = _DocumentSourceCache(gateway)
     # collect_source uses only this explicit query override; no question-plan or
     # uploaded instruction is sent to the linguistic request parser.
     source_family = {'question': task['source_text'], 'locale': task['locale'],
                      'input_language': task['source_language'], 'context': ''}
     with ThreadPoolExecutor(max_workers=unified.DETAIL_WORKERS) as details, \
             ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(unified.collect_source, gateway, source_family,
-                   definition, details, query_override=query) for definition in definitions]
+        futures = [pool.submit(_collect_document_source, source_gateway, source_family,
+                   definition, details, discovery) for definition in definitions]
         for future in as_completed(futures):
             rows, observed = future.result()
             found.extend(rows)
@@ -272,12 +535,17 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
                     for heading in REVIEW_REFERENCE_HEADINGS]}}}
             # Reuse exact-heading discovery and the existing registry/status
             # accounting; no interpretation or applicability verdict is added.
-            unified.expand_request_reference_rules(gateway, discovery_family, definitions,
+            unified.expand_request_reference_rules(source_gateway, discovery_family, definitions,
                 found, coverage, details, pool, exact_heading_only=True)
     found = unified.merge_source_matches(found)
     # Exact source-owned term/advice matches precede generic large headings.
     # Every original remains frozen; this changes fitting order, not authority.
     found.sort(key=lambda row:_writer_source_priority(row,task))
+    if len(found) > 256:
+        raise Failure('unified_capture_too_large', 413)
+    lexical_context = _freeze_document_lexical_context(gateway, task, found)
+    if lexical_context:
+        coverage.append(lexical_context)
     for row in found:
         row['evidence_id'] = capture_id(row)
         # Identify this exact captured record, independently of its mutable URL
@@ -289,17 +557,19 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
             locator={**view.get('locator', {}), 'capture_sha256': row['capture_sha256'],
                      'capture_kind': row['capture_kind'], 'external_id': row['external_id']})
     coverage.sort(key=lambda row: row['family'])
-    external = [{k: deepcopy(v) for k, v in row.items() if k != 'source'} for row in found]
+    external = [{k: deepcopy(v) for k, v in row.items() if k not in
+                 {'source', 'discovery_captures', 'discovery_windows'}} for row in found]
     packet = {'version': unified.PACKET, 'matches': external, 'retrieval': coverage}
     if (len(found) > 256 or len(coverage) > 64
             or len(canonical(packet).encode()) > unified.MAX_BYTES):
         raise Failure('unified_capture_too_large', 413)
     statuses = {row['status'] for row in coverage}
     retrieval = {'route': 'typed_document', 'status': 'partial' if statuses &
-        {'partial', 'timeout', 'unavailable', 'unsupported'} else 'complete',
+        {'partial', 'timeout', 'unavailable', 'unsupported'} or discovery['unqueried_ranges'] else 'complete',
         'coverage': coverage, 'returned_count': len(found),
         'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
-        'discovery_basis': 'bounded_literal_contiguous_snippet', 'query': query}
+        'discovery_basis': 'bounded_overlapping_source_windows_v2', 'query': query,
+        'input_discovery': discovery}
     selection = _review_writer_selection(task, found)
     if selection:
         retrieval.update(status='partial', writer_evidence_selection=deepcopy(selection))
@@ -321,14 +591,18 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
             'timings': {'source_collection_ms': retrieval['elapsed_ms']}}
 
 
-def _native_review_cue(row, text):
+def _native_review_cue(row, text, source_language=None):
     """Discovery priority from exact source fields, never an edit verdict."""
     raw = row.get('capture') or {}
     folded = text.casefold()
+    if row.get('context_eligible') is False or row.get('rights_mode') in {'linked_only', 'metadata_only', 'unknown'}:
+        return 0
     if row.get('capture_kind') == 'terminology_record':
-        return 2 if any(isinstance(term, str) and len(term) >= 4
-            and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', folded)
-            for term in _native_term_surfaces(raw)) else 0
+        return 2 if any(isinstance(term, str) and term.strip()
+            and any(_surface_occurrences(term, text))
+            for term in _native_term_surfaces(raw, source_language)) else 0
+    if source_language is not None and raw.get('language') != source_language:
+        return 0
     original = raw.get('original_text') or ''
     words = set(re.findall(r'[^\W\d_]{4,}', folded))
     common = {'kako', 'tudi', 'lahko', 'samo', 'zato', 'medtem', 'oziroma', 'kadar', 'torej'}
@@ -344,26 +618,42 @@ def _native_review_cue(row, text):
         quote = original[a:b]
         if quote.count(' | ⇨ | ') == 1:
             left = quote.split(' | ⇨ | ', 1)[0]
-            if '\n' not in left and any(re.search(r'(?<!\w)' + re.escape(surface.strip().casefold())
-                    + r'(?!\w)', folded) for surface in left.split(',') if len(surface.strip()) >= 4):
+            if '\n' not in left and any(any(_surface_occurrences(surface.strip(), text))
+                    for surface in left.split(',') if surface.strip()):
                 return 2
         token_match |= bool((words - common) & set(re.findall(r'[^\W\d_]{4,}', quote.casefold())))
     return 1 if token_match else 0
 
 
-def _literal_term_length(row, text):
+def _literal_term_length(row, text, source_language=None):
     raw = row.get('capture') or {}
-    return max((len(term) for term in _native_term_surfaces(raw) if isinstance(term, str) and len(term) >= 4
-        and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text.casefold())), default=0)
+    return max((len(term) for term in _native_term_surfaces(raw, source_language) if isinstance(term, str) and term.strip()
+        and any(_surface_occurrences(term, text))), default=0)
 
 
-def _native_term_surfaces(capture):
-    for key in ('original_terms','standardized_terms'):
-        yield from capture.get(key,[])
+def _native_term_surfaces(capture, source_language=None):
+    recorded = []
     for entry in capture.get('term_entries',[]):
-        if isinstance(entry,dict):yield entry.get('term')
+        if isinstance(entry,dict) and entry.get('lang') in {'sl','it'} and isinstance(entry.get('term'),str):
+            recorded.append((entry['term'],entry['lang']))
+    if not recorded and capture.get('record_kind') == 'terminology_decision':
+        for key, language in [('original_terms','it'),('standardized_terms','sl'),('proposals','sl')]:
+            recorded.extend((term,language) for term in capture.get(key,[]) if isinstance(term,str))
+    if source_language is None and not recorded:
+        # Compatibility for callers inspecting raw candidates without a task;
+        # actual document admission always supplies the recorded source language.
+        for key in ('original_terms','standardized_terms'):
+            yield from capture.get(key,[])
+    for term,language in recorded:
+        if source_language is None or language == source_language:
+            yield term
     for nomination in capture.get('matched_forms',[]):
         if (isinstance(nomination,dict)and nomination.get('language')in {'sl','it'}
+                and isinstance(nomination.get('term'),str)
+                and (source_language is None or nomination['language']==source_language)
+                and (source_language is None or any(language==source_language
+                    and terminology.normalized(term)==terminology.normalized(nomination.get('term',''))
+                    for term,language in recorded))
                 and nomination.get('match_tier')=='morphology_exact'and nomination.get('normalization')=='morphology'
                 and isinstance(nomination.get('lexicon_release_id'),str)and nomination['lexicon_release_id']
                 and isinstance(nomination.get('query_signature'),str)and nomination['query_signature']):
@@ -371,8 +661,8 @@ def _native_term_surfaces(capture):
 
 
 def _writer_source_priority(row,task):
-    cue=_native_review_cue(row,task['source_text'])
-    if cue>=2:return (0,-_literal_term_length(row,task['source_text']))
+    cue=_native_review_cue(row,task['source_text'],task['source_language'])
+    if cue>=2:return (0,-_literal_term_length(row,task['source_text'],task['source_language']))
     original=' '.join((row.get('capture',{}).get('original_text')or'').split())
     if task['mode']=='review'and row.get('source_slug')=='sp2001'and row.get('capture_kind')=='resource_record':
         for index,heading in enumerate(REVIEW_REFERENCE_HEADINGS):
@@ -382,14 +672,13 @@ def _writer_source_priority(row,task):
 
 def _review_writer_selection(task, matches):
     """Nominate whole source parents by exact native fields, never edit text."""
-    if task['mode'] != 'review':
-        return None
     direct = [row['evidence_id'] for row in matches
               if row.get('context_eligible') is not False and row.get('rights_mode') != 'linked_only'
-              and _native_review_cue(row, task['source_text']) >= 2]
+              and _native_review_cue(row, task['source_text'], task['source_language']) >= 2]
     if not direct:
         return None
-    return {'basis': 'exact_source_owned_advice_or_term_cue', 'status': 'partial',
+    return {'basis': 'recorded_source_language_term_or_advice_occurrence', 'status': 'partial',
+        'scope': 'whole_parent_candidates_not_applicability_or_preference',
         'eligible_evidence_ids': direct,
         'excluded_evidence_ids': [row['evidence_id'] for row in matches
                                   if row['evidence_id'] not in direct]}
@@ -726,6 +1015,29 @@ def _comma_document_answer(gateway, bundle, tier, model, parent):
 
 
 def _attach_preflight(result, bundle):
+    discovery = (bundle.get('retrieval') or {}).get('input_discovery')
+    if discovery:
+        gaps = bool(discovery['unqueried_ranges'])
+        incomplete = any(row.get('status') in {'partial', 'timeout', 'unavailable', 'unsupported'}
+            for row in bundle['retrieval']['coverage'])
+        if gaps or incomplete:
+            it = bundle['document_task']['locale'] == 'it'
+            if gaps:
+                notice = ('Una parte del testo non è stata cercata perché supera i limiti di ricerca. '
+                          'Questo non dimostra che manchino fonti pertinenti.' if it else
+                          'Dela besedila zaradi omejitev iskanja ni bilo mogoče preiskati. '
+                          'To ne pomeni, da zanj ni ustreznih virov.')
+            else:
+                notice = ('Le finestre di ricerca erano predisposte per tutto il testo, ma alcune ricerche '
+                          'o fonti erano indisponibili o hanno raggiunto un limite. I risultati non sono esaustivi.' if it else
+                          'Iskalna okna so bila pripravljena za celotno besedilo, vendar vseh poizvedb ali virov '
+                          'ni bilo mogoče pregledati oziroma so dosegli omejitev rezultatov. Najdbe niso izčrpne.')
+            result.setdefault('limitations', []).append({'code': 'document_source_discovery_limited',
+                'scope': 'answer', 'message': notice})
+            result['answer_md'] = result.get('answer_md', '') + '\n\n' + notice
+            result.setdefault('display_blocks', []).append({'block_id': 'document-discovery-limit', 'text': notice})
+            if result.get('document_result'):
+                result['document_result']['notes'].append(notice)
     if bundle.get('comma_preflight'):
         observed = deepcopy(bundle['comma_preflight'])
         result.setdefault('deterministic_result', {})['document_comma_preflight'] = observed
@@ -904,6 +1216,9 @@ def _generate_general(gateway, bundle, tier, model, parent=None):
         blocks.append({'block_id': f'document-edit-{index}',
                        'text': edit['explanation'], 'evidence_ids': edit['evidence_ids']})
     fixed_notes = {
+        'document_source_applicability_unresolved': (
+            'Sono stati trovati record, ma i dati disponibili non ne stabiliscono l’uso pertinente in questo contesto. Non è una conferma linguistica; gli originali restano consultabili.' if it else
+            'Zapisi so bili najdeni, vendar iz razpoložljivih podatkov ni mogoče določiti njihove primerne uporabe v tem sobesedilu. To ni jezikovna potrditev; izvirni zapisi ostajajo na voljo za pregled.'),
         'source_support_unavailable': (
             'Non è disponibile materiale dalle fonti ammesse per verificare questa sezione. La traduzione, se presente, è una bozza senza verifica terminologica.' if it else
             'Za preverjanje tega odseka ni gradiva iz dovoljenih virov. Morebitni prevod je osnutek brez terminološke potrditve.'),

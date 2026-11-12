@@ -382,13 +382,16 @@ def test_translation_does_not_add_review_reference_lookups():
     f['input_language'] = 'it'
     f['request_options']['document_task'].update(source_language='it', target_language='sl')
     bundle = doc.freeze(gateway, f, {})['bundle']
-    assert len(gateway.calls) == 2
-    sent_query = parse_qs(urlsplit(gateway.calls[-1][0]).query)['q'][0]
-    assert sent_query == doc.lookup_query(text) and 'didattica a distanza' in sent_query
-    assert bundle['retrieval']['query'] == sent_query
-    assert bundle['retrieval']['discovery_basis'] == 'bounded_literal_contiguous_snippet'
+    windows = doc.lookup_windows(text)['windows']
+    sent_queries = [parse_qs(urlsplit(path).query)['q'][0] for path, _, _ in gateway.calls if path.startswith('/api/search?')]
+    assert sent_queries == list(dict.fromkeys(window['query'] for window in windows))
+    assert len(gateway.calls) == 1 + len(sent_queries)
+    assert all(0 < len(query) <= 500 for query in sent_queries)
+    assert bundle['retrieval']['query'] == windows[0]['query']
+    assert bundle['retrieval']['discovery_basis'] == 'bounded_overlapping_source_windows_v2'
     coverage = bundle['retrieval']['coverage'][0]
-    assert coverage['query_variants'] == [sent_query] and coverage['limit'] == 10
+    assert coverage['query_variants'] == [window['query'] for window in windows]
+    assert coverage['per_query_limit'] == 10 and coverage['limit'] == 10 * len(windows)
     assert bundle['source_bundle']['matches'][0]['capture']['original_text'] == SOURCE
     assert not any(any(heading in path for heading in doc.REVIEW_REFERENCE_HEADINGS)
                    for path, _, _ in gateway.calls)
@@ -856,7 +859,7 @@ def test_direct_source_owned_advice_precedes_generic_heading_during_fitting():
                 hit = result['hits'][0]
                 if slug == 'cu-slogovni':
                     quote = 'joinedform | ⇨ | separate form'
-                    hit.update(resource_id='native-advice', source_slug=slug, original_text=quote,
+                    hit.update(resource_id='native-advice', source_slug=slug, original_text=quote, language='sl',
                         advice_units=[{'source_span': {'char_start': 0, 'char_end': len(quote),
                             'text_sha256': doc.sha_text(quote)}}])
                     result['sources'] = [slug]

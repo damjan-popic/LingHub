@@ -11,6 +11,7 @@ const api=async(path,options={})=>{
  window.calls.push({path,method:options.method||'GET',body:options.body,headers:options.headers});
  if(path==='/documents')return {documents:saved};
  if(path==='/documents/upload'){
+  window.partialFixture=false;
   doc={document_id:'doc-1',name:'vloga.docx',state:'draft',created:1,options:{},warnings:['document_images_not_reviewed'],processed:0,total:1,sections:[{index:0,location:'body/paragraph1',text:original,state:'pending',family_id:null,output:''}]};
   saved=[{document_id:doc.document_id,name:doc.name,state:doc.state}];return structuredClone(doc);
  }
@@ -18,11 +19,14 @@ const api=async(path,options={})=>{
   doc.state='running';doc.options=options.body;saved[0].state='running';return structuredClone(doc);
  }
  if(path==='/documents/doc-1'){
-  doc.state=window.partialFixture?'failed':'complete';doc.processed=1;saved[0].state=doc.state;Object.assign(doc.sections[0],{state:'complete',family_id:'family-1',output:'Predlog: Čebelica.',document_result:{status:'draft',proposed_text:'Čebelica.',requires_human_review:true},limitations:window.partialFixture?[{code:'document_transform_failed'}]:[]});return structuredClone(doc);
+  const candidate=doc.options.translation_provider==='translategemma_sl_it',proposal=candidate?'Bozza italiana sintetica.':'Čebelica.';
+  doc.state=window.partialFixture?'failed':'complete';doc.processed=1;saved[0].state=doc.state;Object.assign(doc.sections[0],{state:'complete',family_id:'family-1',output:candidate?'Bozza da controllare.\n\n'+proposal:'Predlog: Čebelica.',document_result:{mode:doc.options.mode,status:'draft',proposed_text:proposal,edits:[],requires_human_review:true},limitations:window.partialFixture?[{code:'document_transform_failed'}]:[]});return structuredClone(doc);
  }
  if(path.endsWith('/delete')){saved=[];doc=null;return {acknowledged:true};}
- if(path.includes('/export/'))return new Blob(['Source-linked report fixture']);
+ if(path.includes('/export/'))return new Blob(['Original/draft report fixture']);
  if(path.endsWith('/draft/docx?partial=true'))return new Blob(['Explicit partial draft fixture']);
+ if(path.endsWith('/draft/txt'))return new Blob(['Bozza italiana sintetica.'],{type:'text/plain;charset=utf-8'});
+ if(path.endsWith('/draft/docx'))return new Blob(['Simple translated Word protocol fixture']);
  throw Error('Unexpected '+path);
 };
 const ui=documentUploads({root:document.getElementById('workspace'),api,locale:()=>locale,openFamily:async id=>{window.sourceOpened=id;},errorText:error=>error.message||'Napaka'});
@@ -57,7 +61,7 @@ ui.session({documents:{enabled:true}});
   await section.locator('button').click();assert.equal(await page.evaluate(()=>window.sourceOpened),'family-1');
   const start=await page.evaluate(()=>window.calls.find(c=>c.path.endsWith('/start')).body);
   assert.deepEqual({mode:start.mode,source:start.source_language,target:start.target_language},{mode:'translate',source:'it',target:'sl'});
-  const download=page.waitForEvent('download');await page.locator('.document-actions button').filter({hasText:locale==='sl'?'TXT':'TXT'}).click();assert.equal((await download).suggestedFilename(),'klikai-report.txt');
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:locale==='sl'?'Prenesite poročilo TXT':'Scarica rapporto TXT',exact:true}).click();assert.equal((await download).suggestedFilename(),'klikai-report.txt');
   await page.evaluate(()=>window.showReplayWarning());
   await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Word')&&document.querySelectorAll('.document-actions .secondary').length===0);
   assert((await page.locator('[data-document-detail]').innerText()).includes(locale==='sl'?'Wordov osnutek ni na voljo; preverite poročilo.':'La bozza Word non è disponibile; controlla il rapporto.'));
@@ -66,9 +70,35 @@ ui.session({documents:{enabled:true}});
   const partialDownload=page.waitForEvent('download');await page.locator('[data-partial-draft]').click();
   assert.equal((await partialDownload).suggestedFilename(),'klikai-partial-draft.docx');
   if(process.env.KLIKAI_DOCUMENT_UI_OUTPUT){fs.mkdirSync(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,{recursive:true});await page.locator('#workspace').screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,`documents-${locale}-${width}.png`)});}
+  // A separate private-choice fixture verifies the new download controls. Its
+  // fake server never contacts a provider and makes no language-quality claim.
+  await page.getByRole('button',{name:locale==='sl'?'Izbrišite dokument in njegove odgovore':'Elimina documento e relative risposte',exact:true}).click();
+  await page.evaluate(()=>window.ui.session({documents:{enabled:true,private_translation:true}}));
+  await page.locator('#workspace>details>summary').click();
+  await page.locator('input[type=file]').setInputFiles({name:'plain.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer:Buffer.from('private plain document fixture')});
+  await page.locator('#workspace form button[type=submit]').first().click();
+  await page.locator('[data-document-detail] h3').waitFor();
+  const privateControls=page.locator('.document-options select');
+  await privateControls.nth(0).selectOption('translate');await privateControls.nth(1).selectOption('sl');
+  assert.equal(await privateControls.nth(2).inputValue(),'it');
+  await privateControls.nth(3).selectOption('translategemma_sl_it');
+  assert((await page.locator('.document-options').innerText()).includes(locale==='sl'?'brez vpogleda v terminološke vire KLIKai':'senza consultare fonti terminologiche KLIKai'));
+  await page.locator('.document-options button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Bozza italiana sintetica.'));
+  const privateStart=await page.evaluate(()=>window.calls.filter(c=>c.path.endsWith('/start')).at(-1).body);
+  assert.deepEqual({mode:privateStart.mode,source:privateStart.source_language,target:privateStart.target_language,provider:privateStart.translation_provider},{mode:'translate',source:'sl',target:'it',provider:'translategemma_sl_it'});
+  assert(!Object.hasOwn(privateStart,'translation_profile'));
+  const cleanDownload=page.waitForEvent('download');await page.locator('[data-clean-draft]').click();
+  const clean=await cleanDownload;assert.equal(clean.suggestedFilename(),'klikai-draft.txt');
+  const stream=await clean.createReadStream(),chunks=[];for await(const chunk of stream)chunks.push(chunk);
+  assert.equal(Buffer.concat(chunks).toString('utf8'),'Bozza italiana sintetica.');
+  assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.path.endsWith('/draft/txt')).length),1);
+  const simpleWordDownload=page.waitForEvent('download');await page.getByRole('button',{name:locale==='sl'?'Prenesite osnutek Word':'Scarica bozza Word',exact:true}).click();
+  assert.equal((await simpleWordDownload).suggestedFilename(),'klikai-draft.docx');
+  if(process.env.KLIKAI_DOCUMENT_UI_OUTPUT)await page.locator('#workspace').screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,`documents-private-sl-it-${locale}-${width}.png`)});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(errors,[]);
   await page.evaluate(()=>window.ui.reset());assert(await page.locator('#workspace').isHidden());assert.equal(await page.locator('#workspace').textContent(),'');
-  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,replayed_translation_blocks_word:true,logout_clears_text:true});await context.close();
+  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,replayed_translation_blocks_word:true,private_sl_it_choice:true,browser_does_not_author_profile:true,clean_translation_txt_download:true,simple_word_download:true,logout_clears_text:true});await context.close();
  }}finally{await browser.close();}
  console.log(JSON.stringify({status:'PASS',scope:'UI protocol fixtures only; no source or model calls',checks}));
 })().catch(error=>{console.error(error.stack);process.exit(1);});

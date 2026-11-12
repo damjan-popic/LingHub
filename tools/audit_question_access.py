@@ -8,7 +8,7 @@ analyzer APIs or claim a fully rendered answer for every entry.
 from __future__ import annotations
 import argparse, collections, functools, hashlib, json, multiprocessing, os
 from pathlib import Path
-import sqlite3, sys, time
+import sqlite3, sys, time, subprocess
 
 def population_rows(pop):
     if 'population_sql' in pop:
@@ -64,6 +64,7 @@ def exercise(term,language):
 
 def exercise_population(pop):
     start=time.monotonic();counts=collections.Counter();held=collections.Counter();examples=[]
+    cache_before=exercise.cache_info()
     language='sl'if pop['language']=='it-sl'else pop['language']
     for stable_id,term in population_rows(pop):
         if language not in {'sl','it'}:status,detail='unsupported_language',None
@@ -76,6 +77,8 @@ def exercise_population(pop):
     return {'population_id':pop['id'],'declared_population':pop['population_count'],
             'observed':sum(counts.values()),'counts':dict(counts),
             'identity_reserved_holdout_counts':dict(held),'failure_examples':examples,
+            'parser_consumer_invocations':exercise.cache_info().misses-cache_before.misses,
+            'identical_query_reuses':exercise.cache_info().hits-cache_before.hits,
             'elapsed_seconds':round(time.monotonic()-start,3)}
 
 def main():
@@ -87,7 +90,10 @@ def main():
     output=Path(args.output)
     if output.exists():raise SystemExit('Preserve existing result: choose a new output path')
     report={'manifest_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
-        'checkpoint':manifest['core_checkpoint'],'scope':__doc__,'populations':[]}
+        'core_checkpoint':subprocess.check_output(['git','rev-parse','HEAD'],cwd=args.core,text=True).strip(),
+        'web_checkpoint':subprocess.check_output(['git','rev-parse','HEAD'],cwd=web,text=True).strip(),
+        'harness_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        'scope':__doc__,'populations':[]}
     with multiprocessing.Pool(args.workers,initializer=initialize,initargs=(args.core,web))as pool:
         for result in pool.imap_unordered(exercise_population,manifest['populations']):
             report['populations'].append(result);print(json.dumps({k:result[k]for k in ['population_id','observed','counts','elapsed_seconds']},ensure_ascii=False),flush=True)

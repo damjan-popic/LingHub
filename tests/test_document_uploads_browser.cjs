@@ -20,7 +20,7 @@ const api=async(path,options={})=>{
  }
  if(path==='/documents/doc-1'){
   const candidate=doc.options.translation_provider==='translategemma_sl_it',proposal=candidate?'Bozza italiana sintetica.':'Čebelica.';
-  doc.state=window.partialFixture?'failed':'complete';doc.processed=1;saved[0].state=doc.state;Object.assign(doc.sections[0],{state:'complete',family_id:'family-1',output:candidate?'Bozza da controllare.\n\n'+proposal:'Predlog: Čebelica.',document_result:{mode:doc.options.mode,status:'draft',proposed_text:proposal,edits:[],requires_human_review:true},limitations:window.partialFixture?[{code:'document_transform_failed'}]:[]});return structuredClone(doc);
+  doc.state=window.partialFixture||window.nativeFailedFixture?'failed':'complete';doc.processed=1;saved[0].state=doc.state;Object.assign(doc.sections[0],{state:window.nativeFailedFixture?'failed':'complete',family_id:'family-1',output:window.nativeFailedFixture?'Incomplete provider operation retained.':candidate?'Bozza da controllare.\n\nPRIVATE_REPEATED_TEST_NOTE\nPRIVATE_REPEATED_SOURCE_NOTE\nPRIVATE_REPEATED_INLINE_NOTE\n\n'+proposal:'Predlog: Čebelica.',document_result:window.nativeFailedFixture?null:{mode:doc.options.mode,status:'draft',proposed_text:proposal,edits:[],requires_human_review:true},limitations:window.partialFixture||window.nativeFailedFixture?[{code:'document_transform_failed'}]:[]});return structuredClone(doc);
  }
  if(path.endsWith('/delete')){saved=[];doc=null;return {acknowledged:true};}
  if(path.includes('/export/'))return new Blob(['Original/draft report fixture']);
@@ -33,6 +33,8 @@ const ui=documentUploads({root:document.getElementById('workspace'),api,locale:(
 window.ui=ui;window.changeLocale=value=>{locale=value;ui.locale();};
 window.showReplayWarning=()=>{doc.warnings.push('document_repeated_translation');document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
 window.showPartialReview=()=>{window.partialFixture=true;doc.options.mode='review';doc.warnings=[];document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
+window.fixtureSnapshot=()=>structuredClone(doc);
+window.showNativeFailure=()=>{window.nativeFailedFixture=true;document.querySelector('[data-document-list]').dispatchEvent(new Event('change'));};
 ui.session({documents:{enabled:true}});
 `;
 (async()=>{
@@ -57,6 +59,7 @@ ui.session({documents:{enabled:true}});
   await page.locator('.document-options button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Predlog: Čebelica.'));
   const section=page.locator('.document-section');assert.equal(await section.locator('pre').textContent(),'Čebelica 🧑‍🏫 in človek. <script>window.pwned=true</script>');
+  assert.equal(await section.locator('div.document-text').textContent(),'Predlog: Čebelica.');
   assert.equal(await page.evaluate(()=>window.pwned),undefined);assert.equal(await page.locator('.document-section script').count(),0);
   await section.locator('button').click();assert.equal(await page.evaluate(()=>window.sourceOpened),'family-1');
   const start=await page.evaluate(()=>window.calls.find(c=>c.path.endsWith('/start')).body);
@@ -85,6 +88,10 @@ ui.session({documents:{enabled:true}});
   assert((await page.locator('.document-options').innerText()).includes(locale==='sl'?'brez vpogleda v terminološke vire KLIKai':'senza consultare fonti terminologiche KLIKai'));
   await page.locator('.document-options button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('[data-document-detail]')?.textContent.includes('Bozza italiana sintetica.'));
+  assert.equal(await page.locator('[data-native-scope-note]').count(),1);
+  assert.equal(await page.locator('.document-section div.document-text').textContent(),'Bozza italiana sintetica.');
+  assert(!(await page.locator('[data-document-detail]').innerText()).includes('PRIVATE_REPEATED_'));
+  assert((await page.evaluate(()=>window.fixtureSnapshot().sections[0].output)).includes('PRIVATE_REPEATED_SOURCE_NOTE'));
   const privateStart=await page.evaluate(()=>window.calls.filter(c=>c.path.endsWith('/start')).at(-1).body);
   assert.deepEqual({mode:privateStart.mode,source:privateStart.source_language,target:privateStart.target_language,provider:privateStart.translation_provider},{mode:'translate',source:'sl',target:'it',provider:'translategemma_sl_it'});
   assert(!Object.hasOwn(privateStart,'translation_profile'));
@@ -96,9 +103,13 @@ ui.session({documents:{enabled:true}});
   const simpleWordDownload=page.waitForEvent('download');await page.getByRole('button',{name:locale==='sl'?'Prenesite osnutek Word':'Scarica bozza Word',exact:true}).click();
   assert.equal((await simpleWordDownload).suggestedFilename(),'klikai-draft.docx');
   if(process.env.KLIKAI_DOCUMENT_UI_OUTPUT)await page.locator('#workspace').screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_UI_OUTPUT,`documents-private-sl-it-${locale}-${width}.png`)});
+  await page.evaluate(()=>window.showNativeFailure());
+  await page.waitForFunction(()=>document.querySelector('.document-section div.document-text')?.textContent==='Incomplete provider operation retained.');
+  assert.equal(await page.locator('[data-native-scope-note]').count(),1);
+  assert.equal(await page.locator('[data-clean-draft]').count(),0);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(errors,[]);
   await page.evaluate(()=>window.ui.reset());assert(await page.locator('#workspace').isHidden());assert.equal(await page.locator('#workspace').textContent(),'');
-  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,replayed_translation_blocks_word:true,private_sl_it_choice:true,browser_does_not_author_profile:true,clean_translation_txt_download:true,simple_word_download:true,logout_clears_text:true});await context.close();
+  checks.push({locale,width,status:'PASS',upload_preview:true,explicit_direction:true,progress:true,unicode_and_html_text_preserved:true,source_navigation:true,report_download:true,replayed_translation_blocks_word:true,private_sl_it_choice:true,browser_does_not_author_profile:true,clean_translation_txt_download:true,simple_word_download:true,native_scope_note_once:true,accepted_native_proposal_only:true,retained_raw_output_unchanged:true,failed_native_output_preserved:true,ordinary_output_unchanged:true,logout_clears_text:true});await context.close();
  }}finally{await browser.close();}
  console.log(JSON.stringify({status:'PASS',scope:'UI protocol fixtures only; no source or model calls',checks}));
 })().catch(error=>{console.error(error.stack);process.exit(1);});

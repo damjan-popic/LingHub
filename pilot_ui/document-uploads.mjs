@@ -50,7 +50,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
     if(summary.historical)panel.append(el('p',locale()==='it'?'Storico: questo riepilogo riguarda risultati precedenti.':'Zgodovinski: ta povzetek se nanaša na prejšnje ugotovitve.'));
     else if(summary.status==='available')for(const point of summary.output.points){
      const paragraph=el('p',point.text+' ');
-     for(const id of point.finding_ids){const link=el('a',id,{href:'#'+id});link.addEventListener('click',()=>{const detail=root.querySelector('#'+id);if(detail){detail.open=true;detail.closest('.document-section').open=true;}});paragraph.append(link,document.createTextNode(' '));}
+     for(const id of point.finding_ids){const finding=current.sections.flatMap(s=>s.document_result?.review?.findings||[]).find(f=>f.finding_id===id);const link=el('a',finding?.match.observed.text||(locale()==='it'?'Apri indicazione':'Odpri ugotovitev'),{href:'#'+id});link.addEventListener('click',()=>{const detail=root.querySelector('#'+id);if(detail){detail.open=true;detail.closest('.document-section').open=true;}});paragraph.append(link,document.createTextNode(' '));}
      panel.append(paragraph);
     }
     else panel.append(el('p',summary.status==='prepared'?(locale()==='it'?'Riepilogo pronto per la richiesta.':'Povzetek je pripravljen za zahtevo.'):(locale()==='it'?'Riepilogo non disponibile. Indicazioni e download rimangono disponibili.':'Povzetek ni na voljo. Ugotovitve in prenosi ostajajo na voljo.'),{class:'qualified-note'}));
@@ -107,7 +107,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
     for(const finding of review.findings){
      const detail=el('details',undefined,{'data-finding-id':finding.finding_id,id:finding.finding_id});
      detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen'))));
-     detail.append(el('p',finding.finding_id+' · '+finding.match.observed.start+'–'+finding.match.observed.end),el('p',finding.notice),el('blockquote',finding.source.focus.text));
+     detail.append(el('p',(locale()==='it'?'Posizione nella sezione: ':'Mesto v odseku: ')+finding.match.observed.start+'–'+finding.match.observed.end),el('p',finding.notice),el('blockquote',finding.source.focus.text));
      const advice=finding.source.recorded_advice;
      if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',adviceLabel(key,advice[key])));
      if(finding.source.untyped_context_limit)detail.append(el('p',locale()==='it'?'Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.':'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.',{class:'qualified-note'}));

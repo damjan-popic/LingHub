@@ -87,3 +87,15 @@ def test_short_recorded_form_precedes_longer_incidental_prose_but_not_a_longer_r
     assert any(v['kind']=='literal_phrase'for v in doc._documentary_review_occurrences(intro,t))
     assert doc._writer_source_priority(terminology,t)<doc._writer_source_priority(row,t)
     assert doc._writer_source_priority(row,t)<doc._writer_source_priority(intro,t)
+
+
+def test_wrapped_complete_example_line_remains_context_on_the_correct_side():
+    row=parent();row['capture']['original_text']='oblike za primer | ⇨ | ustrezna oblika\nustrezna oblika primera'
+    row['capture']['advice_units']=[]
+    incidental=term();incidental['capture']['term_entries']=[{'lang':'sl','term':'primera'}]
+    t=task('To je ustrezna oblika primera.')
+    assert {'text':'ustrezna oblika primera','kind':'recorded_line_form'}in doc._documentary_review_occurrences(row,t)
+    assert doc._writer_source_priority(row,t)<doc._writer_source_priority(incidental,t)
+    # An arbitrary fragment of a longer prose line is still lower priority.
+    row['capture']['original_text']='To je ustrezna oblika primera, ki velja samo v določenem kontekstu.'
+    assert all(v['kind']!='recorded_line_form'for v in doc._documentary_review_occurrences(row,t))

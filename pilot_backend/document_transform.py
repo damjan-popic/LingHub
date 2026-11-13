@@ -655,7 +655,7 @@ def _writer_source_priority(row,task):
     cue=_native_review_cue(row,task['source_text'],task['source_language'])
     if row.get('capture_kind')=='terminology_record'and cue>=2:
         return (0,-_literal_term_length(row,task['source_text'],task['source_language']),0)
-    recorded=[value for value in documentary if value['kind']in {'recorded_table_form','recorded_advice_phrase'}]
+    recorded=[value for value in documentary if value['kind']in {'recorded_table_form','recorded_advice_phrase','recorded_line_form'}]
     if recorded or cue>=2:
         # Whole recorded forms compete with explicit terminology, without
         # interpreting either side of a table as an executable correction.
@@ -702,6 +702,13 @@ def _documentary_review_occurrences(row,task):
                     for advice in raw.get('advice_units')or[])
                 result.append({'text':phrase,'kind':'recorded_advice_phrase'if in_advice else'literal_phrase'})
     for line in original.splitlines():
+        surface=line.strip()
+        if (surface and len(surface)<=200 and len(LOOKUP_WORD_RE.findall(surface))<=6
+                and any(len(word)>=4 for word in LOOKUP_WORD_RE.findall(surface))
+                and any(_surface_occurrences(surface,task['source_text']))):
+            # A wrapped table example may be a whole line without its arrow.
+            # Its literal presence nominates the complete parent, not an edit.
+            result.append({'text':surface,'kind':'recorded_line_form'})
         if line.count(' | ⇨ | ')!=1:continue
         for surface in line.split(' | ⇨ | '):
             surface=surface.strip()

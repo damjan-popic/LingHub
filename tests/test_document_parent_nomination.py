@@ -75,3 +75,15 @@ def test_explicit_term_wins_a_same_length_tie_over_contextual_source_text():
     row=parent();terminology=term();terminology['capture']['term_entries']=[{'lang':'sl','term':'v prid manjšine'}]
     t=task('Predlog je v prid manjšine.')
     assert doc._writer_source_priority(terminology,t)<doc._writer_source_priority(row,t)
+
+
+def test_short_recorded_form_precedes_longer_incidental_prose_but_not_a_longer_real_term():
+    row=parent();row['capture']['original_text']='zapis | ⇨ | zapisati'
+    row['capture']['advice_units']=[]
+    intro=parent();intro['capture']['original_text']='Ta uvod je namenjen pregledu.'
+    intro['capture']['advice_units']=[]
+    terminology=term();terminology['capture']['term_entries']=[{'lang':'sl','term':'analiza podatkov'}]
+    t=task('Zapis je namenjen Ani; analiza podatkov ostaja ločena.')
+    assert any(v['kind']=='literal_phrase'for v in doc._documentary_review_occurrences(intro,t))
+    assert doc._writer_source_priority(terminology,t)<doc._writer_source_priority(row,t)
+    assert doc._writer_source_priority(row,t)<doc._writer_source_priority(intro,t)

@@ -655,11 +655,16 @@ def _writer_source_priority(row,task):
     cue=_native_review_cue(row,task['source_text'],task['source_language'])
     if row.get('capture_kind')=='terminology_record'and cue>=2:
         return (0,-_literal_term_length(row,task['source_text'],task['source_language']),0)
-    strong=[value for value in documentary if value['kind']in {'literal_phrase','recorded_table_form'}]
-    if strong or cue>=2:
-        # A lone common word cannot displace a genuine terminology phrase.
-        # Whole recorded table forms and literal phrases only nominate context.
-        return (0,-max((len(value['text'])for value in strong or documentary),default=0),1)
+    recorded=[value for value in documentary if value['kind']in {'recorded_table_form','recorded_advice_phrase'}]
+    if recorded or cue>=2:
+        # Whole recorded forms compete with explicit terminology, without
+        # interpreting either side of a table as an executable correction.
+        return (0,-max((len(value['text'])for value in recorded or documentary),default=0),1)
+    phrases=[value for value in documentary if value['kind']=='literal_phrase']
+    if phrases:
+        # Longer incidental prose (for example "is intended for") must not
+        # crowd out a short actual source-table entry in the document.
+        return (1,-max(len(value['text'])for value in phrases),1)
     original=' '.join((row.get('capture',{}).get('original_text')or'').split())
     if task['mode']=='review'and row.get('source_slug')=='sp2001'and row.get('capture_kind')=='resource_record':
         for index,heading in enumerate(REVIEW_REFERENCE_HEADINGS):
@@ -692,7 +697,10 @@ def _documentary_review_occurrences(row,task):
         for offset in range(len(tokens)-count+1):
             phrase=task['source_text'][tokens[offset].start():tokens[offset+count-1].end()]
             if not any(word in phrase for word in words):continue
-            if any(_surface_occurrences(phrase,original)):result.append({'text':phrase,'kind':'literal_phrase'})
+            if any(_surface_occurrences(phrase,original)):
+                in_advice=any(any(_surface_occurrences(phrase,original[advice['source_span']['char_start']:advice['source_span']['char_end']]))
+                    for advice in raw.get('advice_units')or[])
+                result.append({'text':phrase,'kind':'recorded_advice_phrase'if in_advice else'literal_phrase'})
     for line in original.splitlines():
         if line.count(' | ⇨ | ')!=1:continue
         for surface in line.split(' | ⇨ | '):

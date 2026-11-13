@@ -15,6 +15,15 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
  const tr=key=>messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
  const stateLabel=state=>({sl:{draft:'Pripravljeno',queued:'Čaka',running:'V obdelavi',complete:'Končano',failed:'Ni uspelo',cancelled:'Ustavljeno',pending:'Čaka',unknown:'Ni obdelano'},it:{draft:'Pronto',queued:'In attesa',running:'In corso',complete:'Terminato',failed:'Non riuscito',cancelled:'Interrotto',pending:'In attesa',unknown:'Non elaborato'}}[locale()==='it'?'it':'sl'][state]||tr(state));
+ const reviewCheckLabel=check=>{
+  const it=locale()==='it',names={captured_source_forms:['Zapisi iz virov','Forme registrate nelle fonti'],comma_prediction:['Namensko preverjanje vejic','Controllo dedicato delle virgole'],recorded_morphology:['Zapisani oblikoslovni kandidati','Candidati morfologici registrati'],source_discovery:['Iskanje virov','Ricerca delle fonti'],general_linguistic_correctness:['Celovita jezikovna pravilnost','Correttezza linguistica complessiva']};
+  const states={completed:['Opravljeno v navedenem obsegu','Eseguito nel solo ambito dichiarato'],completed_no_issue:['Preverjanje ni javilo težave','Nessun problema segnalato dal controllo'],applied_existing_contract:['Predlog iz obstoječe izvedljive uporabe','Proposta giustificata da un’applicazione esistente'],unresolved_proposal:['Nerazrešen predlog; izvirnik ohranjen','Proposta irrisolta; originale conservato'],failed:['Obdelava ni uspela','Operazione non riuscita'],not_run:['Ni opravljeno','Non eseguito'],outside_coverage:['Zunaj obsega','Fuori copertura'],partial:['Delni obseg','Copertura parziale']};
+  return (names[check.check_id]||['Preverjanje','Controllo'])[it?1:0]+' · '+(states[check.status]||['Podrobnosti v poročilu','Dettagli nel rapporto'])[it?1:0];
+ };
+ const adviceLabel=(key,value)=>{
+  const it=locale()==='it',labels={recommendation_with_exception:['Priporočilo z izjemo','Raccomandazione con eccezione'],context_dependent:['Odvisno od sobesedila','Dipende dal contesto'],qualified_explanation:['Razlaga z omejenim obsegom','Spiegazione con ambito limitato'],proposed_needs_review:['Predlagana uredniška povezava; še ni pregledana','Associazione editoriale proposta; ancora da revisionare']};
+  return labels[value]?.[it?1:0]||(key==='recommendation_force'?(it?'La forza della raccomandazione è descritta nella fonte.':'Moč priporočila je opisana v viru.'):key==='mapping_status'?(it?'Stato editoriale descritto nella fonte.':'Uredniško stanje je opisano v viru.'):String(value));
+ };
  const sectionLabel=section=>section.document_result?.status==='not_reviewed'?(locale()==='it'?'Non revisionato':'Ni pregledano'):stateLabel(section.state);
  const el=(tag,text,attrs={})=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;};
  const label=(parent,text,input)=>{const n=el('label',text);n.append(input);parent.append(n);return input;};
@@ -100,14 +109,14 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
      detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen'))));
      detail.append(el('p',finding.finding_id+' · '+finding.match.observed.start+'–'+finding.match.observed.end),el('p',finding.notice),el('blockquote',finding.source.focus.text));
      const advice=finding.source.recorded_advice;
-     if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',String(advice[key])));
-     if(finding.source.untyped_context_limit)detail.append(el('p',finding.source.untyped_context_limit,{class:'qualified-note'}));
+     if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',adviceLabel(key,advice[key])));
+     if(finding.source.untyped_context_limit)detail.append(el('p',locale()==='it'?'Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.':'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.',{class:'qualified-note'}));
      if(finding.proposed_edit)detail.append(el('p',finding.proposed_edit.original+' → '+finding.proposed_edit.replacement));
      if(section.family_id)button(detail,locale()==='it'?'Apri indicazione e fonti':'Odpri ugotovitev in vire',()=>openFamily(section.family_id));
      item.append(detail);
     }
     const checks=el('details');checks.append(el('summary',locale()==='it'?'Controlli svolti e copertura':'Opravljena preverjanja in obseg'));
-    for(const check of review.checks)checks.append(el('p',check.check_id+' · '+check.status+' · '+check.scope));
+    for(const check of review.checks)checks.append(el('p',reviewCheckLabel(check)));
     item.append(checks);
    }
    if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));

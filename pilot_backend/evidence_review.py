@@ -96,8 +96,14 @@ def report_blocks(review,locale='sl'):
         yield 'quote',source['focus']['text']
         for key,label in [('recommendation_force','Moč priporočila'),('scope_note','Obseg in izjeme'),
                           ('application_scope_note','Pogoji uporabe'),('mapping_status','Uredniško stanje')]:
-            if advice.get(key):yield 'body',label+': '+str(advice[key])
-        if source.get('untyped_context_limit'):yield 'body',source['untyped_context_limit']
+            if advice.get(key):
+                labels={'recommendation_with_exception':('Raccomandazione con eccezione','Priporočilo z izjemo'),
+                    'context_dependent':('Dipende dal contesto','Odvisno od sobesedila'),
+                    'qualified_explanation':('Spiegazione con ambito limitato','Razlaga z omejenim obsegom'),
+                    'proposed_needs_review':('Associazione editoriale proposta; ancora da revisionare','Predlagana uredniška povezava; še ni pregledana')}
+                value=labels.get(str(advice[key]))
+                yield 'body',label+': '+(value[0 if it else 1]if value else str(advice[key]))
+        if source.get('untyped_context_limit'):yield 'body',('Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.'if it else'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.')
     yield 'subheading','Controlli e limiti'if it else'Preverjanja in omejitve'
     names={'captured_source_forms':('Forme registrate nelle fonti','Zapisi iz virov'),
         'comma_prediction':('Controllo dedicato delle virgole','Namensko preverjanje vejic'),

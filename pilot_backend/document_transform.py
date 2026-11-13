@@ -651,23 +651,68 @@ def _native_term_surfaces(capture, source_language=None):
 
 
 def _writer_source_priority(row,task):
+    documentary=_documentary_review_occurrences(row,task)
     cue=_native_review_cue(row,task['source_text'],task['source_language'])
-    if cue>=2:return (0,-_literal_term_length(row,task['source_text'],task['source_language']))
+    if row.get('capture_kind')=='terminology_record'and cue>=2:
+        return (0,-_literal_term_length(row,task['source_text'],task['source_language']),0)
+    strong=[value for value in documentary if value['kind']in {'literal_phrase','recorded_table_form'}]
+    if strong or cue>=2:
+        # A lone common word cannot displace a genuine terminology phrase.
+        # Whole recorded table forms and literal phrases only nominate context.
+        return (0,-max((len(value['text'])for value in strong or documentary),default=0),1)
     original=' '.join((row.get('capture',{}).get('original_text')or'').split())
     if task['mode']=='review'and row.get('source_slug')=='sp2001'and row.get('capture_kind')=='resource_record':
         for index,heading in enumerate(REVIEW_REFERENCE_HEADINGS):
             if heading in original:return (1,index)
-    return (2 if cue else 3,0)
+    return (2 if cue or documentary else 3,0)
+
+
+def _documentary_review_occurrences(row,task):
+    """Literal full-parent context, without inventing a rule or intended sense.
+
+    Some source tables have valid entries outside their enriched advice spans.
+    Restricting nomination to those spans loses the rest of the recorded parent
+    and the correct-form side of an example. Keep the parent and all its force,
+    conditions and alternatives; normal CORE rights/support/budget checks remain.
+    """
+    if task['mode']!='review'or row.get('capture_kind')!='resource_record':return []
+    if row.get('context_eligible')is False or row.get('rights_mode')in {'linked_only','metadata_only','unknown'}:return []
+    raw=row.get('capture')or{};original=raw.get('original_text')
+    if raw.get('language')!=task['source_language']or not isinstance(original,str):return []
+    for advice in raw.get('advice_units')or[]:
+        span=advice.get('source_span')or{};a,b=span.get('char_start'),span.get('char_end')
+        if (type(a)is not int or type(b)is not int or not 0<=a<b<=len(original)
+                or sha_text(original[a:b])!=span.get('text_sha256')):return []
+    # Existing bounded lexical surfaces nominate context only. Avoid partial
+    # words and do not turn original quotations into correction instructions.
+    words=dict.fromkeys(re.findall(r'[^\W\d_]{4,}',task['source_text'],re.UNICODE))
+    result=[{'text':word,'kind':'literal_word'}for word in words if any(_surface_occurrences(word,original))]
+    tokens=list(LOOKUP_WORD_RE.finditer(task['source_text']))
+    for count in range(2,7):
+        for offset in range(len(tokens)-count+1):
+            phrase=task['source_text'][tokens[offset].start():tokens[offset+count-1].end()]
+            if not any(word in phrase for word in words):continue
+            if any(_surface_occurrences(phrase,original)):result.append({'text':phrase,'kind':'literal_phrase'})
+    for line in original.splitlines():
+        if line.count(' | ⇨ | ')!=1:continue
+        for surface in line.split(' | ⇨ | '):
+            surface=surface.strip()
+            if (surface and len(surface)<=200 and len(LOOKUP_WORD_RE.findall(surface))<=6
+                    and any(_surface_occurrences(surface,task['source_text']))):
+                result.append({'text':surface,'kind':'recorded_table_form'})
+    return result
 
 
 def _review_writer_selection(task, matches):
     """Nominate whole source parents by exact native fields, never edit text."""
     direct = [row['evidence_id'] for row in matches
               if row.get('context_eligible') is not False and row.get('rights_mode') != 'linked_only'
-              and _native_review_cue(row, task['source_text'], task['source_language']) >= 2]
+              and (_native_review_cue(row, task['source_text'], task['source_language']) >= 2
+                   or _documentary_review_occurrences(row,task))]
     if not direct:
         return None
-    return {'basis': 'recorded_source_language_term_or_advice_occurrence', 'status': 'partial',
+    return {'basis': ('document_complete_parent_context_nomination_v2'if task['mode']=='review'else
+                     'recorded_source_language_term_or_advice_occurrence'), 'status': 'partial',
         'scope': 'whole_parent_candidates_not_applicability_or_preference',
         'eligible_evidence_ids': direct,
         'excluded_evidence_ids': [row['evidence_id'] for row in matches
@@ -682,6 +727,13 @@ def _selection_notice(task, selection):
             'Gli altri risultati e le incertezze restano disponibili; non è una verifica linguistica completa.'
             if task['locale']=='it'else'Prevajalnik prejme le izbrane cele zapise iz shranjenega vhoda. '
             'Drugi zadetki in negotovosti ostanejo na voljo; to ni celovito jezikovno preverjanje.')
+    if selection.get('basis')=='document_complete_parent_context_nomination_v2':
+        return ('La revisione usa record terminologici e testi documentari completi con espressioni presenti nel brano. '
+            'La corrispondenza seleziona materiale di contesto, non stabilisce che una regola o un consiglio sia applicabile. '
+            'Non copre tutti gli aspetti linguistici; gli altri risultati restano consultabili.'if task['locale']=='it'else
+            'Pregled uporablja terminološke zapise in cela dokumentarna besedila z izrazi iz odseka. '
+            'Ujemanje izbere gradivo za kontekst, ne potrjuje uporabnosti pravila ali priporočila. '
+            'Ne zajema vseh jezikovnih lastnosti; drugi zadetki ostajajo na voljo za pregled.')
     return ('La revisione considera solo i record con una corrispondenza letterale '
         'nei campi terminologici o nelle indicazioni della fonte. Non copre tutti '
         'gli aspetti linguistici; gli altri record trovati restano consultabili.'

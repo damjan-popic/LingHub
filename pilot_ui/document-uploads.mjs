@@ -112,7 +112,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
      if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',adviceLabel(key,advice[key])));
      if(finding.source.untyped_context_limit)detail.append(el('p',locale()==='it'?'Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.':'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.',{class:'qualified-note'}));
      if(finding.proposed_edit)detail.append(el('p',finding.proposed_edit.original+' → '+finding.proposed_edit.replacement));
-     if(section.family_id)button(detail,locale()==='it'?'Apri indicazione e fonti':'Odpri ugotovitev in vire',()=>openFamily(section.family_id));
+     if(section.family_id)button(detail,locale()==='it'?'Apri la fonte completa':'Odpri celotni vir',()=>openFamily(section.family_id,{sourceId:finding.source.evidence_id}));
      item.append(detail);
     }
     const checks=el('details');checks.append(el('summary',locale()==='it'?'Controlli svolti e copertura':'Opravljena preverjanja in obseg'));

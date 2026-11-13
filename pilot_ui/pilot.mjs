@@ -343,7 +343,7 @@ function renderFamily(family,{pushURL=false}={}) {
   $('retry-answer').hidden=!beta()||!['failed','cancelled'].includes(jobState(family.short));
   setURL(pushURL);
 }
-async function loadFamily(id,{push=false}={}) {saveComposer();submissionRequest++;state.submitting=false;const request=++familyRequest,boot=state.boot;if(id!==familyId())clearFeedbackContext();const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));if(request!==familyRequest||boot!==state.boot)return null;restoreComposer(data);state.longOpen=false;renderFamily(data,{pushURL:push});for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
+async function loadFamily(id,{push=false,sourceId=null}={}) {saveComposer();submissionRequest++;state.submitting=false;const request=++familyRequest,boot=state.boot;if(id!==familyId())clearFeedbackContext();const data=unwrapFamily(await api('/families/'+encodeURIComponent(id)));if(request!==familyRequest||boot!==state.boot)return null;restoreComposer(data);state.longOpen=false;renderFamily(data,{pushURL:push});if(sourceId)await openSource(data.short||{},sourceId,'short',{unusedMatch:true});for(const tier of ['short','long'])if(pendingStates.has(jobState(data[tier]))&&data[tier]?.job_id)pollJob(data[tier].job_id,id,tier);return data;}
 async function loadFeedback(){const boot=state.boot;const data=await api('/feedback');if(boot!==state.boot)return;for(const f of data.feedback||data.items||data||[])if(f.run_id)state.feedback.set(f.run_id,f);state.feedbackEvents.clear();}
 function setJob(job,tier) {
   const waitStarted=state.job?.job_id===job.job_id?state.job.waitStarted:performance.now();state.job={...job,tier,waitStarted};

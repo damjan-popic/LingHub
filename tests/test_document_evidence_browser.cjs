@@ -5,7 +5,7 @@ const harness=String.raw`
 import {documentUploads} from '/document-uploads.mjs';
 const id='Faaaaaaaaaaaaaaaaaaaaaaaa';
 const finding={finding_id:id,type:'qualified_advice',included_in_draft:false,notice:'Uporabnost ostaja nerazrešena.',
- match:{observed:{start:0,end:8,text:'Izvirnik'}},source:{focus:{text:'Celotno priporočilo. Izjema velja za pomoč osebe. <script>window.pwned=true</script>'},
+ match:{observed:{start:0,end:8,text:'Izvirnik'}},source:{evidence_id:'E1',focus:{text:'Celotno priporočilo. Izjema velja za pomoč osebe. <script>window.pwned=true</script>'},
  recorded_advice:{recommendation_force:'recommendation_with_exception',scope_note:'Ohrani izjemo in alternative.',mapping_status:'proposed_needs_review'}}};
 const doc={document_id:'doc-1',name:'review.docx',state:'complete',options:{mode:'review',review_strategy:'evidence_review_v1'},warnings:[],processed:1,total:1,
  review_manifest:{counts:{qualified_advice:1,recorded_contrast:0,recorded_form_context:0,executable_application:0}},
@@ -15,7 +15,7 @@ const doc={document_id:'doc-1',name:'review.docx',state:'complete',options:{mode
 window.opened=null;window.downloads=[];
 const api=async(url,options={})=>{if(url==='/documents')return {documents:[{document_id:'doc-1',name:doc.name,state:doc.state}]};
  if(url==='/documents/doc-1')return structuredClone(doc);if(url.includes('/draft/')){window.downloads.push(url);return new Blob(['unchanged draft']);}throw Error(url);};
-const ui=documentUploads({root:document.querySelector('#workspace'),api,locale:()=>document.documentElement.lang,openFamily:id=>{window.opened=id;},errorText:e=>e.message});
+const ui=documentUploads({root:document.querySelector('#workspace'),api,locale:()=>document.documentElement.lang,openFamily:(id,options)=>{window.opened=id;window.sourceOptions=options;},errorText:e=>e.message});
 ui.session({documents:{enabled:true,evidence_review:true,editorial_summary:true}});
 `;
 (async()=>{const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage']});const checks=[];
@@ -31,7 +31,7 @@ assert.equal(await page.locator('[data-document-review-counts]').textContent(),(
 await page.locator('a[href="#Faaaaaaaaaaaaaaaaaaaaaaaa"]').click();
 assert.equal(await page.locator('[data-finding-id]').evaluate(n=>n.open),true);
 assert.match(await page.locator('[data-finding-id]').textContent(),/Izjema velja za pomoč osebe/);assert.equal(await page.evaluate(()=>window.pwned),undefined);
-await page.locator('[data-finding-id] button').click();assert.equal(await page.evaluate(()=>window.opened),'family-1');
+await page.locator('[data-finding-id] button').click();assert.equal(await page.evaluate(()=>window.opened),'family-1');assert.equal(await page.evaluate(()=>window.sourceOptions.sourceId),'E1');
 assert.equal(await page.locator('[data-clean-draft]').count(),1);assert.deepEqual(errors,[]);
 const overflow=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(n=>n.getBoundingClientRect().right>innerWidth+1).map(n=>({tag:n.tagName,cls:n.className,width:n.getBoundingClientRect().width,text:n.textContent.slice(0,80)})).slice(-8));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,JSON.stringify(overflow));
 if(process.env.KLIKAI_EVIDENCE_SCREENSHOTS){await page.screenshot({path:path.join(process.env.KLIKAI_EVIDENCE_SCREENSHOTS,`review-${locale}-${width}.png`),fullPage:true});}

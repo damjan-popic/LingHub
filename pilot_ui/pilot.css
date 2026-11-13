@@ -76,3 +76,6 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 .document-section{margin:.75rem 0;padding:.75rem;border:1px solid #dce2e0;border-radius:.5rem}
 .document-section summary{cursor:pointer;overflow-wrap:anywhere}
 .document-text{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-width:100%}
+
+.document-section p,.document-section blockquote,[data-document-detail] p{overflow-wrap:anywhere}
+.document-section blockquote{white-space:pre-wrap;margin:1rem 0}

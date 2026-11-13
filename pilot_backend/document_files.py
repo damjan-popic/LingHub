@@ -338,6 +338,18 @@ def _report_blocks(report):
     if report.get('saved_result_url'):
         yield 'body',('Risultato salvato sul servizio KLIKai originale; richiede l’accesso con lo stesso account.'if it else'Shranjeni rezultat na izvornem primerku KLIKai; potrebna je prijava z istim računom.')
         yield 'link',('Apri documento salvato'if it else'Odpri shranjeni dokument',report['saved_result_url'])
+    if report.get('review_manifest'):
+        overview=report['review_manifest'];counts=overview['counts']
+        yield 'subheading','Panoramica deterministica'if it else'Serverjev pregled ugotovitev'
+        yield 'body',('Indicazioni / confronti / contesto / modifiche: 'if it else'Priporočila / primerjave / kontekst / spremembe: ')+str(counts['qualified_advice'])+' / '+str(counts['recorded_contrast'])+' / '+str(counts['recorded_form_context'])+' / '+str(counts['executable_application'])
+        yield 'body',('Nessun autore generativo usato per il riesame. Le indicazioni non stabiliscono automaticamente un errore; la copertura è limitata.'if it else'Pri pregledu generativni pisec ni bil uporabljen. Nasveti ne pomenijo samodejno ugotovljene napake; obseg je omejen.')
+        summary=report.get('editorial_summary')
+        if summary:
+            yield 'subheading','Riepilogo editoriale IA facoltativo'if it else'Neobvezen uredniški povzetek z umetno inteligenco'
+            if summary.get('historical'):yield 'body','Storico: riguarda una revisione precedente.'if it else'Zgodovinski: nanaša se na prejšnjo revizijo ugotovitev.'
+            elif summary.get('status')=='available':
+                for point in summary['output']['points']:yield 'body',point['text']+' ['+', '.join(point['finding_ids'])+']'
+            else:yield 'body','Non disponibile. Risultati e download restano validi nel loro ambito.'if it else'Ni na voljo. Ugotovitve in prenosi ostajajo na voljo v navedenem obsegu.'
     sections=report.get('sections',[])
     repeated=repeated_translation_sections(sections)
     failed_operations=any(failed_document_operation(s)for s in sections)
@@ -403,6 +415,9 @@ def _report_blocks(report):
                 'qualified_source_guidance_supplied':('Il traduttore ha ricevuto i brani KLIKai con le loro qualificazioni; l’applicazione e il significato richiedono verifica.','Prevajalnik je prejel odlomke KLIKai z njihovimi omejitvami; uporabo in pomen je treba preveriti.'),
                 'semantic_inline_alignment_not_supported':('Questo percorso non associa espressioni tradotte a collegamenti o enfasi originali.','Ta pot ne povezuje prevedenih izrazov s povezavami ali poudarki v izvirniku.')}
             yield 'body',known.get(note,(note,note))[0 if it else 1]
+        if result.get('review'):
+            from .evidence_review import report_blocks
+            yield from report_blocks(result['review'],report.get('locale','sl'))
         sources=section.get('sources')or[]
         if section.get('writer_input_selection')=='unknown':
             yield 'body',('La selezione delle fonti inviate al modello non è ricostruibile dai dati conservati. Non viene dedotta dall’elenco dei risultati trovati.'if it else'Iz shranjenih podatkov ni mogoče ugotoviti izbora virov, poslanih modelu. Izbora ne sklepamo iz seznama najdenih zadetkov.')
@@ -430,7 +445,9 @@ def _report_blocks(report):
                 number=source.get('local_number')or next(i+1 for i,s in enumerate(sources)if s is source)
                 yield 'body','['+str(number)+'] '+title
                 if rows is contextual:
-                    roles={'writer_input_context':('Fonte inclusa nell’input conservato del modello; uso in una specifica conclusione non attestato.','Vir je v shranjenem vhodu modela; uporaba pri posameznem sklepu ni potrjena.'),
+                    roles={'finding_evidence':('Fonte della specifica indicazione; nessun autore generativo invocato.','Vir navedene ugotovitve; generativni pisec ni bil poklican.'),
+                           'review_context':('Contesto trovato nel riesame delle fonti; nessuna conclusione specifica associata.','Kontekst, najden pri pregledu virov; brez povezave s posameznim sklepom.'),
+                           'writer_input_context':('Fonte inclusa nell’input conservato del modello; uso in una specifica conclusione non attestato.','Vir je v shranjenem vhodu modela; uporaba pri posameznem sklepu ni potrjena.'),
                            'retrieval_context':('Materiale trovato, escluso dall’input conservato del modello.','Najdeno gradivo, ki ni bilo v shranjenem vhodu modela.'),
                            'selection_unknown':('Selezione per l’input del modello sconosciuta.','Izbor za vhod modela ni znan.')}
                     yield 'body',roles.get(source.get('report_role'),roles['selection_unknown'])[0 if it else 1]

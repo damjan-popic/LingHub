@@ -45,7 +45,7 @@ def sha_text(text):
 
 
 def task_checked(value):
-    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope','translation_profile','translation_request_id','document_binding'} != TASK_FIELDS:
+    if not isinstance(value, dict) or set(value) - {'inline_spans', 'translation_context', 'review_scope','translation_profile','translation_request_id','document_binding','review_strategy','document_revision','document_location'} != TASK_FIELDS:
         raise Failure('invalid_request')
     mode, source, target, locale = (value[k] for k in
         ('mode', 'source_language', 'target_language', 'locale'))
@@ -71,6 +71,10 @@ def task_checked(value):
                 or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',binding['document_id'])
                 or type(binding['section_index'])is not int or not 0<=binding['section_index']<=99):
             raise Failure('invalid_request')
+    if 'review_strategy'in value and (value['review_strategy']!='evidence_review_v1'or mode!='review'or source!='sl'):
+        raise Failure('invalid_request')
+    if 'document_revision'in value and (not re.fullmatch(r'[0-9a-f]{64}',str(value['document_revision']))or not isinstance(value.get('document_location'),str)):
+        raise Failure('invalid_request')
     if 'review_scope' in value and (mode != 'review' or value['review_scope'] != 'non_comma'):
         raise Failure('invalid_request')
     spans = value.get('inline_spans', [])
@@ -417,7 +421,7 @@ def _comma_bundle(bundle):
     return value
 
 
-def _freeze_comma_review(gateway, task, policy):
+def _freeze_comma_review(gateway, task, policy, *, writer_free=False):
     """Use the existing source-bound checker for a literal server-owned task.
 
     The interpreter sees a fixed operation frame. Bind the complete operand
@@ -458,7 +462,8 @@ def _freeze_comma_review(gateway, task, policy):
         explicit = {'question': question, 'original_question': question, 'context': '',
             'locale': task['locale'], 'input_language': 'sl', 'task': 'reference',
             'request_options': {}}
-        frozen = comma_tasks.freeze(BoundGateway(), explicit, policy)
+        frozen = (comma_tasks.freeze(BoundGateway(),explicit,policy,writer_free=True)if writer_free
+                  else comma_tasks.freeze(BoundGateway(),explicit,policy))
     captured = frozen['bundle'] if frozen is not None else None
     if captured is not None:
         comma_tasks.checked(captured)
@@ -561,7 +566,7 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
         'elapsed_ms': round((time.monotonic() - started) * 1000, 3),
         'discovery_basis': 'bounded_overlapping_source_windows_v2', 'query': query,
         'input_discovery': discovery}
-    selection = _review_writer_selection(task, found)
+    selection = None if task.get('review_strategy')=='evidence_review_v1'else _review_writer_selection(task, found)
     if selection:
         retrieval.update(status='partial', writer_evidence_selection=deepcopy(selection))
     reader = {'contract': unified.CONTRACT, 'task': 'reference',
@@ -810,6 +815,26 @@ def freeze(gateway, family, policy):
     task = task_checked((family.get('request_options') or {}).get('document_task'))
     if task['locale'] != family['locale'] or task['source_language'] != family['input_language']:
         raise Failure('invalid_request')
+    if task.get('review_strategy')=='evidence_review_v1':
+        comma,preflight=_freeze_comma_review(gateway,task,policy,writer_free=True)
+        general=_freeze_general(gateway,family,policy,comma_preflight=preflight)
+        body=general['bundle'];body.pop('snapshot_sha256')
+        body['review_route']='writer_independent_evidence_review'
+        captured=(_comma_bundle(comma['bundle'])or{})if comma is not None else preflight or{}
+        body['review_observations']={'comma':deepcopy(captured.get('observation')),
+            'comma_operation':{key:deepcopy(captured[key])for key in ('status','authorization','task')if key in captured}}
+        observation=captured.get('observation')or{}
+        if observation.get('status')=='ok'and observation.get('edits'):
+            comma_task=captured.get('task')or{}
+            question='Preveri vejice: '+task['source_text']
+            syntax,observed=unified.collect_tools(gateway,{'question':question,'original_question':question,
+                'context':'','input_language':task['source_language'],'locale':task['locale'],
+                'request_plan':{'comma_check':comma_task}},comma_observation=observation)
+            body['review_observations']['syntax']=deepcopy(syntax)
+            body['review_observations']['syntax_collection']=observed
+        body['snapshot_sha256']=digest(body)
+        general['identity']['captured_response_sha256']=body['snapshot_sha256']
+        return general
     comma, preflight = _freeze_comma_review(gateway, task, policy)
     general = _freeze_general(gateway, family, policy, comma_preflight=preflight)
     if comma is None:
@@ -873,7 +898,7 @@ def checked_result(value):
         return None
     required = {'mode', 'source_sha256', 'source_language', 'target_language',
                 'locale', 'proposed_text', 'edits', 'notes', 'requires_human_review', 'status'}
-    if not isinstance(value, dict) or set(value) - {'validation_scope', 'inline_mappings'} != required:
+    if not isinstance(value, dict) or set(value) - {'validation_scope', 'inline_mappings','review'} != required:
         invalid()
     if (not isinstance(value['mode'], str) or value['mode'] not in {'review', 'translate'}
             or not isinstance(value['source_language'], str) or value['source_language'] not in {'sl', 'it'}
@@ -898,12 +923,16 @@ def checked_result(value):
             if value['status'] == 'not_reviewed' else
             {'structure_exact_source_spans_source_membership_and_protected_content_only',
              'translation_structure_and_protected_content_only',
-             'source_bound_comma_applications_only', 'mixed_source_bound_document_review'})
+             'source_bound_comma_applications_only', 'mixed_source_bound_document_review','evidence_review_existing_applications'})
         if not isinstance(value['validation_scope'], str) or value['validation_scope'] not in allowed_scopes:
             invalid()
         if value['validation_scope']=='translation_structure_and_protected_content_only'and(
                 value['mode']!='translate'or value['source_language']!='sl'or value['target_language']!='it'):
             invalid()
+    if 'review'in value:
+        from .evidence_review import checked as checked_review
+        checked_review(value['review'])
+        if value.get('validation_scope')!='evidence_review_existing_applications':invalid()
     for edit in value['edits']:
         if not isinstance(edit, dict) or set(edit) != {
                 'start', 'end', 'original', 'replacement', 'explanation', 'evidence_ids', 'support_quote'}:
@@ -963,6 +992,10 @@ def validate_document_result(value, task, matches):
             ('mode', 'source_sha256', 'source_language', 'target_language', 'locale')):
         invalid()
     text = task['source_text']
+    if task.get('review_strategy')=='evidence_review_v1':
+        from .evidence_review import checked as checked_review
+        checked_review(value.get('review'),text,task,matches)
+    elif 'review'in value:invalid()
     last, rendered = 0, []
     for edit in value['edits']:
         a, b, ids = edit['start'], edit['end'], edit['evidence_ids']
@@ -1166,6 +1199,40 @@ def _checked_guidance_delivery(response, task, matches, unified_evidence):
     reference_block='BEGIN QUALIFIED KLIKAI REFERENCES\n'+canonical(references)+'\nEND QUALIFIED KLIKAI REFERENCES'
     if reference_block not in rendered[:span['start']]:invalid()
     return deepcopy(delivery)
+
+
+
+def _generate_evidence(gateway,bundle,tier,model,parent=None):
+    checked(bundle)
+    if tier not in {'short','answer'}or parent is not None:raise Failure('expansion_unavailable',409)
+    task=bundle['document_task']
+    payload={'text':task['source_text'],**{k:task[k]for k in ('mode','source_language','target_language','locale','source_sha256','review_strategy')},
+        'unified_evidence':deepcopy(bundle['unified_evidence']),
+        'review_observations':deepcopy(bundle.get('review_observations',{}))}
+    for key in ('document_binding','document_revision','document_location'):
+        if key in task:payload[key]=deepcopy(task[key])
+    response=gateway.request('/internal/pilot/document-transform',payload)
+    if (not isinstance(response,dict)or response.get('contract')!=RESPONSE_CONTRACT
+            or response.get('provider_attempts')!=[]or response.get('execution',{}).get('inference_performed')is not False):invalid()
+    matches={row['evidence_id']:row for row in bundle['source_bundle']['matches']}
+    if response.get('status')!='ok':invalid()
+    document=validate_document_result(response.get('document_result'),task,matches)
+    if document['edits']!=document['review']['applications']['edits']:invalid()
+    from .evidence_review import overview
+    text=overview(document['review'],task['locale'])
+    evidence=[]
+    for number,item in enumerate(response.get('evidence',[]),1):
+        if item.get('evidence_id')not in matches:invalid()
+        row=matches[item['evidence_id']]
+        evidence.append({**deepcopy(item),'local_number':number,
+            **{k:deepcopy(row['source'][k])for k in ('source_id','source_revision','locator')if k in row['source']}})
+    blocks=[{'block_id':'evidence-review-overview','text':text}]
+    return {'status':'source_only','answer_kind':'deterministic_guidance','answer_support':'partial',
+        'generation_status':'not_generated','short_answer':text,'answer_md':text,'display_blocks':blocks,'blocks':deepcopy(blocks),
+        'document_result':document,'evidence':evidence,'source_badges':[],
+        'claims':[],'citations':[],'limitations':([{'code':'document_transform_failed','scope':'answer','operation':check['check_id']}for check in document['review']['checks']if check['status']=='failed']),
+        'retrieval':deepcopy(bundle['retrieval']),
+        **{key:deepcopy(response[key])for key in ('execution','model_identity','provider_attempts','diagnostics')if key in response}}
 
 
 def _generate_general(gateway, bundle, tier, model, parent=None):
@@ -1455,6 +1522,8 @@ def _mixed_document_answer(gateway, bundle, tier, model, parent):
 
 
 def generate(gateway, bundle, tier, model, parent=None):
+    if bundle.get('document_task',{}).get('review_strategy')=='evidence_review_v1':
+        return _generate_evidence(gateway,bundle,tier,model,parent)
     checked(bundle)
     if tier not in {'short', 'answer'} or parent is not None:
         raise Failure('expansion_unavailable', 409)

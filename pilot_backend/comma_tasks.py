@@ -41,7 +41,7 @@ def _options(family):
     return identity.get('request_options',{}) if isinstance(identity,dict) else {}
 
 
-def freeze(gateway,family,policy):
+def freeze(gateway,family,policy,*,writer_free=False):
     config=getattr(gateway,'comma_checker',None)
     if not capability(config)['configured'] or not candidate(family['question'],family.get('context','')):
         return None
@@ -90,6 +90,10 @@ def freeze(gateway,family,policy):
         and not re.search(r'\b(?:vse|obe|vsak\w*|both|all|tutte|entrambe|pred|za|before|after)\b',question,re.I))
     if ambiguous_edit:
         explanation_status='edit_required'
+    elif writer_free:
+        # The dedicated observation survives; no unified freeze, selector,
+        # explanation writer or auxiliary route is entered for evidence review.
+        explanation_status='not_requested_writer_independent'
     elif task.get('explain') and status=='ok':
         # This is the existing source-grounded path. Its selected supports and
         # citations remain separate from the checker observation.

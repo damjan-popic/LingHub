@@ -90,7 +90,8 @@ class Domain:
         comma_candidate=(not document_task and self.unified_answers and task=='reference'
             and comma_tasks.capability(getattr(self.request_gateway,'comma_checker',None))['configured']
             and comma_tasks.candidate(stored['question'],stored['context']))
-        job_model='cpu'if guidance or comma_candidate or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
+        evidence_review=isinstance(document_value,dict)and document_value.get('review_strategy')=='evidence_review_v1'
+        job_model='cpu'if evidence_review or guidance or comma_candidate or task in {'source_search','text_check','terminology','morphology',*editorial.SOURCES}else model
         if document_value and document_value.get('translation_profile'):
             from .private_translation import RESOURCE,task_profile
             task_profile(document_value)

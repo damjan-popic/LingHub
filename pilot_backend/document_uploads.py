@@ -56,6 +56,10 @@ def task_for(block, options, *, previous_sections=(), document_id=None):
     task.update(source_text=block['text'],source_sha256=hashlib.sha256(block['text'].encode('utf-8')).hexdigest())
     if document_id is not None:
         task['document_binding']={'document_id':document_id,'section_index':block['index']}
+    if options.get('review_strategy'):
+        task['review_strategy']=options['review_strategy']
+        task['document_revision']=options['document_revision']
+        task['document_location']=block.get('location','')
     if translation.selected(options):
         task['translation_profile']=translation.profile_checked(options['translation_profile'])
         task['translation_request_id']='document-'+options['translation_document_id']+'-'+str(block['index'])
@@ -90,11 +94,13 @@ def task_for(block, options, *, previous_sections=(), document_id=None):
 
 
 class Documents:
-    def __init__(self, store, domain, *, private_translation=False, translation_limits=None):
+    def __init__(self, store, domain, *, private_translation=False, translation_limits=None, evidence_review=False, editorial_summary=False):
         self.store, self.domain = store, domain
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
         self.thread = None
+        self.editorial_summary=editorial_summary
+        self.evidence_review=evidence_review
         self.private_translation=private_translation
         self.translation_limits={**translation.DEFAULT_LIMITS,**(translation_limits or {})}
 
@@ -127,7 +133,7 @@ class Documents:
 
     @serialized
     def start(self, owner, identifier, payload):
-        fields(payload, {'mode', 'source_language', 'target_language', 'locale', 'idempotency_key','translation_provider'})
+        fields(payload, {'mode', 'source_language', 'target_language', 'locale', 'idempotency_key','translation_provider','review_strategy'})
         checked_key(payload.get('idempotency_key'))
         mode = payload.get('mode')
         source, target = payload.get('source_language'), payload.get('target_language')
@@ -141,6 +147,12 @@ class Documents:
             raise Failure('invalid_request')
         options = {'mode': mode, 'source_language': source, 'target_language': target,
                    'locale': locale, 'model': self.domain.default_model}
+        strategy=payload.get('review_strategy')
+        if mode=='review'and self.evidence_review:
+            strategy=strategy or'evidence_review_v1'
+            if strategy!='evidence_review_v1'or source!='sl':raise Failure('document_review_ineligible',422)
+            options['review_strategy']=strategy
+        elif strategy is not None:raise Failure('document_review_ineligible',422)
         provider=payload.get('translation_provider')
         if provider is not None:
             if (provider!=translation.PROVIDER or not self.private_translation
@@ -181,6 +193,8 @@ class Documents:
                 row = self.owned(db, owner, identifier)
                 if row['state'] != 'draft':
                     raise Failure('document_already_started', 409)
+                if options.get('review_strategy'):
+                    options['document_revision']=row['source_sha256']
                 active = db.execute("SELECT count(*) FROM uploaded_documents WHERE owner=? "
                                     "AND state IN ('queued','running')", (owner,)).fetchone()[0]
                 if active:
@@ -229,15 +243,80 @@ class Documents:
         options=json.loads(row['options']or'{}')
         if row['state']=='draft'and options.get('translation_failed_preflight'):
             warnings.append(options['translation_failed_preflight']['error_code'])
-        public_options={k:v for k,v in options.items() if not k.startswith('translation_') or k=='translation_provider'}
+        public_options={k:v for k,v in options.items()if k not in {'editorial_summary','editorial_summary_history'}and(not k.startswith('translation_')or k=='translation_provider')}
         if translation.selected(options):
             public_options['translation_profile_sha256']=translation.profile_hash(options['translation_profile'])
             public_options['translation_guidance']=translation.guided(options['translation_profile'])
-        return {'document_id': identifier, 'name': row['name'], 'state': row['state'],
-                'has_word_original':original_word,
+        result={'document_id': identifier, 'name': row['name'], 'state': row['state'],
+                'has_word_original':original_word,'source_sha256':row['source_sha256'],
                 'created': row['created'], 'options': options if internal else public_options,
                 'warnings': warnings, 'sections': sections,
                 'processed': sum(s['state'] in TERMINAL for s in sections), 'total': len(sections)}
+        from .document_summary import manifest,public_summary
+        result['review_manifest']=manifest(result)
+        result['editorial_summary']=public_summary(options.get('editorial_summary'),result['review_manifest'])
+        return result
+
+    def prepare_summary(self,owner,identifier):
+        if not self.editorial_summary:raise Failure('document_summary_unavailable',409)
+        document=self.get(owner,identifier,internal=True)
+        from .document_summary import packet
+        bundles=[]
+        with self.store.connect()as db:
+            for section in document['sections']:
+                row=db.execute('SELECT bundle FROM families WHERE id=?AND owner=?',
+                    (section.get('family_id'),owner)).fetchone()
+                bundles.append(json.loads(row[0])if row else{})
+        material=packet(document,bundles)
+        previous=document['options'].get('editorial_summary')
+        if previous and previous.get('manifest_sha256')==material['manifest_sha256']:
+            return self.get(owner,identifier)
+        gateway=self.domain.request_gateway
+        if gateway is None:raise Failure('document_summary_unavailable',503)
+        prepared=gateway.request('/internal/pilot/document-summary/prepare',{'packet':material})
+        if (prepared.get('packet_sha256')!=material['packet_sha256']or prepared.get('status')not in {'prepared','unavailable_input_limit'}):
+            raise Failure('document_summary_unavailable',502)
+        saved={key:prepared[key]for key in ('version','status','manifest_sha256','document_revision')}
+        saved.update(packet=material,prepared=prepared,output=None,attempted=False,authority='optional_editorial_summary_only')
+        with self.store.tx()as db:
+            row=self.owned(db,owner,identifier);options=json.loads(row['options'])
+            if previous:options.setdefault('editorial_summary_history',[]).append(previous)
+            options['editorial_summary']=saved
+            db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
+        return self.get(owner,identifier)
+
+    def generate_summary(self,owner,identifier):
+        if not self.editorial_summary:raise Failure('document_summary_unavailable',409)
+        with self.store.tx()as db:
+            row=self.owned(db,owner,identifier);options=json.loads(row['options']or'{}')
+            saved=options.get('editorial_summary')
+            if not saved or saved['status']!='prepared':raise Failure('document_summary_unavailable',409)
+            saved['status']='dispatch_pending'
+            db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
+        current=self.get(owner,identifier,internal=True)
+        if saved['manifest_sha256']!=current['review_manifest']['manifest_sha256']:
+            response={**saved,'status':'historical','output':None}
+        else:
+            try:
+                response=self.domain.request_gateway.request('/internal/pilot/document-summary',
+                    {'packet':saved['packet'],'prepared':saved['prepared']})
+                if (response.get('version')!=saved['version']or response.get('manifest_sha256')!=saved['manifest_sha256']
+                        or response.get('status')not in {'available','unavailable'}):raise Failure('document_summary_unavailable',502)
+                if response['status']=='available':
+                    known={f['finding_id']for f in saved['packet']['findings']}
+                    if not isinstance(response.get('output'),dict)or set(response['output'])!={'points'}:raise Failure('document_summary_unavailable',502)
+                    for point in response['output']['points']:
+                        if not isinstance(point.get('text'),str)or not point.get('finding_ids')or not set(point['finding_ids'])<=known:
+                            raise Failure('document_summary_unavailable',502)
+            except Failure as error:
+                response={'version':saved['version'],'manifest_sha256':saved['manifest_sha256'],
+                    'document_revision':saved['document_revision'],'status':'unavailable','output':None,
+                    'attempted':None,'failure_type':error.code,'authority':'optional_editorial_summary_only'}
+        with self.store.tx()as db:
+            row=self.owned(db,owner,identifier);options=json.loads(row['options'])
+            options['editorial_summary']={**response,'packet':saved['packet'],'prepared':saved['prepared']}
+            db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
+        return self.get(owner,identifier)
 
     def list(self, owner):
         with self.store.connect() as db:

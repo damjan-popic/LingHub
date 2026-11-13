@@ -11,7 +11,7 @@ Object.assign(messages.it,{document_translation_ineligible:'Il traduttore privat
 messages.sl.document_translation_cancel_pending='Prevod je ustavljen za ta dokument. Čakamo še na potrditev ustavitve prevajalnika; pozni rezultat ne bo uporabljen.';
 messages.it.document_translation_cancel_pending='La traduzione del documento è interrotta. Si attende la conferma di arresto del traduttore; un risultato tardivo non sarà utilizzato.';
 export function documentUploads({root,api,locale,openFamily,errorText}){
- let current=null,rows=[],timer=null,epoch=0,selection=0,enabled=false,privateTranslation=false,busy=false,uploadKey=null;
+ let current=null,rows=[],timer=null,epoch=0,selection=0,enabled=false,privateTranslation=false,evidenceReview=false,editorialSummary=false,busy=false,uploadKey=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
  const tr=key=>messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
  const stateLabel=state=>({sl:{draft:'Pripravljeno',queued:'Čaka',running:'V obdelavi',complete:'Končano',failed:'Ni uspelo',cancelled:'Ustavljeno',pending:'Čaka',unknown:'Ni obdelano'},it:{draft:'Pronto',queued:'In attesa',running:'In corso',complete:'Terminato',failed:'Non riuscito',cancelled:'Interrotto',pending:'In attesa',unknown:'Non elaborato'}}[locale()==='it'?'it':'sl'][state]||tr(state));
@@ -28,18 +28,41 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  function schedule(){clearTimeout(timer);if(enabled&&current&&active.has(current.state)){const token=epoch,selected=selection,id=current.document_id;timer=setTimeout(()=>{if(token===epoch&&selected===selection)load(id,false).catch(error=>{if(token===epoch&&selected===selection){status(error);schedule();}});},1500);}}
  async function download(fmt,draft=false,partial=false){const token=epoch,id=current.document_id;const blob=await api('/documents/'+id+(draft?'/draft/':'/export/')+fmt+(partial?'?partial=true':''),{response:'blob'});if(token!==epoch)return;const url=URL.createObjectURL(blob),a=el('a',undefined,{href:url,download:(partial?'klikai-partial-draft.':draft?'klikai-draft.':'klikai-report.')+fmt});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  function renderDocument(){const panel=root.querySelector('[data-document-detail]');if(!panel)return;panel.replaceChildren();if(!current)return;const native=current.options?.translation_provider==='translategemma_sl_it';panel.append(el('h3',current.name));panel.append(el('p',native&&current.state==='complete'?stateLabel(current.state):tr(current.state)));panel.append(el('p',tr('progress')+': '+current.processed+' / '+current.total,{role:'status','aria-live':'polite'}));
+  const evidence=current.options?.review_strategy==='evidence_review_v1';
+  if(evidence)panel.append(el('p',locale()==='it'?'Revisione delle fonti senza autore generativo. Le indicazioni richiedono una decisione; solo modifiche giustificate da applicazioni esistenti entrano nella bozza.':'Pregled iz virov brez generativnega pisca. Nasveti zahtevajo presojo; v osnutek se vključijo le spremembe z obstoječo izvedljivo uporabo.',{class:'qualified-note','data-evidence-review-strategy':''}));
+  else if(current.state!=='draft'&&current.options?.mode==='review')panel.append(el('p',locale()==='it'?'Risultato storico: revisione con il precedente percorso di generazione.':'Zgodovinski rezultat: pregled po prejšnji generativni poti.',{class:'qualified-note'}));
   if(native)panel.append(el('p',current.options?.translation_guidance?(locale()==='it'?'Percorso privato SL→IT con materiale KLIKai: il rapporto mostra quanto è stato consegnato al traduttore. Verifica significato e scelte.':'Zasebna pot SL→IT z gradivom KLIKai: poročilo pokaže, kaj je bilo posredovano prevajalniku. Preverite pomen in izbire.'):(locale()==='it'?'Bozza privata SL→IT: controlla significato e stile. Fonti terminologiche KLIKai non consultate.':'Zasebni osnutek SL→IT: preverite pomen in slog. Terminološki viri KLIKai niso bili uporabljeni.'),{class:'qualified-note','data-native-scope-note':''}));
+  if(current.review_manifest){
+   const counts=current.review_manifest.counts;
+   panel.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / modifiche: ':'Priporočila / primerjave / kontekst / spremembe: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application].join(' / '),{'data-document-review-counts':''}));
+   const summary=current.editorial_summary;
+   if(summary){
+    panel.append(el('h4',locale()==='it'?'Riepilogo editoriale IA facoltativo':'Neobvezen uredniški povzetek z umetno inteligenco'));
+    if(summary.historical)panel.append(el('p',locale()==='it'?'Storico: questo riepilogo riguarda risultati precedenti.':'Zgodovinski: ta povzetek se nanaša na prejšnje ugotovitve.'));
+    else if(summary.status==='available')for(const point of summary.output.points){
+     const paragraph=el('p',point.text+' ');
+     for(const id of point.finding_ids){const link=el('a',id,{href:'#'+id});link.addEventListener('click',()=>{const detail=root.querySelector('#'+id);if(detail){detail.open=true;detail.closest('.document-section').open=true;}});paragraph.append(link,document.createTextNode(' '));}
+     panel.append(paragraph);
+    }
+    else panel.append(el('p',summary.status==='prepared'?(locale()==='it'?'Riepilogo pronto per la richiesta.':'Povzetek je pripravljen za zahtevo.'):(locale()==='it'?'Riepilogo non disponibile. Indicazioni e download rimangono disponibili.':'Povzetek ni na voljo. Ugotovitve in prenosi ostajajo na voljo.'),{class:'qualified-note'}));
+   }
+   if(editorialSummary&&current.state==='complete'&&(!summary||summary.status==='prepared')){
+    const action=summary?'summary':'summary/prepare';
+    button(panel,summary?(locale()==='it'?'Crea riepilogo facoltativo':'Ustvari neobvezen povzetek'):(locale()==='it'?'Prepara riepilogo facoltativo':'Pripravi neobvezen povzetek'),async()=>{current=await api('/documents/'+current.document_id+'/'+action,{method:'POST',body:{}});renderDocument();});
+   }
+  }
   if(current.state==='draft'){
    const form=el('form',undefined,{class:'document-options'});
    const mode=label(form,tr('mode'),select([['review',tr('review')],['translate',tr('translate')]],values.mode));
    const source=label(form,tr('source'),select([['sl','Slovenščina'],['it','Italiano']],values.source_language));
    const target=label(form,tr('target'),select([['sl','Slovenščina'],['it','Italiano']],values.target_language));
+   if(evidenceReview)form.append(el('p',locale()==='it'?'Il nuovo riesame indipendente dall’autore è disponibile per lo sloveno.':'Novi pregled brez pisca je na voljo za slovenščino.',{class:'qualified-note'}));
    const provider=privateTranslation?label(form,locale()==='it'?'Percorso di traduzione':'Način prevoda',select([['',locale()==='it'?'Percorso esistente':'Obstoječa pot'],['translategemma_sl_it',locale()==='it'?'Traduzione privata SL→IT — bozza da controllare':'Zasebni prevod SL→IT — osnutek za pregled']],values.translation_provider)):null;
    const candidateNote=el('p',locale()==='it'?'Il rapporto distingue il materiale KLIKai consegnato al traduttore dalle scelte verificate. Sono supportate al massimo quattro sezioni senza collegamenti o enfasi. Controlla integralmente significato e stile.':'Poročilo loči gradivo KLIKai, poslano prevajalniku, od preverjenih jezikovnih izbir. Podprti so največ štirje odseki brez povezav ali poudarkov. Preverite celoten pomen in slog.',{class:'qualified-note'});if(provider)form.append(candidateNote);
    const controls=()=>{values.mode=mode.value;values.source_language=source.value;if(source.value===target.value)target.value=source.value==='sl'?'it':'sl';for(const option of target.options)option.disabled=option.value===source.value;values.target_language=target.value;target.parentElement.hidden=mode.value!=='translate';if(provider){provider.parentElement.hidden=mode.value!=='translate';provider.options[1].disabled=source.value!=='sl'||target.value!=='it';candidateNote.hidden=provider.value!=='translategemma_sl_it'||mode.value!=='translate';}};
    mode.addEventListener('change',controls);source.addEventListener('change',controls);target.addEventListener('change',controls);if(provider)provider.addEventListener('change',()=>{values.translation_provider=provider.value;controls();});controls();
    form.append(el('button',tr('start'),{type:'submit',class:'primary'}));
-   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const token=epoch;const result=await api('/documents/'+current.document_id+'/start',{method:'POST',body:{mode:values.mode,source_language:values.source_language,...(values.mode==='translate'?{target_language:values.target_language,...(values.translation_provider?{translation_provider:values.translation_provider}:{})}:{}),locale:locale(),idempotency_key:'document-start-'+current.document_id}});if(token!==epoch)return;current=result;renderDocument();await refresh();schedule();});});panel.append(form);
+   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const token=epoch;const result=await api('/documents/'+current.document_id+'/start',{method:'POST',body:{mode:values.mode,source_language:values.source_language,...(values.mode==='translate'?{target_language:values.target_language,...(values.translation_provider?{translation_provider:values.translation_provider}:{})}:{}),...(evidenceReview&&values.mode==='review'?{review_strategy:'evidence_review_v1'}:{}),locale:locale(),idempotency_key:'document-start-'+current.document_id}});if(token!==epoch)return;current=result;renderDocument();await refresh();schedule();});});panel.append(form);
   }
   const actions=el('div',undefined,{class:'document-actions'});panel.append(actions);
   if(active.has(current.state))button(actions,'cancel',async()=>{const token=epoch;const result=await api('/documents/'+current.document_id+'/cancel',{method:'POST'});if(token!==epoch)return;current=result;renderDocument();await refresh();});
@@ -68,6 +91,25 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    const displayed=nativeDraft?section.document_result.proposed_text:section.output;
    if(displayed)item.append(el('h4',tr('result')),el('div',displayed,{class:'document-text'}));
    if(section.state==='complete'&&section.document_result?.mode==='review'&&section.document_result.status==='draft'&&!section.document_result.edits.length&&section.document_result.proposed_text===section.text&&!section.limitations?.some(l=>l.code==='document_transform_failed'))item.append(el('p',locale()==='it'?'Nessuna modifica proposta nell’ambito elaborato; non è una conferma dell’assenza di errori.':'V obdelanem obsegu ni predlaganih sprememb; to ni potrditev, da besedilo nima napak.',{class:'qualified-note'}));
+   const review=section.document_result?.review;
+   if(review){
+    const counts=review.overview.counts;
+    item.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / modifiche: ':'Priporočila / primerjave / kontekst / spremembe: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application].join(' / '),{'data-review-counts':''}));
+    for(const finding of review.findings){
+     const detail=el('details',undefined,{'data-finding-id':finding.finding_id,id:finding.finding_id});
+     detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen'))));
+     detail.append(el('p',finding.finding_id+' · '+finding.match.observed.start+'–'+finding.match.observed.end),el('p',finding.notice),el('blockquote',finding.source.focus.text));
+     const advice=finding.source.recorded_advice;
+     if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',String(advice[key])));
+     if(finding.source.untyped_context_limit)detail.append(el('p',finding.source.untyped_context_limit,{class:'qualified-note'}));
+     if(finding.proposed_edit)detail.append(el('p',finding.proposed_edit.original+' → '+finding.proposed_edit.replacement));
+     if(section.family_id)button(detail,locale()==='it'?'Apri indicazione e fonti':'Odpri ugotovitev in vire',()=>openFamily(section.family_id));
+     item.append(detail);
+    }
+    const checks=el('details');checks.append(el('summary',locale()==='it'?'Controlli svolti e copertura':'Opravljena preverjanja in obseg'));
+    for(const check of review.checks)checks.append(el('p',check.check_id+' · '+check.status+' · '+check.scope));
+    item.append(checks);
+   }
    if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));
    if(section.family_id)button(item,'view',()=>openFamily(section.family_id));panel.append(item);
   }
@@ -79,8 +121,8 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument();
  }
  return {
-  session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true;if(next===enabled&&candidate===privateTranslation)return;enabled=next;privateTranslation=candidate;render();if(enabled)refresh().catch(status);},
+  session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true,review=capabilities.documents?.evidence_review===true,summary=capabilities.documents?.editorial_summary===true;if(next===enabled&&candidate===privateTranslation&&review===evidenceReview&&summary===editorialSummary)return;enabled=next;privateTranslation=candidate;evidenceReview=review;editorialSummary=summary;render();if(enabled)refresh().catch(status);},
   locale(){const opened=root.querySelector('details')?.open;render();if(opened&&root.querySelector('details'))root.querySelector('details').open=true;},
-  reset(){epoch++;selection++;clearTimeout(timer);enabled=false;privateTranslation=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;root.removeAttribute('aria-busy');render();}
+  reset(){epoch++;selection++;clearTimeout(timer);enabled=false;privateTranslation=false;evidenceReview=false;editorialSummary=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;root.removeAttribute('aria-busy');render();}
  };
 }

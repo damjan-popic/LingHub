@@ -61,7 +61,9 @@ def retained_writer_ids(snapshot, source_text):
 
 def report_section(section, bundle, snapshot, api_root):
     """Add references to an export copy, leaving stored results unchanged."""
-    selected=retained_writer_ids(snapshot,section['text'])
+    review=(section.get('document_result')or{}).get('review')
+    selected=[]if review is not None else retained_writer_ids(snapshot,section['text'])
+    finding_ids={r['evidence_id']for finding in (review or{}).get('findings',[])for r in finding['related_source_captures']}
     references=[dict(row)for row in section.get('sources',[])]
     known={r.get('evidence_id')for r in references}
     captured=(bundle.get('source_bundle')or{}).get('matches',[])
@@ -79,10 +81,10 @@ def report_section(section, bundle, snapshot, api_root):
     for number,row in enumerate(references,1):
         row['local_number']=number
         eid=row.get('evidence_id')
-        row['report_role']=('edit_support'if eid in used else'writer_input_context'if selected is not None and eid in selected
+        row['report_role']=('edit_support'if eid in used else'finding_evidence'if eid in finding_ids else'review_context'if review is not None else'writer_input_context'if selected is not None and eid in selected
                             else'retrieval_context'if selected is not None else'selection_unknown')
         if family_url and eid:
             row['frozen_source_url']=family_url+'/sources/'+quote(eid,safe='')+'?tier=answer'
     return {**section,'sources':references,'saved_result_url':family_url,
-            'writer_input_selection':'retained'if selected is not None else'unknown',
+            'writer_input_selection':'not_invoked'if review is not None else'retained'if selected is not None else'unknown',
             'unresolved_writer_evidence_ids':[eid for eid in selected if eid not in known]if selected is not None else[]}

@@ -40,6 +40,10 @@ def config_checked(config):
     c.setdefault('single_answers',c['unified_answers'])
     c.setdefault('document_uploads',False)
     if type(c['document_uploads'])is not bool or c['document_uploads']and not c['unified_answers']:raise ValueError('Document uploads require unified answers')
+    c.setdefault('evidence_review',False)
+    if type(c['evidence_review'])is not bool or c['evidence_review']and not c['document_uploads']:raise ValueError('Evidence review requires document uploads')
+    c.setdefault('editorial_summary',False)
+    if type(c['editorial_summary'])is not bool or c['editorial_summary']and not c['evidence_review']:raise ValueError('Editorial summary requires evidence review')
     c.setdefault('private_translation',False)
     if type(c['private_translation'])is not bool or c['private_translation']and not c['document_uploads']:raise ValueError('Private translation requires document uploads')
     from .private_translation import DEFAULT_LIMITS
@@ -79,7 +83,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     from .document_uploads import Documents
-    documents=Documents(store,domain,private_translation=config['private_translation'],translation_limits=config['private_translation_limits'])
+    documents=Documents(store,domain,private_translation=config['private_translation'],translation_limits=config['private_translation_limits'],evidence_review=config['evidence_review'],editorial_summary=config['editorial_summary'])
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
@@ -165,7 +169,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         from .comma_tasks import capability
         checker=capability(config.get('comma_checker'))
         extra={'comma_checker':checker}if checker['configured']else{}
-        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation']}
+        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation'],'evidence_review':config['evidence_review'],'editorial_summary':config['editorial_summary']}
         if beta(s):return {**extra,'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':config['single_answers'],'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {**extra,'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'single_answers':config['single_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
@@ -243,6 +247,16 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     @app.post(api+'/documents/{identifier}/start')
     async def start_document(identifier:str,request:Request):
         u=document_user(request);return await run_in_threadpool(documents.start,u['id'],identifier,await payload(request))
+    @app.post(api+'/documents/{identifier}/summary/prepare')
+    async def prepare_document_summary(identifier:str,request:Request):
+        u=document_user(request)
+        if await payload(request)!={}:raise Failure('invalid_request')
+        return await run_in_threadpool(documents.prepare_summary,u['id'],identifier)
+    @app.post(api+'/documents/{identifier}/summary')
+    async def generate_document_summary(identifier:str,request:Request):
+        u=document_user(request)
+        if await payload(request)!={}:raise Failure('invalid_request')
+        return await run_in_threadpool(documents.generate_summary,u['id'],identifier)
     @app.post(api+'/documents/{identifier}/cancel')
     async def cancel_document(identifier:str,request:Request):
         u=document_user(request);return await run_in_threadpool(documents.cancel,u['id'],identifier)

@@ -1568,10 +1568,5 @@ def source(bundle, evidence_id, tier=None):
     task=bundle['document_task']
     for row in ordinary_records((bundle.get('review_observations')or{}).get('ordinary_resources'),task['source_text'],task['source_sha256']):
         if row['evidence_id']!=evidence_id:continue
-        p=row['native_passage'];question=(p.get('context')or{}).get('question')
-        body=(('Izvirno vprašanje:\n'+question+'\n\n')if isinstance(question,str)else'')+p['text']
-        return {'evidence_id':evidence_id,'title':p.get('title')or row['external_id'],'source_label':p.get('source_label')or row['source_slug'],
-            'url':p.get('url'),'excerpt':body,'reader_blocks':[{'heading':p.get('source_label')or row['source_slug'],'text':body}],
-            'bibliography':{k:deepcopy(p[k])for k in ('source_id','source_revision','authors','date','edition','source_status','publication_scope','tool_scope','editorial_status','tool_provenance','context')if k in p},
-            'locator':deepcopy(p.get('span')or{}),'native_source_unit':deepcopy(p)}
+        return deepcopy(row['source'])
     raise Failure('not_found',404)

@@ -11,10 +11,25 @@ def native_exclusion(passage):
             or 'incomplete_answer_group'in passage.get('warnings',[])):return 'native_content_incomplete_or_missing'
     return None
 
+def same_native_projection(expected,retained):
+    """Field maps are mappings; retain their native serialization unchanged."""
+    def normalized(units):
+        units=deepcopy(units)
+        for unit in units:
+            projection=unit.get('writer_projection')
+            if isinstance(projection,dict)and isinstance(projection.get('field_map'),list):
+                projection['field_map']=sorted(projection['field_map'],key=lambda v:json.dumps(v,ensure_ascii=False,sort_keys=True))
+        return units
+    return normalized(expected)==normalized(retained)
+
+def native_question(passage):
+    context=passage.get('context')
+    return context.get('question')if isinstance(context,dict)else None
+
 def reference_nomination(passage,occurrence_text):
     """Mechanical topic nomination only; it never resolves applicability."""
     norm=lambda v:' '.join(unicodedata.normalize('NFKC',v).casefold().split())
-    topic='\n'.join(v for v in (passage.get('title'),(passage.get('context')or{}).get('question'))if isinstance(v,str))
+    topic='\n'.join(v for v in (passage.get('title'),native_question(passage))if isinstance(v,str))
     quoted=re.findall(r'»([^»«\n]+)«|«([^«»\n]+)»|“([^“”\n]+)”|"([^"\n]+)"',topic)
     target=norm(occurrence_text)
     for group in quoted:
@@ -32,7 +47,7 @@ def records(value,text,source_sha256):
             or value.get('context_sha256')!=digest({k:v for k,v in value.items()if k!='context_sha256'})
             or not isinstance(value.get('envelopes'),list)or len(value['envelopes'])>64):raise ValueError('Ordinary context binding differs')
     found={}
-    for envelope in value['envelopes']:
+    for envelope_index,envelope in enumerate(value['envelopes']):
         occurrence=envelope['occurrence'];a,b=occurrence['start'],occurrence['end']
         if (type(a)is not int or type(b)is not int or not 0<=a<b<=len(text)
                 or text[a:b]!=occurrence['text']or occurrence['original_sha256']!=source_sha256):raise ValueError('Resource occurrence differs')
@@ -42,6 +57,7 @@ def records(value,text,source_sha256):
             if query!=occurrence['text']or envelope.get('query')!=occurrence['text']:raise ValueError('Lexical query occurrence differs')
         reference=envelope.get('reference_response')
         if reference and(reference.get('question')!=occurrence['text']or envelope.get('query')!=occurrence['text']):raise ValueError('Reference query occurrence differs')
+        if reference and envelope.get('source_passages',[])!=reference.get('passages',[]):raise ValueError('Native reader response differs')
         for bound in envelope.get('all_occurrences')or[occurrence]:
             if (type(bound.get('start'))is not int or type(bound.get('end'))is not int or not 0<=bound['start']<bound['end']<=len(text)or text[bound['start']:bound['end']]!=bound.get('text')or bound.get('original_sha256')!=source_sha256):raise ValueError('Repeated resource occurrence differs')
         for passage in envelope.get('source_passages',[])+envelope.get('tool_passages',[]):
@@ -64,7 +80,7 @@ def records(value,text,source_sha256):
             nomination=('ordinary_source_owned_lexical_candidate'if passage.get('role')=='tool_result'else reference_nomination(passage,occurrence['text']))
             row['document_admission']={'role':'candidate_context'if nomination and excluded is None else'retained_lookup_only',
                 'basis':nomination or'no_supported_source_topic_nomination','reason':excluded,'applicability_not_established':True}
-            question=(passage.get('context')or{}).get('question')
+            question=native_question(passage)
             reader_text=(('Izvirno vprašanje:\n'+question+'\n\n')if isinstance(question,str)else'')+body
             row['source']={'source_id':passage.get('source_id')or eid,'source_revision':passage['source_revision'],
                 'evidence_id':eid,'title':passage.get('title')or row['external_id'],
@@ -77,11 +93,77 @@ def records(value,text,source_sha256):
                 row['source']['reader_blocks'].insert(0,{'heading':'Omejitev zajetega gradiva',
                     'text':'Gradivo je nepopolno ali omejeno in se ne uporablja kot vsebinsko priporočilo.'})
                 row['source']['bibliography']['context_exclusion']=excluded
+            siblings=[p for p in envelope.get('source_passages',[])if (p.get('source_id'),p.get('source_revision'),p.get('role'),(p.get('span')or{}).get('post_id'))==(passage.get('source_id'),passage.get('source_revision'),passage.get('role'),(passage.get('span')or{}).get('post_id'))]
+            complete_proof=bool(reference and reference.get('contract')=='klikai.reference-source-context.v1'
+                and reference.get('source_only')is True and passage in reference.get('passages',[])
+                and siblings and all(native_exclusion(p)is None and p.get('context_eligible',True)for p in siblings))
+            binding={'envelope_index':envelope_index,'passage_sha256':digest(passage),
+                'occurrences':deepcopy(envelope.get('all_occurrences')or[occurrence]),
+                'reference_response_sha256':digest(reference)if reference else None,
+                'source_group':{k:passage.get(k)for k in ('source_id','source_revision','role')},
+                'post_id':(passage.get('span')or{}).get('post_id'),
+                'native_siblings':[{'passage_id':p['passage_id'],'passage_sha256':digest(p),'span':deepcopy(p.get('span'))}for p in siblings],
+                'reader_complete_group':complete_proof,'native_context_eligible':passage.get('context_eligible',True),
+                'native_exclusion':excluded,'nomination':nomination}
             if eid in found:
-                if found[eid]['capture_sha256']!=row['capture_sha256']:raise ValueError('Conflicting native source identity')
+                previous=found[eid]
+                # Ranking and group eligibility belong to the lookup. Every
+                # original scored/qualified variant is retained unchanged.
+                identity=lambda p:{k:v for k,v in p.items()if k not in {'context_eligible','warnings','fusion_score','lexical_bm25','rerank_score','rights_mode','incomplete','missing_content','missing_fields','content_status'}}
+                if identity(previous['native_passage'])!=identity(passage):raise ValueError('Conflicting native source identity')
+                if passage not in previous['native_passage_variants']:previous['native_passage_variants'].append(deepcopy(passage))
+                previous['native_bindings'].append(binding)
                 for bound in row['occurrences']:
-                    if bound not in found[eid]['occurrences']:found[eid]['occurrences'].append(deepcopy(bound))
-            else:found[eid]=row
+                    if bound not in previous['occurrences']:previous['occurrences'].append(deepcopy(bound))
+            else:
+                row.update(native_passage_variants=[deepcopy(passage)],native_bindings=[binding])
+                found[eid]=row
+    for row in found.values():
+        variants=sorted(row['native_passage_variants'],key=digest)
+        row['native_passage_variants']=variants
+        by_hash={digest(p):p for p in variants}
+        def hard_exclusion(p):
+            p=deepcopy(p);p['warnings']=[w for w in p.get('warnings',[])if w!='incomplete_answer_group']
+            return native_exclusion(p)
+        hard=next((hard_exclusion(p)for p in variants if hard_exclusion(p)),None)
+        local_partial=any('incomplete_answer_group'in p.get('warnings',[])for p in variants)
+        admitted=[]
+        for binding in row['native_bindings']:
+            p=by_hash[binding['passage_sha256']]
+            lexical=p.get('role')=='tool_result'and p.get('tool_kind')in {'synonyms','collocations','morphology'}
+            allowed=not hard and not binding['native_exclusion']and(p.get('context_eligible',True)or lexical)
+            if local_partial:allowed=allowed and binding['reader_complete_group']
+            binding['admitted_candidate_context']=bool(allowed and binding['nomination'])
+            if allowed:admitted.append(binding)
+        chosen=by_hash[(admitted or row['native_bindings'])[0]['passage_sha256']]
+        row['native_passage']=deepcopy(chosen)
+        row['capture']['source_unit']=deepcopy(chosen)
+        if len(variants)>1:row['capture']['source_unit_variants']=deepcopy(variants)
+        row['capture_sha256']=digest(row['capture'])
+        row['context_eligible']=any(by_hash[b['passage_sha256']].get('context_eligible',True)for b in admitted)
+        row['model_context_eligible']=bool(admitted)
+        row['admitted_occurrences']=[]
+        for binding in admitted:
+            if binding['nomination']:
+                for occurrence in binding['occurrences']:
+                    if occurrence not in row['admitted_occurrences']:row['admitted_occurrences'].append(deepcopy(occurrence))
+        row['document_admission']={'role':'candidate_context'if row['admitted_occurrences']else'retained_lookup_only',
+            'basis':next((b['nomination']for b in admitted if b['nomination']),'no_supported_source_topic_nomination'),
+            'reason':hard or ('native_content_incomplete_or_missing'if not admitted and local_partial else None),
+            'applicability_not_established':True}
+        question=native_question(chosen)
+        body=(('Izvirno vprašanje:\n'+question+'\n\n')if isinstance(question,str)else'')+chosen['text']
+        row['source']['excerpt']=body
+        row['source']['reader_blocks']=[{'heading':chosen.get('source_label')or chosen['source_slug'],'text':body}]
+        row['source']['native_source_unit']=deepcopy(chosen)
+        row['source']['native_source_unit_variants']=deepcopy(variants)
+        row['source']['bibliography'].pop('context_exclusion',None)
+        row['source']['bibliography']['native_context_bindings']=deepcopy(row['native_bindings'])
+        if hard or not admitted and local_partial:
+            row['source']['bibliography']['context_exclusion']=row['document_admission']['reason']
+            row['source']['reader_blocks'].insert(0,{'heading':'Omejitev zajetega gradiva','text':'Gradivo je nepopolno ali omejeno in se ne uporablja kot vsebinsko priporočilo.'})
+        elif local_partial:
+            row['source']['reader_blocks'].insert(0,{'heading':'Omejitev posamezne poizvedbe','text':'Ena poizvedba je vrnila le del skupine. Za navedeni izvirni odsek se uporablja ločeno zajeta popolna skupina; sled delne poizvedbe ostaja shranjena.'})
     if len(found)>512:raise ValueError('Document context unit bound')
     return list(found.values())
 

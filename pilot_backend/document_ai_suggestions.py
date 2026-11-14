@@ -101,7 +101,9 @@ def packet(documents,owner,document):
                 if not relevant:omitted.append({'evidence_id':eid,'reason':'no_supported_occurrence_nomination'});continue
                 key=retain(record,section['family_id'],'model_context_not_edit_authority')
                 retained.append({'source_refs':[key],'role':'candidate_context_only'if ordinary else'qualified_source_context',
-                    'applicability_not_established':True,'occurrences':deepcopy(record.get('occurrences',[])),
+                    'applicability_not_established':True,'occurrences':deepcopy(record.get('admitted_occurrences',record.get('occurrences',[]))),
+                    'native_occurrence_bindings_sha256':digest(record.get('native_bindings',[])),
+                    'native_occurrence_bindings_location':'saved source reader bibliography.native_context_bindings',
                     'native_answer_eligibility':record.get('context_eligible')})
             draft=result['proposed_text']
             sections.append({'index':section['index'],'location':section['location'],'original_text':section['text'],

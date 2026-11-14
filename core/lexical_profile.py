@@ -44,6 +44,13 @@ def source_record(kind,entry_id,body,provenance,target,relation='recorded_target
  if occurrence:item['source_occurrence_key']=occurrence
  item['record_id']='lexical:'+digest(item);return item
 
+def synonym_source_fields(entry,sense):
+ """Preserve entry qualifications beside their own source sense."""
+ return {'headword':entry['headword'],'head_status':entry.get('head_status'),
+     **({'head_metadata':copy.deepcopy(entry['head_metadata'])}if 'head_metadata'in entry else{}),
+     'sense':copy.deepcopy(sense)}
+
+
 def full_paradigm_occurrences(interpretation,lexemes):
  """Retain complete recorded paradigms for an explicitly identified class.
 
@@ -378,7 +385,7 @@ async def make_profile(req,request):
      for ent in data['entries']:
       for sense in ent['senses']:
        target=next(t for t in targets if t['text']==d['target']);relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and ent['headword'][:1].islower()else lookup['match_relation']
-       records.append(source_record(kind,str(sense['sense_id']),{'headword':ent['headword'],'head_status':ent.get('head_status'),'sense':sense},prov,d['target'],relation))
+       records.append(source_record(kind,str(sense['sense_id']),synonym_source_fields(ent,sense),prov,d['target'],relation))
     else:
      for rec in data['collocations']:
       target=next(t for t in targets if t['text']==d['target']);relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and rec['headword'][:1].islower()else rec['match_relation']

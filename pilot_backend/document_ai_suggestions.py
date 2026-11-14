@@ -10,6 +10,22 @@ def invalid():raise Failure('document_ai_unavailable',409)
 def _options(documents,owner,identifier):
     with documents.store.connect()as db:
         row=documents.owned(db,owner,identifier);return json.loads(row['options']or'{}')
+def label_coordinates(value):
+    """Add representation labels to a new packet; never rewrite historical fields."""
+    value['coordinate_base_scope']='new_ai_items_only'
+    value['coordinate_spaces']={
+        'original_text_unicode_codepoint_half_open':['sections[].evidence_edits',
+            'sections[].findings[].match.observed','sections[].findings[].proposed_edit',
+            'sections[].findings[].alternatives[] (where document offsets are present)'],
+        'evidence_draft_unicode_codepoint_half_open':['sections[].coordinate_guide','new_ai_items'],
+        'bound_source_original_text_unicode_codepoint_half_open':['sections[].findings[].source_focus',
+            'sources[].recorded_advice[].source_span']}
+    for section in value['sections']:
+        for finding in section['findings']:
+            finding['evidence_draft_relation']=('already_incorporated_historical_evidence'
+                if finding.get('included_in_draft')else'historical_evidence_not_applied')
+    return value
+
 def packet(documents,owner,document):
     if (document['state']!='complete'or document['options'].get('review_strategy')!='evidence_review_v1'
             or not document.get('review_manifest')):invalid()
@@ -54,6 +70,7 @@ def packet(documents,owner,document):
             'scope':'All extracted text sections in this packet; images/unextracted content not reviewed',
             'document_warnings':deepcopy(document['warnings'])},
         'authority':'AI comments/suggestions only; original source findings and evidence draft remain unchanged'}
+    label_coordinates(value)
     value['packet_sha256']=digest(value);return checked_packet(value)
 
 def prepare(documents,owner,identifier):
@@ -207,6 +224,7 @@ def generate(gateway,bundle,tier,model,parent=None):
 def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     it=locale=='it'
     yield 'subheading','Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso'if it else AI_LABEL
+    yield 'body','Opzione sperimentale: suggerimenti IA non verificati.'if it else'Poskusna možnost: nepreverjeni AI predlogi.'
     yield 'body','I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if it else WARNING
     if not ai:
         yield 'body','Non richiesti.'if it else'Niso bili zahtevani.';return
@@ -226,7 +244,7 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
         yield 'body',item['observed_text']
         if item['replacement']is not None:yield 'body',item['observed_text']+' → '+item['replacement']
         yield 'body',item['explanation']
-        if item['uncertainty']:yield 'body',('Incertezza: 'if it else'Negotovost: ')+item['uncertainty']
+        if item['uncertainty']:yield 'body',('Valutazione dell’incertezza del modello: 'if it else'Modelova ocena negotovosti: ')+item['uncertainty']
         if item['mechanical_issues']:yield 'body','Non applicabile automaticamente al testo; controllare posizione o contenuto protetto.'if it else'Ni mogoče vključiti v besedilo; preverite mesto ali zaščiteno vsebino.'
         for ref in item['source_refs']:
             source=ai.get('source_references',{}).get(ref)

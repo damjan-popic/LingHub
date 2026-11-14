@@ -42,7 +42,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  function renderAI(panel){
   if(!aiSuggestions&&!current.ai_suggestions)return;
   const group=el('section',undefined,{'data-ai-suggestions-group':''});panel.append(group);
-  group.append(el('h3',aiLabel()),el('p',aiWarning(),{class:'qualified-note','data-ai-warning':''}));
+  group.append(el('h3',aiLabel()),el('p',locale()==='it'?'Opzione sperimentale: suggerimenti IA non verificati.':'Poskusna možnost: nepreverjeni AI predlogi.',{class:'small muted'}),el('p',aiWarning(),{class:'qualified-note','data-ai-warning':''}));
   const ai=current.ai_suggestions;
   if(!ai){
    group.append(el('p',locale()==='it'?'Passaggio facoltativo, successivo alla revisione delle fonti.':'Neobvezen korak po shranjenem pregledu iz virov.'));
@@ -63,7 +63,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    detail.append(el('summary',statusText+' · '+item.observed_text),el('p',aiLabel()),el('p',item.kind==='finding_comment'?(locale()==='it'?'Commento alle indicazioni esistenti':'Komentar k obstoječim ugotovitvam'):(locale()==='it'?'Suggerimento aggiuntivo':'Dodatni predlog')),
     el('p',(locale()==='it'?'Sezione ':'Odsek ')+(item.section_index+1)+' · '+item.start+'–'+item.end),el('blockquote',item.observed_text));
    if(item.replacement!==null)detail.append(el('p',item.observed_text+' → '+item.replacement));
-   detail.append(el('p',item.explanation));if(item.uncertainty)detail.append(el('p',(locale()==='it'?'Incertezza: ':'Negotovost: ')+item.uncertainty));
+   detail.append(el('p',item.explanation));if(item.uncertainty)detail.append(el('p',(locale()==='it'?'Valutazione dell’incertezza del modello: ':'Modelova ocena negotovosti: ')+item.uncertainty));
    if(item.mechanical_issues.length)detail.append(el('p',locale()==='it'?'Non applicabile al testo: posizione, riferimento o contenuto protetto richiedono controllo. Puoi scartarlo.':'Ni mogoče vključiti v besedilo: preveriti je treba mesto, sklic ali zaščiteno vsebino. Predlog lahko zavrnete.',{class:'qualified-note'}));
    for(const ref of item.source_refs){const source=ai.source_references[ref];if(source)button(detail,locale()==='it'?'Apri fonte citata dall’IA — non prova l’applicabilità':'Odpri vir, ki ga navaja AI — ne dokazuje uporabnosti',()=>openFamily(source.family_id,{sourceId:source.evidence_id}));}
    const decision=choice=>aiAction('decision',{suggestion_id:item.suggestion_id,decision:choice,result_sha256:ai.result_sha256,evidence_manifest_sha256:ai.evidence_manifest_sha256});

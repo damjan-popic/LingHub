@@ -137,3 +137,36 @@ def test_selected_word_keeps_native_styles_parts_and_no_ai_warning_in_body(rig):
         text=''.join(t.text or''for t in root.iter(files.W+'t'))
         assert text=='Ana je doma.'and AI_LABEL not in text
     assert client.get('/api/pilot/documents/'+identifier+'/draft/docx').content==original
+
+def test_future_coordinate_labels_keep_length_changing_historical_evidence_exact():
+    from pilot_backend.document_ai_contract import PACKET,sha
+    original='Nadaljni opis.';draft='Nadaljnji opis.'
+    edit={'start':0,'end':8,'original':'Nadaljni','replacement':'Nadaljnji'}
+    finding={'finding_id':'F'+'a'*24,'match':{'observed':{'start':0,'end':8,'text':'Nadaljni'}},
+       'proposed_edit':deepcopy(edit),'alternatives':[],'included_in_draft':True,
+       'applicability':'source_recommendation_applied','source_refs':['S'+'b'*16],
+       'source_focus':{'char_start':4,'char_end':12,'text':'Nadaljni'}}
+    section={'index':0,'location':'text@0:14','original_text':original,'original_sha256':sha(original),
+       'evidence_draft':draft,'draft_sha256':sha(draft),'evidence_edits':[edit],'findings':[finding],
+       'coordinate_guide':[{'start':10,'end':14,'text':'opis'}]}
+    value={'version':PACKET,'coordinate_base':'frozen_evidence_draft_unicode_codepoint_half_open',
+       'document_revision':'0'*64,'evidence_manifest_sha256':'1'*64,'locale':'sl','sections':[section],
+       'sources':{'S'+'b'*16:{'original_text':'abc Nadaljni','body_sha256':sha('abc Nadaljni')}},
+       'coverage':{'provided_sections':[0],'omitted_sections':[]}}
+    before=deepcopy(value);ai.label_coordinates(value);value['packet_sha256']=digest(value)
+    assert value['coordinate_base_scope']=='new_ai_items_only'
+    spaces=value['coordinate_spaces'];assert 'sections[].evidence_edits'in spaces['original_text_unicode_codepoint_half_open']
+    assert 'sections[].findings[].proposed_edit'in spaces['original_text_unicode_codepoint_half_open']
+    assert 'sections[].coordinate_guide'in spaces['evidence_draft_unicode_codepoint_half_open']
+    assert 'sections[].findings[].source_focus'in spaces['bound_source_original_text_unicode_codepoint_half_open']
+    assert finding['evidence_draft_relation']=='already_incorporated_historical_evidence'
+    assert {k:finding[k]for k in before['sections'][0]['findings'][0]}==before['sections'][0]['findings'][0]
+    assert value['sources']==before['sources']and section['evidence_edits']==before['sections'][0]['evidence_edits']
+    # The following unchanged word moves by one codepoint in the draft. New
+    # AI output still uses exact draft offsets and maps back to original 9:13.
+    row={'kind':'additional_suggestion','section_index':0,'start':10,'end':14,'observed_text':'opis',
+       'replacement':'zapis','explanation':'Synthetic mechanical coordinate fixture only.',
+       'uncertainty':'','source_refs':[],'finding_ids':[]}
+    item,=checked_output({'items':[row]},value)
+    assert item['eligible_for_accept']and item['original_span']=={'start':9,'end':13}
+    assert section['original_text'][9:13]==section['evidence_draft'][10:14]=='opis'

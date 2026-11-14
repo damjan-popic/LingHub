@@ -120,13 +120,16 @@ def report_blocks(review,locale='sl'):
     it=locale=='it'
     yield 'subheading','Revisione delle fonti senza autore generativo'if it else'Pregled iz virov brez generativnega pisca'
     yield 'body',overview(review,locale)
-    for finding in review['findings']:
+    rendered_advice={}
+    for number,finding in enumerate(review['findings'],1):
         span=finding['match']['observed'];source=finding['source'];advice=source.get('recorded_advice')or{}
-        yield 'subheading',('Indicazione 'if it else'Ugotovitev ')+finding['finding_id']
+        identity=digest({k:finding.get(k)for k in ('source','notice','type','applicability','alternatives','remaining_conditions','proposed_edit','included_in_draft')})
+        previous=rendered_advice.get(identity)
+        rendered_advice.setdefault(identity,number)
+        yield 'subheading',('Indicazione 'if it else'Ugotovitev ')+str(number)
         yield 'body',f"{span['start']}–{span['end']}: {span['text']}"
-        yield 'body',finding['notice']
-        if finding.get('document_revision'):yield 'body',('Revisione documento: 'if it else'Revizija dokumenta: ')+finding['document_revision']
-        if source.get('native_table'):yield 'body',('Posizione nella fonte: 'if it else'Mesto v viru: ')+str(source['native_table']['locator'])
+        if previous is None:yield 'body',finding['notice']
+        else:yield 'body',('Lo stesso testo integrale e le condizioni della fonte sono riportati nell’indicazione '+str(previous)+'.'if it else'Enako celotno pojasnilo in pogoji istega vira so navedeni pri ugotovitvi '+str(previous)+'.')
         yield 'body',(('Proposta con prova di applicabilità inclusa nella bozza; da verificare.'if it else'Predlog z dokazom uporabe je vključen v osnutek; potreben je pregled.')if finding['included_in_draft']else('Originale conservato. Nessuna correzione eseguibile autorizzata.'if it else'Izvirnik je ohranjen. Izvedljivi popravek ni bil dovoljen.'))
         if finding.get('proposed_edit'):
             yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
@@ -134,7 +137,7 @@ def report_blocks(review,locale='sl'):
             yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+({'singular':('singolare','ednina'),'dual':('duale','dvojina'),'plural':('plurale','množina')}.get(alternative.get('number'),('',''))[0 if it else 1])+')'
         if (source.get('native_source_unit')or{}).get('tool_kind')or (source.get('body_binding')or{}).get('capture_kind')=='terminology_record':
             yield 'body','Letture, sensi, alternative e misure originali sono conservati nella fonte acquisita; non sono sostituzioni automatiche.'if it else'Izvirne razlage, pomeni, možnosti in mere so ohranjeni v zajetem viru; to niso samodejne zamenjave.'
-        else:
+        elif previous is None and source['focus']['text']not in finding['notice']:
             yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
             yield 'quote',source['focus']['text']
         for key,label in [('recommendation_force','Moč priporočila'),('scope_note','Obseg in izjeme'),

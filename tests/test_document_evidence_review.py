@@ -119,3 +119,24 @@ def test_summary_is_separate_and_unknown_ids_cannot_replace_server_counts():
     assert packet['sources'][next(iter(packet['sources']))]['original_text']=='Zapis.'
     summary=document_summary.public_summary({'status':'available','manifest_sha256':'9'*64,'output':{'points':[]}},before)
     assert summary['historical']is True
+
+
+def test_report_reuses_only_identical_complete_advice_and_keeps_occurrence_identity():
+    from pilot_backend.evidence_review import report_blocks
+    task,doc,rows=sample();review=deepcopy(doc['review']);first=review['findings'][0]
+    first['notice']='Zapis. Governing condition A; alternative B remains available.'
+    first['document_revision']='a'*64
+    second=deepcopy(first);second['finding_id']='F'+'b'*24
+    second['match']['observed']={'start':10,'end':15,'text':'Other'}
+    review['findings'].append(second)
+    before=deepcopy(review);blocks=list(report_blocks(review));text='\n'.join(value for kind,value in blocks)
+    assert text.count(first['notice'])==1
+    assert 'Ugotovitev 1'in text and 'Ugotovitev 2'in text and '10–15: Other'in text
+    assert 'pri ugotovitvi 1'in text
+    assert not any(kind=='quote'and value==first['source']['focus']['text']for kind,value in blocks)
+    assert first['finding_id']not in text and first['document_revision']not in text
+    assert review==before
+    # Distinct source ownership must never disappear behind an identical quote.
+    second['source']['capture_sha256']='9'*64
+    text='\n'.join(value for kind,value in report_blocks(review))
+    assert text.count(first['notice'])==2

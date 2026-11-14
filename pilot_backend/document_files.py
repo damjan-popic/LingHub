@@ -458,10 +458,7 @@ def _report_blocks(report):
                     yield 'body',('Fonte congelata richiede accesso allo stesso account'if it else'Zamrznjeni vir zahteva prijavo z istim računom')
                     yield 'link',('Apri fonte congelata'if it else'Odpri zamrznjeni vir',source['frozen_source_url'])
                 else:
-                    if source.get('evidence_id'):yield 'body',('ID fonte 'if it else'ID vira ')+source['evidence_id']
-                    if source.get('source_revision'):yield 'body',('Revisione 'if it else'Revizija ')+source['source_revision']
-                    if source.get('locator'):
-                        yield 'body',('Localizzatore 'if it else'Lokator ')+json.dumps(source['locator'],ensure_ascii=False,sort_keys=True)
+                    yield 'body',('Identità e acquisizione completa della fonte sono conservate con il rapporto originale.'if it else'Identiteta in celotno zajetje vira sta shranjena ob izvirnem poročilu.')
                 if source.get('url'):yield 'link',('Pubblicazione originale'if it else'Izvirna objava',str(source['url']))
 
 

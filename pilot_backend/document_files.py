@@ -363,6 +363,9 @@ def _report_blocks(report):
         if warning=='document_translation_expired':yield 'body',('Il tempo della traduzione privata è scaduto; le parti non completate restano esplicite.'if it else'Čas zasebnega prevoda je potekel; nedokončani deli ostanejo izrecno označeni.')
         if warning=='document_translation_cancel_pending':yield 'body',('Si attende la conferma di arresto del traduttore. Un risultato tardivo non sarà utilizzato.'if it else'Čakamo na potrditev ustavitve prevajalnika. Pozni rezultat ne bo uporabljen.')
         if warning=='document_images_not_reviewed':yield 'body',('Le immagini sono conservate dove possibile, ma il loro contenuto non è stato revisionato né tradotto.'if it else'Slike se po možnosti ohranijo, njihova vsebina pa ni bila jezikovno pregledana ali prevedena.')
+    if report.get('ai_suggestions_enabled'):
+        from .document_ai_contract import EVIDENCE_LABEL
+        yield 'subheading',EVIDENCE_LABEL if not it else'Suggerimenti basati sulle fonti KLIKai'
     parts={};seen={}
     for section in sections:
         key=str(section.get('location','')).rsplit('@',1)[0];parts[key]=parts.get(key,0)+1
@@ -460,6 +463,11 @@ def _report_blocks(report):
                     if source.get('locator'):
                         yield 'body',('Localizzatore 'if it else'Lokator ')+json.dumps(source['locator'],ensure_ascii=False,sort_keys=True)
                 if source.get('url'):yield 'link',('Pubblicazione originale'if it else'Izvirna objava',str(source['url']))
+
+
+    if report.get('ai_suggestions_enabled'):
+        from .document_ai_suggestions import report_blocks as ai_blocks
+        yield from ai_blocks(report.get('ai_suggestions'),report.get('locale','sl'),report.get('saved_result_url','').split('/documents/')[0]or'/api/pilot')
 
 
 def _report_lines(report):

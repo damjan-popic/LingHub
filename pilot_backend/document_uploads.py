@@ -94,11 +94,12 @@ def task_for(block, options, *, previous_sections=(), document_id=None):
 
 
 class Documents:
-    def __init__(self, store, domain, *, private_translation=False, translation_limits=None, evidence_review=False, editorial_summary=False):
+    def __init__(self, store, domain, *, private_translation=False, translation_limits=None, evidence_review=False, editorial_summary=False, ai_suggestions=False):
         self.store, self.domain = store, domain
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
         self.thread = None
+        self.ai_suggestions=ai_suggestions
         self.editorial_summary=editorial_summary
         self.evidence_review=evidence_review
         self.private_translation=private_translation
@@ -243,7 +244,7 @@ class Documents:
         options=json.loads(row['options']or'{}')
         if row['state']=='draft'and options.get('translation_failed_preflight'):
             warnings.append(options['translation_failed_preflight']['error_code'])
-        public_options={k:v for k,v in options.items()if k not in {'editorial_summary','editorial_summary_history'}and(not k.startswith('translation_')or k=='translation_provider')}
+        public_options={k:v for k,v in options.items()if k not in {'editorial_summary','editorial_summary_history','ai_review','ai_history','ai_decisions','ai_decision_history'}and(not k.startswith('translation_')or k=='translation_provider')}
         if translation.selected(options):
             public_options['translation_profile_sha256']=translation.profile_hash(options['translation_profile'])
             public_options['translation_guidance']=translation.guided(options['translation_profile'])
@@ -255,7 +256,33 @@ class Documents:
         from .document_summary import manifest,public_summary
         result['review_manifest']=manifest(result)
         result['editorial_summary']=public_summary(options.get('editorial_summary'),result['review_manifest'])
+        from .document_ai_suggestions import public_review
+        if self.ai_suggestions or options.get('ai_review'):result['ai_suggestions']=public_review(self,owner,result,options)
         return result
+
+    @serialized
+    def prepare_ai(self,owner,identifier):
+        from .document_ai_suggestions import prepare
+        return prepare(self,owner,identifier)
+
+    @serialized
+    def start_ai(self,owner,identifier):
+        from .document_ai_suggestions import start
+        return start(self,owner,identifier)
+
+    @serialized
+    def decide_ai(self,owner,identifier,payload):
+        from .document_ai_suggestions import decide
+        return decide(self,owner,identifier,payload)
+
+    @serialized
+    def cancel_ai(self,owner,identifier):
+        from .document_ai_suggestions import cancel
+        return cancel(self,owner,identifier)
+
+    def export_selected(self,owner,identifier,fmt,revision,partial=False):
+        from .document_ai_suggestions import selected_export
+        return selected_export(self,owner,identifier,fmt,revision,partial)
 
     def prepare_summary(self,owner,identifier):
         if not self.editorial_summary:raise Failure('document_summary_unavailable',409)
@@ -383,6 +410,11 @@ class Documents:
             families = [r[0] for r in db.execute('SELECT family_id FROM document_sections '
                         'WHERE document_id=?', (identifier,)) if r[0]]
             db.execute('DELETE FROM uploaded_documents WHERE id=?', (identifier,))
+            ai=json.loads(row['options']or'{}').get('ai_review')or{}
+            if ai.get('family_id'):
+                active_ai=db.execute("SELECT 1 FROM jobs WHERE id=?AND state IN('queued','running')",(ai['job_id'],)).fetchone()
+                if active_ai:raise Failure('document_running',409)
+                families.append(ai['family_id'])
             # An explicitly linked follow-up retains its parent run. Delete the
             # document's own descendant answers together, in one FK-checked
             # statement, rather than break immutable historical references.
@@ -439,7 +471,7 @@ class Documents:
                 bundle=json.loads(saved[0]or'{}')if saved else{}
                 snapshot=json.loads(saved[1]or'{}')if saved else{}
                 sections.append(report_section({**section,'status':section['state']},bundle,snapshot,api_root))
-        report = {**document, **document['options'], 'sections':sections,
+        report = {**document, **document['options'], 'sections':sections,'ai_suggestions_enabled':self.ai_suggestions or bool(document.get('ai_suggestions')),
                   'saved_result_url':api_root+'/documents/'+quote(identifier,safe='')}
         return document_files.report_docx(report) if fmt == 'docx' else document_files.report_text(report)
 

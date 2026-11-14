@@ -29,6 +29,14 @@ def render_result(value):
     if 'document_result'in value:
         from .document_transform import checked_result
         out['document_result']=checked_result(value['document_result'])
+    if 'document_ai_suggestions'in value:
+        ai=value['document_ai_suggestions']
+        from .document_ai_contract import VERSION
+        if (not isinstance(ai,dict)or ai.get('version')!=VERSION
+                or ai.get('result_sha256')!=digest({k:v for k,v in ai.items()if k!='result_sha256'})
+                or ai.get('origin')!='ai_generated'or ai.get('authority')!='not_source_authorized'):
+            raise Failure('invalid_answer',502)
+        out['document_ai_suggestions']=ai
     from .human_feedback import provider_diagnostics
     out.update(provider_diagnostics(value))
     for field in ('short_answer','answer_md'):

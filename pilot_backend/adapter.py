@@ -177,6 +177,9 @@ class Gateway:
             raise Failure('document_translation_cancel_pending',503)
         return result
     def freeze(self,family,policy):
+        if family.get('request_options',{}).get('document_ai'):
+            from .document_ai_suggestions import freeze
+            return freeze(self,family,policy)
         if family.get('request_options',{}).get('document_task'):
             from . import document_transform
             return document_transform.freeze(self,family,policy)
@@ -232,6 +235,9 @@ class Gateway:
             frozen.setdefault('timings',{})['cpu_collation_ms']=tools.get('timings',{}).get('tool_evidence_ms')
         return frozen
     def generate(self,bundle,tier,model,parent=None):
+        if bundle.get('contract')=='klikai.document-ai-job.v1':
+            from .document_ai_suggestions import generate
+            return generate(self,bundle,tier,model,parent)
         if bundle.get('contract')=='klikai.document.v1':
             from . import document_transform
             return document_transform.generate(self,bundle,tier,model,parent)

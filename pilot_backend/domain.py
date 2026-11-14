@@ -85,7 +85,7 @@ class Domain:
         task=stored['task']
         options=db.execute('SELECT options FROM family_request_options WHERE family_id=?',(family,)).fetchone()
         document_value=json.loads(options[0]).get('document_task') if options else None
-        document_task=bool(document_value)
+        document_task=bool(document_value)or bool(json.loads(options[0]).get('document_ai')if options else False)
         guidance=not document_task and self.unified_answers and task=='reference' and request_tasks.interpret(stored['question'],stored['context'],stored['locale']) is not None
         comma_candidate=(not document_task and self.unified_answers and task=='reference'
             and comma_tasks.capability(getattr(self.request_gateway,'comma_checker',None))['configured']
@@ -106,7 +106,7 @@ class Domain:
         # Stable account/cohort allocation; no per-request reroll or existing-family mutation.
         if row and int(digest([owner,row['id']])[:8],16)%10==0:return row['candidate']
         return baseline
-    def create_family(self,owner,payload,*,document_task=None):
+    def create_family(self,owner,payload,*,document_task=None,document_ai=None):
         fields(payload,{'question','context','locale','interface_locale','input_language','focus','model','task','idempotency_key','origin','parent_run_id','parent_relation','comma_checker_consent'})
         if 'comma_checker_consent'in payload and type(payload['comma_checker_consent'])is not bool:raise Failure('invalid_request')
         relation=payload.get('parent_relation')
@@ -166,6 +166,7 @@ class Domain:
                 db.execute('INSERT INTO family_inputs VALUES(?,?)',(fid,original_question))
                 options={}
                 if document_task is not None:options['document_task']=document_task
+                if document_ai is not None:options['document_ai']=document_ai
                 if 'comma_checker_consent'in payload:options['comma_checker_consent']=payload['comma_checker_consent']
                 if comma_parent is not None:options['comma_parent']=comma_parent
                 if options:db.execute('INSERT INTO family_request_options VALUES(?,?)',(fid,canonical(options)))
@@ -174,7 +175,7 @@ class Domain:
                 r=self.new_run(db,fid,owner,'short',model,parent=parent,automated=payload.get('origin')=='automated_test')
                 if relation:db.execute('INSERT INTO run_relations VALUES(?,?)',(r['run_id'],relation))
                 return dict(family_id=fid,**r)
-            saved=self.idem(db,owner,'family',payload if document_task is None else{**payload,'document_task':document_task},action)
+            saved=self.idem(db,owner,'family',payload if document_task is None and document_ai is None else{**payload,**({'document_task':document_task}if document_task is not None else{}),**({'document_ai':document_ai}if document_ai is not None else{})},action)
         return {'family':self.family(owner,saved['family_id']),'job':self.job(owner,saved['job_id'])}
     def expand(self,owner,fid,payload):
         with self.store.tx()as db:

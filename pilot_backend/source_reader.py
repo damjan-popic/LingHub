@@ -248,6 +248,16 @@ def source_view(source, locale='sl'):
     if source.get('original_projection') is not None:
         from .original_projection import reader_blocks
         rows.extend(reader_blocks(source['original_projection'], locale))
+    bibliography=source.get('bibliography')or{}
+    if not isinstance(bibliography,dict):bibliography={}
+    bindings=bibliography.get('native_context_bindings')
+    if not isinstance(bindings,list):bindings=[]
+    if bibliography.get('context_exclusion')in {'native_content_incomplete_or_missing','native_rights_do_not_admit_content'}:
+        rows.insert(0,{'heading':'Limite del materiale acquisito'if locale=='it'else'Omejitev zajetega gradiva',
+            'text':'Il materiale è incompleto o soggetto a limiti e non costituisce una raccomandazione.'if locale=='it'else'Gradivo je nepopolno ali omejeno in se ne uporablja kot vsebinsko priporočilo.'})
+    elif any(b.get('native_exclusion')=='native_content_incomplete_or_missing'for b in bindings if isinstance(b,dict)):
+        rows.insert(0,{'heading':'Limite di una ricerca'if locale=='it'else'Omejitev posamezne poizvedbe',
+            'text':'Una ricerca ha restituito un gruppo parziale; il contesto ammesso proviene da un gruppo completo acquisito separatamente.'if locale=='it'else'Ena poizvedba je vrnila delno skupino. Prikazani sprejeti kontekst je vezan na ločeno zajeto popolno skupino.'})
     # The display contract is projected into bounded, text-only reader blocks;
     # raw captures and internal checksum/binding fields are not browser content.
     return dict({k: v for k, v in source.items() if k != 'original_projection'}, reader_blocks=rows)

@@ -365,9 +365,10 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             else:r=db.execute('SELECT *FROM runs WHERE family_id=?AND tier=?AND assignment_id IS NULL ORDER BY revision DESC LIMIT 1',(fid,stored_tier)).fetchone()
             if r:tier=answer_mode.source_tier(db,r)
             bundle=json.loads(f['bundle'])if f['bundle']else{}
+            document_bundle=None
             if bundle.get('contract')=='klikai.document.v1':
                 from .document_transform import checked
-                checked(bundle);bundle=bundle['source_bundle']
+                checked(bundle);document_bundle=bundle;bundle=bundle['source_bundle']
             is_unified=bundle.get('contract')==unified.CONTRACT and aid is None
             if not r or(r['state']!='complete'and not(is_unified and r['state']in {'running','cancelled','failed'})):raise Failure('not_found',404)
             run_result=json.loads(r['result']or'{}')
@@ -377,9 +378,17 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             original=db.execute('SELECT original_question FROM family_inputs WHERE family_id=?',
                 (fid,)).fetchone()
             binding_question=original[0]if original else f['question']
-            evidence=bundle['matches']if is_unified else json.loads(r['result']).get('evidence',[])
+            evidence=list(bundle['matches'])if is_unified else json.loads(r['result']).get('evidence',[])
+            if document_bundle is not None:
+                from .document_resource_context import records as ordinary_records
+                task=document_bundle['document_task']
+                try:evidence.extend(ordinary_records((document_bundle.get('review_observations')or{}).get('ordinary_resources'),task['source_text'],task['source_sha256']))
+                except (ValueError,KeyError,TypeError):raise Failure('source_binding_mismatch',502)from None
             selected=next((e for e in evidence if unified.evidence_id(e)==eid),None)
             if selected is None:raise Failure('not_found',404)
+            ordinary_document_source=document_bundle is not None and selected.get('capture_kind')=='ordinary_context_unit'
+            source_read_bundle=document_bundle if ordinary_document_source else bundle
+            if current_original and ordinary_document_source:raise Failure('not_found',404)
             frozen_source_record=(selected.get('source')if is_unified
                 and isinstance(selected.get('source'),dict)else None)
             if current_original and not is_unified:raise Failure('not_found',404)
@@ -387,7 +396,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         if current_original:
             unified.current_original_discovery(bundle,eid)
             result=await run_in_threadpool(adapter.current_original,bundle,eid)
-        else:result=retained if retained is not None else await run_in_threadpool(adapter.source,bundle,eid,tier)
+        else:result=retained if retained is not None else await run_in_threadpool(adapter.source,source_read_bundle,eid,tier)
         returned_record=result
         returned_evidence=result
         if isinstance(result.get('evidence'),list):

@@ -260,7 +260,7 @@ class Gateway:
     def source(self,bundle,evidence_id,tier):
         if bundle.get('contract')=='klikai.document.v1':
             from . import document_transform
-            return document_transform.source(self,bundle,evidence_id,tier)
+            return document_transform.source(bundle,evidence_id,tier)
         if bundle.get('contract')==comma_tasks.CONTRACT:return comma_tasks.source(self,bundle,evidence_id)
         if bundle.get('contract')==request_tasks.CONTRACT:return request_tasks.source(bundle,evidence_id,tier)
         if bundle.get('contract')==unified.CONTRACT:return unified.source(bundle,evidence_id)

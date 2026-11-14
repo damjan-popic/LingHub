@@ -57,3 +57,49 @@ def test_ai_packet_retains_native_candidate_context_with_no_evidence_finding():
     blocked=ai.packet(documents,'owner',document)
     assert blocked['sources']=={}and blocked['sections'][0]['retained_context']==[]
     assert blocked['coverage']['resource_context_delivery'][0]['omitted'][0]['reason']=='native_content_incomplete_or_missing'
+
+
+def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path):
+    import json
+    from argon2 import PasswordHasher,Type
+    from fastapi.testclient import TestClient
+    from pilot_backend.api import create_app
+    from pilot_backend import document_transform as doc,unified
+    from pilot_backend.document_resource_context import VERSION
+    from test_document_transform import Gateway,task,response
+    class NativeReaderGateway(Gateway):
+        reader_contracts=[]
+        def freeze(self,family,policy):
+            value=doc.freeze(self,family,policy);b=value['bundle'];text=b['document_task']['source_text']
+            sha=hashlib.sha256(text.encode()).hexdigest()
+            native={'passage_id':'tool:owned-native','source_id':'native:owned','source_slug':'cjvt-thesaurus',
+                'source_revision':'2'*64,'role':'tool_result','tool_kind':'synonyms','text':'Complete retained native content.',
+                'context_eligible':False,'incomplete':True}
+            context={'version':VERSION,'source_sha256':sha,'envelopes':[{'occurrence':{'section':0,'start':0,'end':len(text),
+                'text':text,'original_sha256':sha},'language':'sl','tool_passages':[native]}]}
+            context['context_sha256']=digest(context);b['review_observations']={'ordinary_resources':context}
+            b['snapshot_sha256']=digest({k:v for k,v in b.items()if k!='snapshot_sha256'})
+            self.result=response(b);return value
+        def generate(self,bundle,tier,model,parent=None):return doc.generate(self,bundle,tier,model,parent)
+        def source(self,bundle,eid,tier):
+            self.reader_contracts.append(bundle.get('contract'))
+            return doc.source(bundle,eid,tier)if bundle.get('contract')==doc.CONTRACT else unified.source(bundle,eid)
+    origin='http://127.0.0.1:18310';adapter=NativeReaderGateway()
+    app=create_app({'store':str(tmp_path/'pilot.sqlite'),'allowed_origins':[origin],'secure_cookies':False,
+        'unified_answers':True,'models':['auto'],'klikai_url':'http://127.0.0.1:18313'},adapter=adapter,start_workers=False,
+        hasher=PasswordHasher(time_cost=1,memory_cost=1024,parallelism=1,type=Type.ID))
+    password='synthetic native reader password'
+    owner=app.state.auth.create('reader-one',password,role='tester',origin='synthetic',must_change=False)
+    app.state.auth.create('reader-two',password,role='tester',origin='synthetic',must_change=False)
+    with TestClient(app,base_url=origin)as client:
+        assert client.post('/api/pilot/login',json={'username':'reader-one','password':password},headers={'Origin':origin}).status_code==200
+        created=app.state.domain.create_family(owner,{'question':'Pregled naloženega dokumenta','locale':'sl','input_language':'sl',
+            'model':'auto','task':'reference','idempotency_key':'native-reader-owner-test'},document_task=task())
+        app.state.jobs.execute(app.state.jobs.claim());fid=created['family']['answer_family_id']
+        url='/api/pilot/families/'+fid+'/sources/tool:owned-native?tier=answer'
+        opened=client.get(url);assert opened.status_code==200,opened.text
+        assert 'Complete retained native content.'in opened.json()['excerpt']
+        assert opened.json()['reader_blocks'][0]['heading']=='Omejitev zajetega gradiva'
+        assert adapter.reader_contracts[-1]==doc.CONTRACT
+        assert client.post('/api/pilot/login',json={'username':'reader-two','password':password},headers={'Origin':origin}).status_code==200
+        assert client.get(url).status_code==404

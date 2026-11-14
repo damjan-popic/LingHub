@@ -2,6 +2,7 @@
 from copy import deepcopy
 import hashlib,json,re
 from .store import canonical,digest,stamp
+from .document_source_body import source_body,body_binding
 from .security import Failure
 from .document_ai_contract import VERSION,PACKET,AI_LABEL,EVIDENCE_LABEL,WARNING,checked_packet,checked_output,selected_sections
 
@@ -40,11 +41,12 @@ def packet(documents,owner,document):
             for finding in review['findings']:
                 source=finding['source'];record=by_id.get(source['evidence_id'])
                 if record is None or record['capture_sha256']!=source['capture_sha256']:invalid()
-                raw=record['capture'];body=raw.get('original_text')
+                raw=record['capture'];body=source_body(record)
                 if not isinstance(body,str):invalid()
                 native={key:deepcopy(raw[key])for key in ('title','source_revision','source_status','source_date','edition','release_id',
                     'normative_status','coverage_note','rights_mode','url','language','geographical_scope','jurisdiction','domain','register')if key in raw}
                 native.update(source_slug=record['source_slug'],external_id=record['external_id'],original_text=body,body_sha256=hashlib.sha256(body.encode()).hexdigest())
+                if not isinstance(raw.get('original_text'),str):native.update(body_binding=body_binding(record),source_owned_fields=deepcopy(raw))
                 key='S'+digest(native)[:16]
                 if key not in sources:sources[key]={**native,'recorded_advice':[],'related_captures':[],
                     'reader':{'family_id':section['family_id'],'evidence_id':source['evidence_id']}}

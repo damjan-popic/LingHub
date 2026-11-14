@@ -1,5 +1,6 @@
 """Validation and deterministic presentation of writer-independent findings."""
 from copy import deepcopy
+from .document_source_body import source_body,body_binding
 import hashlib
 import re
 from .store import digest
@@ -82,10 +83,10 @@ def checked(review,text=None,task=None,matches=None):
                 raise Failure('invalid_document_result',502)
         if matches is not None:
             record=matches.get(source.get('evidence_id'));raw=(record or{}).get('capture')or{}
-            body=raw.get('original_text');focus=source.get('focus')or{}
+            body=source_body(record or{});focus=source.get('focus')or{}
             left,right=focus.get('char_start'),focus.get('char_end')
             if (record is None or record['capture_sha256']!=source.get('capture_sha256')
-                    or not isinstance(body,str)or type(left)is not int or type(right)is not int
+                    or not isinstance(body,str)or source.get('body_binding')is not None and source['body_binding']!=body_binding(record)or type(left)is not int or type(right)is not int
                     or not 0<=left<right<=len(body)or body[left:right]!=focus.get('text')
                     or hashlib.sha256(body[left:right].encode()).hexdigest()!=focus.get('text_sha256')
                     or source.get('recorded_advice')is not None and source['recorded_advice']not in(raw.get('advice_units')or[])):

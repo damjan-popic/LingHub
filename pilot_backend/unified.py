@@ -574,7 +574,7 @@ def collect_tools(gateway, family, *, comma_observation=None):
                 raise ValueError('Syntax target differs from interpreted original')
             observed=collect_syntax(target['text'],config)
             if observed.get('status')!='ok':
-                return None,dict(status,status='unavailable',tool_outcome='unavailable',reason=observed.get('reason','syntax_unavailable'))
+                return None,dict(status,status='unavailable',tool_outcome='unavailable',reason=observed.get('reason','syntax_unavailable'),observation=deepcopy(observed))
             observed['target_scope']=deepcopy(target)
             if isinstance(comma_observation,dict) and comma_observation.get('input_text')==target['text']:
                 from core.comma_checker import public_proposal

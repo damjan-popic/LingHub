@@ -43,7 +43,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   if(native)panel.append(el('p',current.options?.translation_guidance?(locale()==='it'?'Percorso privato SL→IT con materiale KLIKai: il rapporto mostra quanto è stato consegnato al traduttore. Verifica significato e scelte.':'Zasebna pot SL→IT z gradivom KLIKai: poročilo pokaže, kaj je bilo posredovano prevajalniku. Preverite pomen in izbire.'):(locale()==='it'?'Bozza privata SL→IT: controlla significato e stile. Fonti terminologiche KLIKai non consultate.':'Zasebni osnutek SL→IT: preverite pomen in slog. Terminološki viri KLIKai niso bili uporabljeni.'),{class:'qualified-note','data-native-scope-note':''}));
   if(current.review_manifest){
    const counts=current.review_manifest.counts;
-   panel.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / modifiche: ':'Priporočila / primerjave / kontekst / spremembe: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application].join(' / '),{'data-document-review-counts':''}));
+   panel.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / incluse / condizionate: ':'Priporočila / primerjave / kontekst / vključeni / pogojni: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application,counts.application_proposal||0].join(' / '),{'data-document-review-counts':''}));
    const summary=current.editorial_summary;
    if(summary){
     panel.append(el('h4',locale()==='it'?'Riepilogo editoriale IA facoltativo':'Neobvezen uredniški povzetek z umetno inteligenco'));
@@ -103,7 +103,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    const review=section.document_result?.review;
    if(review){
     const counts=review.overview.counts;
-    item.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / modifiche: ':'Priporočila / primerjave / kontekst / spremembe: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application].join(' / '),{'data-review-counts':''}));
+    item.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / incluse / condizionate: ':'Priporočila / primerjave / kontekst / vključeni / pogojni: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application,counts.application_proposal||0].join(' / '),{'data-review-counts':''}));
     for(const finding of review.findings){
      const detail=el('details',undefined,{'data-finding-id':finding.finding_id,id:finding.finding_id});
      detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen'))));
@@ -112,6 +112,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
      if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',adviceLabel(key,advice[key])));
      if(finding.source.untyped_context_limit)detail.append(el('p',locale()==='it'?'Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.':'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.',{class:'qualified-note'}));
      if(finding.proposed_edit)detail.append(el('p',finding.proposed_edit.original+' → '+finding.proposed_edit.replacement));
+     for(const alternative of finding.alternatives||[])detail.append(el('p',(locale()==='it'?'Alternativa condizionata: ':'Pogojna možnost: ')+alternative.form+' ('+alternative.number+')'));
      if(section.family_id)button(detail,locale()==='it'?'Apri la fonte completa':'Odpri celotni vir',()=>openFamily(section.family_id,{sourceId:finding.source.evidence_id}));
      item.append(detail);
     }

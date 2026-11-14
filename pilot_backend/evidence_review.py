@@ -28,23 +28,39 @@ def checked(review,text=None,task=None,matches=None):
         original=(finding.get('match')or{}).get('observed')or{}
         a,b=original.get('start'),original.get('end')
         if (not re.fullmatch(r'F[0-9a-f]{24}',str(finding.get('finding_id')))
-                or finding['finding_id']in seen or finding.get('type')not in {'qualified_advice','recorded_contrast','recorded_form_context','executable_application'}
-                or type(a)is not int or type(b)is not int or not 0<=a<b<=3000
+                or finding['finding_id']in seen or finding.get('type')not in {'qualified_advice','recorded_contrast','recorded_form_context','executable_application','application_proposal'}
+                or type(a)is not int or type(b)is not int or not 0<=a<=b<=3000
                 or text is not None and text[a:b]!=original.get('text')
-                or finding.get('type')!='executable_application'and(finding.get('proposed_edit')is not None or finding.get('included_in_draft')is not False)):
+                or finding.get('type')!='executable_application'and(finding.get('type')!='application_proposal'and finding.get('proposed_edit')is not None or finding.get('included_in_draft')is not False)):
             raise Failure('invalid_document_result',502)
         if (finding.get('document_revision')!=review.get('document_revision')or finding.get('document_location')!=review.get('document_location')):
             raise Failure('invalid_document_result',502)
         seen.add(finding['finding_id'])
         if finding['type']=='executable_application':
             proof=finding.get('application_proof')or{}
-            if (proof.get('adapter_version')!='document-existing-applications.v1'
+            if (proof.get('adapter_version')not in {'document-existing-applications.v1','document-source-applications.v1'}
                     or proof.get('proof_sha256')!=digest({k:v for k,v in proof.items()if k!='proof_sha256'})
                     or proof.get('writer_inference_performed')is not False
                     or finding.get('included_in_draft')is not True
                     or finding.get('proposed_edit')not in review.get('applications',{}).get('edits',[])):
                 raise Failure('invalid_document_result',502)
         source=finding.get('source')or{}
+        if finding.get('application_proof',{}).get('adapter_version')=='document-source-applications.v1'and finding.get('included_in_draft'):
+            # Consumer checks exact contract/registry/source/document bindings.
+            # Normative applicability is established and rechecked in CORE.
+            from .document_application_observations import application_registry
+            data,identity=application_registry();proof=finding['application_proof']
+            index=proof.get('registry_entry');edit=finding['proposed_edit']
+            if (proof.get('registry_sha256')!=identity or type(index)is not int or not 0<=index<len(data['entries'])
+                    or proof.get('input_sha256')!=review['source_sha256']
+                    or proof.get('source_capture_sha256')!=source.get('capture_sha256')):
+                raise Failure('invalid_document_result',502)
+            entry=data['entries'][index]
+            if (entry['kind']!='spelling_letters'or source.get('focus',{}).get('text_sha256')!=entry['row_sha256']
+                    or edit['original'].casefold()!=entry['original'].casefold()
+                    or edit['replacement'].casefold()!=entry['replacement'].casefold()
+                    or text is not None and text[edit['start']:edit['end']]!=edit['original']):
+                raise Failure('invalid_document_result',502)
         if matches is not None:
             record=matches.get(source.get('evidence_id'));raw=(record or{}).get('capture')or{}
             body=raw.get('original_text');focus=source.get('focus')or{}
@@ -62,10 +78,10 @@ def checked(review,text=None,task=None,matches=None):
     included=[f['proposed_edit']for f in review['findings']if f['included_in_draft']]
     if included!=review.get('applications',{}).get('edits',[]):raise Failure('invalid_document_result',502)
     if review.get('overview',{}).get('included_edits')!=len(included):raise Failure('invalid_document_result',502)
-    expected={kind:sum(f['type']==kind for f in review['findings'])for kind in ('qualified_advice','recorded_contrast','recorded_form_context','executable_application')}
-    if review.get('overview',{}).get('counts')!=expected:raise Failure('invalid_document_result',502)
+    expected={kind:sum(f['type']==kind for f in review['findings'])for kind in ('qualified_advice','recorded_contrast','recorded_form_context','executable_application','application_proposal')}
+    if {k:review.get('overview',{}).get('counts',{}).get(k,0)for k in expected}!=expected or set(review.get('overview',{}).get('counts',{}))-set(expected):raise Failure('invalid_document_result',502)
     statuses={'completed','completed_no_issue','applied_existing_contract','unresolved_proposal','failed','not_run','outside_coverage','partial'}
-    if any(not isinstance(c,dict)or c.get('check_id')not in {'captured_source_forms','comma_prediction','general_linguistic_correctness','recorded_morphology','source_discovery'}or c.get('status')not in statuses for c in review['checks']):raise Failure('invalid_document_result',502)
+    if any(not isinstance(c,dict)or c.get('check_id')not in {'captured_source_forms','comma_prediction','general_linguistic_correctness','recorded_morphology','source_discovery','application_analysis','application_paradigms'}or c.get('status')not in statuses for c in review['checks']):raise Failure('invalid_document_result',502)
     return deepcopy(review)
 
 
@@ -73,10 +89,10 @@ def overview(review,locale='sl'):
     counts=review['overview']['counts']
     if locale=='it':
         return (f"Revisione delle fonti: {counts['qualified_advice']} indicazioni qualificate, "
-            f"{counts['recorded_contrast']} confronti registrati, {counts['recorded_form_context']} riferimenti contestuali, {counts['executable_application']} modifiche da applicazioni esistenti. "
+            f"{counts['recorded_contrast']} confronti registrati, {counts['recorded_form_context']} riferimenti contestuali, {counts['executable_application']} proposte incluse, {counts.get('application_proposal',0)} applicazioni condizionate. "
             'Le indicazioni non sono correzioni automatiche. Controllare ambito e condizioni; non è una certificazione linguistica completa.')
     return (f"Pregled iz virov: {counts['qualified_advice']} kvalificiranih priporočil, "
-        f"{counts['recorded_contrast']} zapisanih primerjav, {counts['recorded_form_context']} kontekstnih zapisov, {counts['executable_application']} sprememb iz obstoječih izvedljivih uporab. "
+        f"{counts['recorded_contrast']} zapisanih primerjav, {counts['recorded_form_context']} kontekstnih zapisov, {counts['executable_application']} vključenih predlogov, {counts.get('application_proposal',0)} pogojnih uporab. "
         'Nasveti niso samodejni popravki. Preverite obseg in pogoje; celovita jezikovna pravilnost ni potrjena.')
 
 
@@ -91,7 +107,11 @@ def report_blocks(review,locale='sl'):
         yield 'body',finding['notice']
         if finding.get('document_revision'):yield 'body',('Revisione documento: 'if it else'Revizija dokumenta: ')+finding['document_revision']
         if source.get('native_table'):yield 'body',('Posizione nella fonte: 'if it else'Mesto v viru: ')+str(source['native_table']['locator'])
-        yield 'body',(('Modifica proposta da un’applicazione esistente; da verificare.'if it else'Predlog iz obstoječe izvedljive uporabe; potreben je pregled.')if finding['included_in_draft']else('Originale conservato. Nessuna correzione eseguibile autorizzata.'if it else'Izvirnik je ohranjen. Izvedljivi popravek ni bil dovoljen.'))
+        yield 'body',(('Proposta con prova di applicabilità inclusa nella bozza; da verificare.'if it else'Predlog z dokazom uporabe je vključen v osnutek; potreben je pregled.')if finding['included_in_draft']else('Originale conservato. Nessuna correzione eseguibile autorizzata.'if it else'Izvirnik je ohranjen. Izvedljivi popravek ni bil dovoljen.'))
+        if finding.get('proposed_edit'):
+            yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
+        for alternative in finding.get('alternatives',[]):
+            yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+str(alternative.get('number',''))+')'
         yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
         yield 'quote',source['focus']['text']
         for key,label in [('recommendation_force','Moč priporočila'),('scope_note','Obseg in izjeme'),
@@ -105,7 +125,9 @@ def report_blocks(review,locale='sl'):
                 yield 'body',label+': '+(value[0 if it else 1]if value else str(advice[key]))
         if source.get('untyped_context_limit'):yield 'body',('Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.'if it else'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.')
     yield 'subheading','Controlli e limiti'if it else'Preverjanja in omejitve'
-    names={'captured_source_forms':('Forme registrate nelle fonti','Zapisi iz virov'),
+    names={'application_analysis':('Analisi contestuale dedicata','Namenska skladenjska analiza'),
+        'application_paradigms':('Paradigmi registrati per le proposte','Zapisane paradigme za predloge'),
+        'captured_source_forms':('Forme registrate nelle fonti','Zapisi iz virov'),
         'comma_prediction':('Controllo dedicato delle virgole','Namensko preverjanje vejic'),
         'recorded_morphology':('Candidati morfologici registrati','Zapisani oblikoslovni kandidati'),
         'source_discovery':('Ricerca delle fonti','Iskanje virov'),

@@ -1,0 +1,173 @@
+{
+  "version": "document-source-applications.v1",
+  "entries": [
+    {
+      "kind": "spelling_letters",
+      "body_sha256": "33b24aaf35ab944007f2fb67785c54c3424e3356475fbde7bba0d01c379c10a7",
+      "row_sha256": "5258b430321f6b1d39e289907ae66d8b6712536215a7f6b7f4abfefd8613606a",
+      "row_span": [
+        3749,
+        3773
+      ],
+      "left": "nadaljni",
+      "right": "nadaljnji",
+      "locator": [
+        13,
+        0,
+        5
+      ],
+      "authority": "CU May 2021 advisory manual for Slovene administrative writing in Italy; source recommendation, not universal prohibition",
+      "assessment": "Engineering interpretation of complete source row and heading; no external linguistic certification",
+      "force": "source_recommends",
+      "original": "nadaljni",
+      "replacement": "nadaljnji",
+      "allowed_pos": [
+        "ADJ"
+      ],
+      "interpretation": "Source-recorded letter repair between these exact adjective surfaces; independent MANUAL Sloleks feature sets agree. Distinct lexical entry IDs, not arbitrary same-lexeme inflection.",
+      "source_metadata": {
+        "source_revision": "c5d0adf7dafc0f0ba1e24cc9423762af129a5a93aa5ccc23c226cc4e0237319f",
+        "source_date": "2021-05",
+        "source_status": "Objavljeni slogovni priročnik CU, maj 2021.",
+        "edition": null,
+        "normative_status": "current_reference",
+        "coverage_note": "Pisanje in prevajanje upravnih besedil za potrebe slovenske manjšine v Italiji; primeri iz dežele Furlanije - Julijske krajine. Slogovna in prevodna priporočila iz maja 2021, ne preverjanje veljavnosti predpisov. Izvirna dostavljena datoteka je ohranjena; spletna stran je trenutna stran priročnika.",
+        "record_id": null,
+        "title": "Slogovni priročnik CU — 1. NAPOTKI ZA RAZUMLJIVEJŠI JEZIK IN BOLJŠI SLOG — 5. Napačne, odsvetovane ali slabe izbire glede na knjižni kod oziroma standardni jezik in predlagane rešitve:"
+      },
+      "source_assessment_artifact": "source-applicability-audit/SOURCE_APPLICABILITY_RECOMMENDATION_20261114.md",
+      "independent_crosscheck": "source-applicability-audit/SPELLING_PAIR_CROSSCHECK_SUPPLEMENT_20261114.md"
+    },
+    {
+      "kind": "spelling_letters",
+      "body_sha256": "33b24aaf35ab944007f2fb67785c54c3424e3356475fbde7bba0d01c379c10a7",
+      "row_sha256": "cfda1a57e4ff44c60c099a35f5a63a91e5fe74f762539775476241c16e14022d",
+      "row_span": [
+        1902,
+        1940
+      ],
+      "left": "eventuelen",
+      "right": "eventualen, morebiten",
+      "locator": [
+        12,
+        0,
+        2
+      ],
+      "authority": "CU May 2021 advisory manual for Slovene administrative writing in Italy; source recommendation, not universal prohibition",
+      "assessment": "Engineering interpretation of complete source row and heading; no external linguistic certification",
+      "force": "source_recommends",
+      "original": "eventuelen",
+      "replacement": "eventualen",
+      "allowed_pos": [
+        "ADJ"
+      ],
+      "interpretation": "Source-recorded letter repair between these exact adjective surfaces; independent MANUAL Sloleks feature sets agree. Distinct lexical entry IDs, not arbitrary same-lexeme inflection.",
+      "source_metadata": {
+        "source_revision": "c5d0adf7dafc0f0ba1e24cc9423762af129a5a93aa5ccc23c226cc4e0237319f",
+        "source_date": "2021-05",
+        "source_status": "Objavljeni slogovni priročnik CU, maj 2021.",
+        "edition": null,
+        "normative_status": "current_reference",
+        "coverage_note": "Pisanje in prevajanje upravnih besedil za potrebe slovenske manjšine v Italiji; primeri iz dežele Furlanije - Julijske krajine. Slogovna in prevodna priporočila iz maja 2021, ne preverjanje veljavnosti predpisov. Izvirna dostavljena datoteka je ohranjena; spletna stran je trenutna stran priročnika.",
+        "record_id": null,
+        "title": "Slogovni priročnik CU — 1. NAPOTKI ZA RAZUMLJIVEJŠI JEZIK IN BOLJŠI SLOG — 5. Napačne, odsvetovane ali slabe izbire glede na knjižni kod oziroma standardni jezik in predlagane rešitve:"
+      },
+      "source_assessment_artifact": "source-applicability-audit/SOURCE_APPLICABILITY_RECOMMENDATION_20261114.md",
+      "independent_crosscheck": "source-applicability-audit/SPELLING_PAIR_CROSSCHECK_SUPPLEMENT_20261114.md"
+    },
+    {
+      "kind": "case_government",
+      "body_sha256": "33b24aaf35ab944007f2fb67785c54c3424e3356475fbde7bba0d01c379c10a7",
+      "row_sha256": "92d00df43ac72d26f558755102624be3a81a42d57dea5af6111422cc71a9ee09",
+      "row_span": [
+        10045,
+        10129
+      ],
+      "left": "v prid koga/česa\nv prid manjšine",
+      "right": "v prid + dajalnik (komu/čemu)\nv prid manjšini",
+      "locator": [
+        17,
+        0,
+        5
+      ],
+      "authority": "CU May 2021 advisory manual for Slovene administrative writing in Italy; source recommendation, not universal prohibition",
+      "assessment": "Engineering interpretation of complete source row and heading; no external linguistic certification",
+      "force": "source_recommends",
+      "prefix": "v prid",
+      "required_case": "dative",
+      "example_original": "v prid manjšine",
+      "example_replacement": "v prid manjšini",
+      "source_metadata": {
+        "source_revision": "c5d0adf7dafc0f0ba1e24cc9423762af129a5a93aa5ccc23c226cc4e0237319f",
+        "source_date": "2021-05",
+        "source_status": "Objavljeni slogovni priročnik CU, maj 2021.",
+        "edition": null,
+        "normative_status": "current_reference",
+        "coverage_note": "Pisanje in prevajanje upravnih besedil za potrebe slovenske manjšine v Italiji; primeri iz dežele Furlanije - Julijske krajine. Slogovna in prevodna priporočila iz maja 2021, ne preverjanje veljavnosti predpisov. Izvirna dostavljena datoteka je ohranjena; spletna stran je trenutna stran priročnika.",
+        "record_id": null,
+        "title": "Slogovni priročnik CU — 1. NAPOTKI ZA RAZUMLJIVEJŠI JEZIK IN BOLJŠI SLOG — 5. Napačne, odsvetovane ali slabe izbire glede na knjižni kod oziroma standardni jezik in predlagane rešitve:"
+      },
+      "source_assessment_artifact": "source-applicability-audit/SOURCE_APPLICABILITY_RECOMMENDATION_20261114.md"
+    },
+    {
+      "kind": "qualified_means_assistance",
+      "body_sha256": "33b24aaf35ab944007f2fb67785c54c3424e3356475fbde7bba0d01c379c10a7",
+      "row_sha256": "0e872a564e42e58670e9f37726008a2edb5cdb13661c457bd7062da5692b6d1b",
+      "row_span": [
+        6955,
+        7199
+      ],
+      "force": "recommendation_with_exception",
+      "head": "s pomočjo",
+      "example_original": "s pomočjo preglednice",
+      "example_replacement": "z uporabo preglednice",
+      "exception_examples": [
+        "s pomočjo odvetnika",
+        "s pomočjo tolmača"
+      ],
+      "complete_original_sentence": "Podatki so prikazani s pomočjo preglednice.",
+      "complete_replacement_sentence": "Podatki so prikazani z uporabo preglednice.",
+      "authority": "Complete qualified recommendation, alternatives and helping/advising person exception retained; proposed annotation is not promoted",
+      "assessment": "Engineering interpretation of complete advice; no independent semantic classifier or linguistic certification",
+      "source_metadata": {
+        "source_revision": "c5d0adf7dafc0f0ba1e24cc9423762af129a5a93aa5ccc23c226cc4e0237319f",
+        "source_date": "2021-05",
+        "source_status": "Objavljeni slogovni priročnik CU, maj 2021.",
+        "edition": null,
+        "normative_status": "current_reference",
+        "coverage_note": "Pisanje in prevajanje upravnih besedil za potrebe slovenske manjšine v Italiji; primeri iz dežele Furlanije - Julijske krajine. Slogovna in prevodna priporočila iz maja 2021, ne preverjanje veljavnosti predpisov. Izvirna dostavljena datoteka je ohranjena; spletna stran je trenutna stran priročnika.",
+        "record_id": null,
+        "title": "Slogovni priročnik CU — 1. NAPOTKI ZA RAZUMLJIVEJŠI JEZIK IN BOLJŠI SLOG — 5. Napačne, odsvetovane ali slabe izbire glede na knjižni kod oziroma standardni jezik in predlagane rešitve:"
+      },
+      "advice_metadata": {
+        "recommendation_force": "recommendation_with_exception",
+        "mapping_status": "proposed_needs_review",
+        "scope_note": "Pri predmetnem sredstvu priročnik predlaga z uporabo ali na podlagi; zvezo s pomočjo izrecno dopušča pri osebi, ki pomaga ali svetuje.",
+        "application_scope_note": null
+      },
+      "source_assessment_artifact": "source-applicability-audit/SOURCE_APPLICABILITY_RECOMMENDATION_20261114.md"
+    }
+  ],
+  "excluded": [
+    {
+      "left": "inštitucija",
+      "reason": "Source contrast alone cannot exclude accepted spelling variants."
+    },
+    {
+      "left": "preskusiti",
+      "reason": "Accepted lexical variants; not a proved spelling error."
+    },
+    {
+      "left": "odgovarjajoč",
+      "reason": "Lexical/style alternatives, not a letter repair."
+    },
+    {
+      "left": "čimbolj, čimprej",
+      "reason": "Word segmentation and proposed advice outside this letter-repair class."
+    },
+    {
+      "left": "osveščen, osveščenost",
+      "reason": "Independent semantic/lexical interpretation not established."
+    }
+  ]
+}

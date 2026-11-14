@@ -824,14 +824,21 @@ def freeze(gateway, family, policy):
         body['review_observations']={'comma':deepcopy(captured.get('observation')),
             'comma_operation':{key:deepcopy(captured[key])for key in ('status','authorization','task')if key in captured}}
         observation=captured.get('observation')or{}
-        if observation.get('status')=='ok'and observation.get('edits'):
+        if task['source_language']=='sl':
             comma_task=captured.get('task')or{}
+            if comma_task.get('status')!='ready':
+                comma_task={'status':'ready','explain':True,'target':{'scope':'question','start':len('Preveri vejice: '),
+                    'end':len('Preveri vejice: ')+len(task['source_text']),'text':task['source_text']}}
             question='Preveri vejice: '+task['source_text']
             syntax,observed=unified.collect_tools(gateway,{'question':question,'original_question':question,
                 'context':'','input_language':task['source_language'],'locale':task['locale'],
                 'request_plan':{'comma_check':comma_task}},comma_observation=observation)
             body['review_observations']['syntax']=deepcopy(syntax)
             body['review_observations']['syntax_collection']=observed
+        # Complete bounded noun paradigms are recorded evidence, not a sense
+        # selection. Keep every case/number reading for conditional proposals.
+        from .document_application_observations import freeze_morphology
+        body['review_observations']['application_morphology']=freeze_morphology(gateway,task,body)
         body['snapshot_sha256']=digest(body)
         general['identity']['captured_response_sha256']=body['snapshot_sha256']
         return general

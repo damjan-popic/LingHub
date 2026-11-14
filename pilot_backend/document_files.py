@@ -341,7 +341,7 @@ def _report_blocks(report):
     if report.get('review_manifest'):
         overview=report['review_manifest'];counts=overview['counts']
         yield 'subheading','Panoramica deterministica'if it else'Pregled ugotovitev'
-        yield 'body',('Indicazioni / confronti / contesto / modifiche: 'if it else'Priporočila / primerjave / kontekst / spremembe: ')+str(counts['qualified_advice'])+' / '+str(counts['recorded_contrast'])+' / '+str(counts['recorded_form_context'])+' / '+str(counts['executable_application'])
+        yield 'body',('Indicazioni / confronti / contesto / incluse / condizionate: 'if it else'Priporočila / primerjave / kontekst / vključeni / pogojni: ')+str(counts['qualified_advice'])+' / '+str(counts['recorded_contrast'])+' / '+str(counts['recorded_form_context'])+' / '+str(counts['executable_application'])+' / '+str(counts.get('application_proposal',0))
         yield 'body',('Nessun autore generativo usato per il riesame. Le indicazioni non stabiliscono automaticamente un errore; la copertura è limitata.'if it else'Pri pregledu generativni pisec ni bil uporabljen. Nasveti ne pomenijo samodejno ugotovljene napake; obseg je omejen.')
         summary=report.get('editorial_summary')
         if summary:

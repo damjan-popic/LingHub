@@ -52,3 +52,8 @@ def test_ai_packet_retains_native_candidate_context_with_no_evidence_finding():
     assert source['native_answer_eligibility']is False
     assert source['admission_roles']==['model_context_not_edit_authority']
     assert value['coverage']['resource_context_delivery'][0]['additional_context_count']==1
+    native['incomplete']=True;native['context_eligible']=True
+    context['context_sha256']=digest({k:v for k,v in context.items()if k!='context_sha256'})
+    blocked=ai.packet(documents,'owner',document)
+    assert blocked['sources']=={}and blocked['sections'][0]['retained_context']==[]
+    assert blocked['coverage']['resource_context_delivery'][0]['omitted'][0]['reason']=='native_content_incomplete_or_missing'

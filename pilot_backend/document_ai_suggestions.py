@@ -94,7 +94,7 @@ def packet(documents,owner,document):
                     omitted.append({'evidence_id':eid,'reason':'linked_or_unavailable_content'});continue
                 ordinary=record.get('capture_kind')=='ordinary_context_unit'
                 eligible=(record.get('model_context_eligible')or record.get('context_eligible'))if ordinary else record.get('context_eligible')
-                if not eligible:omitted.append({'evidence_id':eid,'reason':'native_capture_not_admitted'});continue
+                if not eligible:omitted.append({'evidence_id':eid,'reason':(record.get('document_admission')or{}).get('reason')or'native_capture_not_admitted'});continue
                 relevant=(ordinary and record['document_admission']['role']!='retained_lookup_only'or record.get('capture_kind')=='editorial_record'
                     or _native_review_cue(record,section['text'],task['source_language'])>=2
                     or any(item.get('kind')!='literal_word'for item in _documentary_review_occurrences(record,task)))

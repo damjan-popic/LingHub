@@ -4,6 +4,13 @@ import hashlib,json,re,unicodedata
 
 VERSION='klikai.document-ordinary-context.v1'
 def digest(v):return hashlib.sha256(json.dumps(v,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+def native_exclusion(passage):
+    if passage.get('rights_mode')in {'linked_only','metadata_only','unknown'}:return 'native_rights_do_not_admit_content'
+    if (passage.get('incomplete')or passage.get('missing_content')or passage.get('missing_fields')
+            or passage.get('content_status')in {'incomplete','unavailable','metadata_only','linked_only'}
+            or 'incomplete_answer_group'in passage.get('warnings',[])):return 'native_content_incomplete_or_missing'
+    return None
+
 def reference_nomination(passage,occurrence_text):
     """Mechanical topic nomination only; it never resolves applicability."""
     norm=lambda v:' '.join(unicodedata.normalize('NFKC',v).casefold().split())
@@ -42,20 +49,21 @@ def records(value,text,source_sha256):
             if (not isinstance(eid,str)or not eid or not isinstance(body,str)or not body
                     or len(body)>65536 or not isinstance(passage.get('source_slug'),str)
                     or not isinstance(passage.get('source_revision'),str)):raise ValueError('Native context passage differs')
+            excluded=native_exclusion(passage)
             raw={k:deepcopy(passage[k])for k in ('title','url','source_revision','source_status','edition','date','publication_scope')if k in passage}
             raw.update(original_text=body,source_unit=deepcopy(passage),language=envelope['language'],
                 coverage_note=passage.get('tool_scope')or'Qualified retained source context; relevance is not applicability or correction authority.')
             row={'evidence_id':eid,'capture_kind':'ordinary_context_unit','capture':raw,'capture_sha256':digest(raw),
                 'source_slug':passage['source_slug'],'external_id':passage.get('source_id')or eid,
                 'rights_mode':passage.get('rights_mode')if isinstance(passage.get('rights_mode'),str)else'restricted',
-                'context_eligible':passage.get('context_eligible',True)and not passage.get('incomplete',False),
+                'context_eligible':passage.get('context_eligible',True)and excluded is None,
                 'source_role':passage.get('role'),'tool_kind':passage.get('tool_kind'),
                 'occurrences':deepcopy(envelope.get('all_occurrences')or[occurrence]),'native_passage':deepcopy(passage),
-                'model_context_eligible':passage.get('context_eligible',True)or passage.get('role')=='tool_result'and passage.get('tool_kind')in {'synonyms','collocations','morphology'},
+                'model_context_eligible':excluded is None and(passage.get('context_eligible',True)or passage.get('role')=='tool_result'and passage.get('tool_kind')in {'synonyms','collocations','morphology'}),
                 'context_use':'candidate_context_only_not_sentence_applicability'}
             nomination=('ordinary_source_owned_lexical_candidate'if passage.get('role')=='tool_result'else reference_nomination(passage,occurrence['text']))
-            row['document_admission']={'role':'candidate_context'if nomination else'retained_lookup_only',
-                'basis':nomination or'no_supported_source_topic_nomination','applicability_not_established':True}
+            row['document_admission']={'role':'candidate_context'if nomination and excluded is None else'retained_lookup_only',
+                'basis':nomination or'no_supported_source_topic_nomination','reason':excluded,'applicability_not_established':True}
             question=(passage.get('context')or{}).get('question')
             reader_text=(('Izvirno vprašanje:\n'+question+'\n\n')if isinstance(question,str)else'')+body
             row['source']={'source_id':passage.get('source_id')or eid,'source_revision':passage['source_revision'],
@@ -65,6 +73,10 @@ def records(value,text,source_sha256):
                 'locator':deepcopy(passage.get('span')or{}),
                 'bibliography':{k:deepcopy(passage[k])for k in ('source_id','source_revision','authors','date','edition','source_status','publication_scope','tool_scope','editorial_status','tool_provenance','context')if k in passage},
                 'native_source_unit':deepcopy(passage)}
+            if excluded:
+                row['source']['reader_blocks'].insert(0,{'heading':'Omejitev zajetega gradiva',
+                    'text':'Gradivo je nepopolno ali omejeno in se ne uporablja kot vsebinsko priporočilo.'})
+                row['source']['bibliography']['context_exclusion']=excluded
             if eid in found:
                 if found[eid]['capture_sha256']!=row['capture_sha256']:raise ValueError('Conflicting native source identity')
                 for bound in row['occurrences']:

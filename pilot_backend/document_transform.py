@@ -946,9 +946,13 @@ def checked_result(value):
             invalid()
         a, b, ids = edit['start'], edit['end'], edit['evidence_ids']
         mixed = value.get('validation_scope') == 'mixed_source_bound_document_review'
+        proof_bound=(value.get('validation_scope')=='evidence_review_existing_applications'
+            and any(f.get('included_in_draft')is True and f.get('proposed_edit')==edit
+                    for f in value.get('review',{}).get('findings',[])))
+        point_allowed=mixed or proof_bound
         if (type(a) is not int or type(b) is not int or not 0 <= a <= b <= MAX_TEXT
-                or not mixed and a == b
-                or not isinstance(edit['original'], str) or not mixed and not edit['original']
+                or not point_allowed and a == b
+                or not isinstance(edit['original'], str) or not point_allowed and not edit['original']
                 or not isinstance(edit['replacement'], str) or len(edit['replacement']) > 12000
                 or not isinstance(edit['explanation'], str) or not edit['explanation'].strip()
                 or len(edit['explanation']) > 2000 or not isinstance(ids, list)
@@ -1003,11 +1007,13 @@ def validate_document_result(value, task, matches):
         from .evidence_review import checked as checked_review
         checked_review(value.get('review'),text,task,matches)
     elif 'review'in value:invalid()
+    exact_operations=task.get('review_strategy')=='evidence_review_v1'
     last, rendered = 0, []
+    previous_edits=[]
     for edit in value['edits']:
         a, b, ids = edit['start'], edit['end'], edit['evidence_ids']
-        if (not last <= a < b <= len(text) or text[a:b] != edit['original']
-                or text.count(edit['original']) != 1
+        if (not last <= a <= b <= len(text) or not exact_operations and a==b or text[a:b] != edit['original']
+                or not exact_operations and text.count(edit['original']) != 1
                 or edit['original'] == edit['replacement']
                 or task.get('review_scope') == 'non_comma'
                     and edit['original'].replace(',', '') == edit['replacement'].replace(',', '')
@@ -1016,6 +1022,16 @@ def validate_document_result(value, task, matches):
                 or not any(edit['support_quote'] in source for eid in ids
                            for source in _source_strings(matches[eid]))):
             invalid()
+        if exact_operations:
+            # Same boundary semantics as CORE composition: a point inside or
+            # on another operation, and duplicate points, are never ordered
+            # arbitrarily. Every included edit has a validated finding/proof.
+            if not any(f.get('included_in_draft')is True and f.get('proposed_edit')==edit
+                       for f in value['review']['findings']):invalid()
+            for prior in previous_edits:
+                c,d=prior['start'],prior['end']
+                if max(a,c)<min(b,d)or a==b and c<=a<=d or c==d and a<=c<=b:invalid()
+            previous_edits.append(edit)
         rendered.extend([text[last:a], edit['replacement']])
         last = b
     rendered.append(text[last:])

@@ -44,6 +44,25 @@ def checked(review,text=None,task=None,matches=None):
                     or finding.get('included_in_draft')is not True
                     or finding.get('proposed_edit')not in review.get('applications',{}).get('edits',[])):
                 raise Failure('invalid_document_result',502)
+            edit=finding['proposed_edit']
+            if (edit.get('start')!=a or edit.get('end')!=b or edit.get('original')!=original.get('text')
+                    or proof.get('input_sha256')!=review['source_sha256']):
+                raise Failure('invalid_document_result',502)
+            if proof['adapter_version']=='document-existing-applications.v1'and text is not None and review.get('applications',{}).get('composition'):
+                operations=finding.get('observed_checker_edits')or[]
+                if not any(all(edit.get(k)==op.get(k)for k in ('start','end','original','replacement'))for op in operations):
+                    raise Failure('invalid_document_result',502)
+                rendered=[];last=0
+                for operation in operations:
+                    left,right=operation.get('start'),operation.get('end')
+                    if (type(left)is not int or type(right)is not int or not last<=left<=right<=len(text)
+                            or text[left:right]!=operation.get('original')
+                            or operation.get('original')==operation.get('replacement')):
+                        raise Failure('invalid_document_result',502)
+                    rendered.extend([text[last:left],operation['replacement']]);last=right
+                proposed=''.join(rendered)+text[last:]
+                if hashlib.sha256(proposed.encode()).hexdigest()!=proof.get('output_sha256'):
+                    raise Failure('invalid_document_result',502)
         source=finding.get('source')or{}
         if finding.get('application_proof',{}).get('adapter_version')=='document-source-applications.v1'and finding.get('included_in_draft'):
             # Consumer checks exact contract/registry/source/document bindings.

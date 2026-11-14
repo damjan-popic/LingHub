@@ -26,7 +26,7 @@ class Gateway:
         if not token or len(token)<32:raise ValueError('Configure a strong private gateway token')
     def request(self,path,payload,base=None):
         try:
-            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base or path=='/internal/pilot/interpret'else 3600 if path in {'/internal/pilot/generate','/internal/pilot/document-transform'}else 240,connect=5))as client:
+            with httpx.Client(base_url=base or self.url,trust_env=False,follow_redirects=False,timeout=httpx.Timeout(10 if base or path in {'/internal/pilot/interpret','/internal/pilot/source-context','/internal/pilot/document-resource-context/project'}else 3600 if path in {'/internal/pilot/generate','/internal/pilot/document-transform'}else 240,connect=5))as client:
                 editorial_auth=bool(self.editorial_operator_policy_id and base==self.klikai_url and path.startswith('/api/editorial/records/'))
                 with client.stream('GET'if payload is None else'POST',path,**({}if payload is None else{'json':payload}),headers={'X-Pilot-Internal-Token':self.token}if base is None or editorial_auth else{})as response:
                     if response.status_code!=200:

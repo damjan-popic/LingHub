@@ -30,50 +30,98 @@ def label_coordinates(value):
 def packet(documents,owner,document):
     if (document['state']!='complete'or document['options'].get('review_strategy')!='evidence_review_v1'
             or not document.get('review_manifest')):invalid()
-    sections=[];sources={}
+    from .document_resource_context import records as ordinary_records
+    from .document_transform import _documentary_review_occurrences,_native_review_cue
+    sections=[];sources={};delivery=[]
+    def retain(record,family,role):
+        raw=record['capture'];body=source_body(record)
+        if not body:invalid()
+        native={key:deepcopy(raw[key])for key in ('title','source_revision','source_status','source_date','date','edition','release_id',
+            'normative_status','coverage_note','rights_mode','url','language','geographical_scope','jurisdiction','domain','register')if key in raw}
+        native.update(source_slug=record['source_slug'],external_id=record['external_id'],rights_mode=record.get('rights_mode',raw.get('rights_mode','unknown')),original_text=body,
+            body_sha256=hashlib.sha256(body.encode()).hexdigest())
+        if raw.get('source_unit'):
+            unit=deepcopy(raw['source_unit']);bound=body_binding(record)
+            projection=unit.get('writer_projection')or{}
+            if projection.get('version')=='lexical-field-projection-v1':
+                # The normal writer_unit text already retains every linguistic
+                # field/variant/qualification. Original JSON and the mechanical
+                # field map stay in the frozen reader; do not duplicate them in
+                # the effective input or invent a new excerpt/sense selector.
+                proof={k:deepcopy(v)for k,v in projection.items()if k!='field_map'}
+                proof.update(field_map_sha256=digest(projection.get('field_map',[])),field_map_available_in_frozen_reader=True)
+                unit.pop('original_json',None);unit.pop('text',None);unit['writer_projection']=proof
+                bound={**bound,'writer_projection':proof}
+                native['input_representation']='complete_existing_ordinary_writer_unit_with_qualified_native_metadata'
+            native.update(native_source_unit=unit,body_binding=bound,
+                context_use=record.get('context_use'),native_answer_eligibility=record.get('context_eligible'))
+        elif not isinstance(raw.get('original_text'),str):native.update(body_binding=body_binding(record),source_owned_fields=deepcopy(raw))
+        key='S'+digest(native)[:16]
+        if key not in sources:sources[key]={**native,'recorded_advice':[],'related_captures':[],
+            'admission_roles':[],'reader':{'family_id':family,'evidence_id':record['evidence_id']}}
+        linked={'evidence_id':record['evidence_id'],'capture_sha256':record['capture_sha256']}
+        if linked not in sources[key]['related_captures']:sources[key]['related_captures'].append(linked)
+        if role not in sources[key]['admission_roles']:sources[key]['admission_roles'].append(role)
+        return key
     with documents.store.connect()as db:
         for section in document['sections']:
             result=section.get('document_result')or{};review=result.get('review')
             if section['state']!='complete'or result.get('status')!='draft'or not review:invalid()
             row=db.execute('SELECT bundle FROM families WHERE id=?AND owner=?',(section['family_id'],owner)).fetchone()
-            bundle=json.loads(row[0]or'{}')if row else{};by_id={r['evidence_id']:r for r in bundle.get('source_bundle',{}).get('matches',[])}
-            findings=[]
+            bundle=json.loads(row[0]or'{}')if row else{};context=(bundle.get('review_observations')or{}).get('ordinary_resources')
+            by_id={r['evidence_id']:r for r in bundle.get('source_bundle',{}).get('matches',[])}
+            by_id.update({r['evidence_id']:r for r in ordinary_records(context,section['text'],hashlib.sha256(section['text'].encode()).hexdigest())})
+            findings=[];finding_sources=set();retained=[];omitted=[]
             for finding in review['findings']:
                 source=finding['source'];record=by_id.get(source['evidence_id'])
                 if record is None or record['capture_sha256']!=source['capture_sha256']:invalid()
-                raw=record['capture'];body=source_body(record)
-                if not isinstance(body,str):invalid()
-                native={key:deepcopy(raw[key])for key in ('title','source_revision','source_status','source_date','edition','release_id',
-                    'normative_status','coverage_note','rights_mode','url','language','geographical_scope','jurisdiction','domain','register')if key in raw}
-                native.update(source_slug=record['source_slug'],external_id=record['external_id'],original_text=body,body_sha256=hashlib.sha256(body.encode()).hexdigest())
-                if not isinstance(raw.get('original_text'),str):native.update(body_binding=body_binding(record),source_owned_fields=deepcopy(raw))
-                key='S'+digest(native)[:16]
-                if key not in sources:sources[key]={**native,'recorded_advice':[],'related_captures':[],
-                    'reader':{'family_id':section['family_id'],'evidence_id':source['evidence_id']}}
-                linked={'evidence_id':source['evidence_id'],'capture_sha256':source['capture_sha256']}
-                if linked not in sources[key]['related_captures']:sources[key]['related_captures'].append(linked)
+                key=retain(record,section['family_id'],'finding_evidence');finding_sources.add(source['evidence_id'])
+                refs=[key]
+                for linked in finding.get('related_source_captures',[]):
+                    alternate=by_id.get(linked['evidence_id'])
+                    if alternate is None or alternate['capture_sha256']!=linked['capture_sha256']:invalid()
+                    ref=retain(alternate,section['family_id'],'finding_evidence');finding_sources.add(linked['evidence_id'])
+                    if ref not in refs:refs.append(ref)
                 advice=source.get('recorded_advice')
                 if advice is not None and advice not in sources[key]['recorded_advice']:sources[key]['recorded_advice'].append(deepcopy(advice))
                 kept={k:deepcopy(finding[k])for k in ('finding_id','type','applicability','match','notice','proposed_edit','included_in_draft','remaining_conditions','alternatives')if k in finding}
-                kept.update(source_refs=[key],source_focus=deepcopy(source['focus']),source_qualifications=deepcopy(source['qualifications']))
+                kept.update(source_refs=refs,source_focus=deepcopy(source['focus']),source_qualifications=deepcopy(source['qualifications']))
                 findings.append(kept)
+            task={'source_text':section['text'],'mode':'review','source_language':document['options']['source_language']}
+            for eid,record in by_id.items():
+                if eid in finding_sources:continue
+                if record.get('rights_mode')in {'linked_only','metadata_only','unknown'}:
+                    omitted.append({'evidence_id':eid,'reason':'linked_or_unavailable_content'});continue
+                ordinary=record.get('capture_kind')=='ordinary_context_unit'
+                eligible=(record.get('model_context_eligible')or record.get('context_eligible'))if ordinary else record.get('context_eligible')
+                if not eligible:omitted.append({'evidence_id':eid,'reason':'native_capture_not_admitted'});continue
+                relevant=(ordinary and record['document_admission']['role']!='retained_lookup_only'or record.get('capture_kind')=='editorial_record'
+                    or _native_review_cue(record,section['text'],task['source_language'])>=2
+                    or any(item.get('kind')!='literal_word'for item in _documentary_review_occurrences(record,task)))
+                if not relevant:omitted.append({'evidence_id':eid,'reason':'no_supported_occurrence_nomination'});continue
+                key=retain(record,section['family_id'],'model_context_not_edit_authority')
+                retained.append({'source_refs':[key],'role':'candidate_context_only'if ordinary else'qualified_source_context',
+                    'applicability_not_established':True,'occurrences':deepcopy(record.get('occurrences',[])),
+                    'native_answer_eligibility':record.get('context_eligible')})
             draft=result['proposed_text']
             sections.append({'index':section['index'],'location':section['location'],'original_text':section['text'],
                 'original_sha256':hashlib.sha256(section['text'].encode()).hexdigest(),'evidence_draft':draft,
                 'draft_sha256':hashlib.sha256(draft.encode()).hexdigest(),
                 'evidence_edits':[{k:deepcopy(e[k])for k in ('start','end','original','replacement')}for e in result['edits']],
-                'findings':findings,'evidence_manifest_sha256':review['manifest_sha256'],
+                'findings':findings,'retained_context':retained,'evidence_manifest_sha256':review['manifest_sha256'],
                 'checks':[{'check_id':c['check_id'],'status':c['status']}for c in review['checks']],
                 'coordinate_guide':[{'start':m.start(),'end':m.end(),'text':m.group()}for m in re.finditer(r'\S+',draft)]})
+            delivery.append({'section_index':section['index'],'finding_source_count':len(finding_sources),
+                'additional_context_count':len(retained),'omitted':omitted,
+                'ordinary_context_present':context is not None,'source_trace_location':'saved section bundle review_observations.ordinary_resources'})
     value={'version':PACKET,'document_id':document['document_id'],'document_revision':document['source_sha256'],
         'evidence_manifest_sha256':document['review_manifest']['manifest_sha256'],'locale':document['options']['locale'],
         'coordinate_base':'frozen_evidence_draft_unicode_codepoint_half_open','sections':sections,'sources':sources,
         'coverage':{'provided_sections':[s['index']for s in sections],'omitted_sections':[],
-            'scope':'All extracted text sections in this packet; images/unextracted content not reviewed',
-            'document_warnings':deepcopy(document['warnings'])},
+            'scope':'All extracted text sections supplied. Source context is bounded, qualified and not applicability or comprehensive review.',
+            'resource_context_delivery':delivery,'document_warnings':deepcopy(document['warnings'])},
         'authority':'AI comments/suggestions only; original source findings and evidence draft remain unchanged'}
-    label_coordinates(value)
-    value['packet_sha256']=digest(value);return checked_packet(value)
+    label_coordinates(value);value['packet_sha256']=digest(value);return checked_packet(value)
 
 def prepare(documents,owner,identifier):
     if not documents.ai_suggestions:invalid()

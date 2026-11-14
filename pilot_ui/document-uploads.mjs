@@ -139,6 +139,8 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   for(const section of current.sections){
    const item=el('details',undefined,{class:'document-section'});if(current.total===1)item.open=true;
    item.append(el('summary',tr('section')+' '+(section.index+1)+' · '+sectionLabel(section)));
+   const resourceCoverage=section.document_result?.review?.resource_coverage;
+   if(resourceCoverage){const labels={jezikovna_svetovalnica:'Jezikovna svetovalnica',epravopis:'ePravopis','cjvt-thesaurus':'Sopomenke','cjvt-ksss':'Kolokacije',sloleks:'Sloleks',loris:'LORIS','morph-it':'Morph-it!'},names=resourceCoverage.captured_families.map(name=>labels[name]||name);if(names.length)item.append(el('p',(locale()==='it'?'Materiale acquisito: ':'Zajeto gradivo: ')+names.join(', ')+'.'));if(resourceCoverage.bounded_or_partial)item.append(el('p',locale()==='it'?'La ricerca ha un ambito limitato; non certifica la correttezza del testo.':'Iskanje ima omejen obseg; ne potrjuje pravilnosti besedila.',{class:'small muted'}));}
    item.append(el('h4',tr('original')),el('pre',section.text,{class:'document-text'}));
    const nativeDraft=(native||evidence&&aiSuggestions)&&section.state==='complete'&&section.document_result?.status==='draft'&&typeof section.document_result.proposed_text==='string'&&!section.limitations?.some(l=>l.code==='document_transform_failed');
    const displayed=nativeDraft?section.document_result.proposed_text:section.output;

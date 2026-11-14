@@ -132,8 +132,11 @@ def report_blocks(review,locale='sl'):
             yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
         for alternative in finding.get('alternatives',[]):
             yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+({'singular':('singolare','ednina'),'dual':('duale','dvojina'),'plural':('plurale','množina')}.get(alternative.get('number'),('',''))[0 if it else 1])+')'
-        yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
-        yield 'quote',source['focus']['text']
+        if (source.get('native_source_unit')or{}).get('tool_kind')or (source.get('body_binding')or{}).get('capture_kind')=='terminology_record':
+            yield 'body','Letture, sensi, alternative e misure originali sono conservati nella fonte acquisita; non sono sostituzioni automatiche.'if it else'Izvirne razlage, pomeni, možnosti in mere so ohranjeni v zajetem viru; to niso samodejne zamenjave.'
+        else:
+            yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
+            yield 'quote',source['focus']['text']
         for key,label in [('recommendation_force','Moč priporočila'),('scope_note','Obseg in izjeme'),
                           ('application_scope_note','Pogoji uporabe'),('mapping_status','Uredniško stanje')]:
             if advice.get(key):
@@ -144,6 +147,12 @@ def report_blocks(review,locale='sl'):
                 value=labels.get(str(advice[key]))
                 yield 'body',label+': '+(value[0 if it else 1]if value else str(advice[key]))
         if source.get('untyped_context_limit'):yield 'body',('Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.'if it else'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.')
+    coverage=review.get('resource_coverage')
+    if coverage:
+        labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis','cjvt-thesaurus':'Sopomenke','cjvt-ksss':'Kolokacije','sloleks':'Sloleks','loris':'LORIS','morph-it':'Morph-it!'}
+        names=[labels.get(name,name)for name in coverage.get('captured_families',[])]
+        if names:yield 'body',('Materiale acquisito: 'if it else'Zajeto gradivo: ')+', '.join(names)+'.'
+        if coverage.get('bounded_or_partial'):yield 'body','La ricerca ha un ambito limitato; i risultati non certificano la correttezza del testo.'if it else'Iskanje ima omejen obseg; rezultat ne potrjuje pravilnosti besedila.'
     yield 'subheading','Controlli e limiti'if it else'Preverjanja in omejitve'
     names={'application_analysis':('Analisi contestuale dedicata','Namenska skladenjska analiza'),
         'application_paradigms':('Paradigmi registrati per le proposte','Zapisane paradigme za predloge'),

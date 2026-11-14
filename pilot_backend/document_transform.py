@@ -839,6 +839,8 @@ def freeze(gateway, family, policy):
         # selection. Keep every case/number reading for conditional proposals.
         from .document_application_observations import freeze_morphology
         body['review_observations']['application_morphology']=freeze_morphology(gateway,task,body)
+        from .document_resource_collection import collect as collect_ordinary_resources
+        if getattr(gateway,'document_resources',False):body['review_observations']['ordinary_resources']=collect_ordinary_resources(gateway,task,body['retrieval']['input_discovery'])
         body['snapshot_sha256']=digest(body)
         general['identity']['captured_response_sha256']=body['snapshot_sha256']
         return general
@@ -1238,6 +1240,8 @@ def _generate_evidence(gateway,bundle,tier,model,parent=None):
     if (not isinstance(response,dict)or response.get('contract')!=RESPONSE_CONTRACT
             or response.get('provider_attempts')!=[]or response.get('execution',{}).get('inference_performed')is not False):invalid()
     matches={row['evidence_id']:row for row in bundle['source_bundle']['matches']}
+    from .document_resource_context import records as ordinary_records
+    matches.update({r['evidence_id']:r for r in ordinary_records((bundle.get('review_observations')or{}).get('ordinary_resources'),task['source_text'],task['source_sha256'])})
     if response.get('status')!='ok':invalid()
     document=validate_document_result(response.get('document_result'),task,matches)
     if document['edits']!=document['review']['applications']['edits']:invalid()
@@ -1557,4 +1561,17 @@ def generate(gateway, bundle, tier, model, parent=None):
 
 def source(bundle, evidence_id, tier=None):
     checked(bundle)
-    return unified.source(bundle['source_bundle'], evidence_id)
+    try:return unified.source(bundle['source_bundle'], evidence_id)
+    except Failure as error:
+        if error.status!=404:raise
+    from .document_resource_context import records as ordinary_records
+    task=bundle['document_task']
+    for row in ordinary_records((bundle.get('review_observations')or{}).get('ordinary_resources'),task['source_text'],task['source_sha256']):
+        if row['evidence_id']!=evidence_id:continue
+        p=row['native_passage'];question=(p.get('context')or{}).get('question')
+        body=(('Izvirno vprašanje:\n'+question+'\n\n')if isinstance(question,str)else'')+p['text']
+        return {'evidence_id':evidence_id,'title':p.get('title')or row['external_id'],'source_label':p.get('source_label')or row['source_slug'],
+            'url':p.get('url'),'excerpt':body,'reader_blocks':[{'heading':p.get('source_label')or row['source_slug'],'text':body}],
+            'bibliography':{k:deepcopy(p[k])for k in ('source_id','source_revision','authors','date','edition','source_status','publication_scope','tool_scope','editorial_status','tool_provenance','context')if k in p},
+            'locator':deepcopy(p.get('span')or{}),'native_source_unit':deepcopy(p)}
+    raise Failure('not_found',404)

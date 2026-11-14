@@ -42,6 +42,8 @@ def config_checked(config):
     if type(c['document_uploads'])is not bool or c['document_uploads']and not c['unified_answers']:raise ValueError('Document uploads require unified answers')
     c.setdefault('evidence_review',False)
     if type(c['evidence_review'])is not bool or c['evidence_review']and not c['document_uploads']:raise ValueError('Evidence review requires document uploads')
+    c.setdefault('document_resources',False)
+    if type(c['document_resources'])is not bool or c['document_resources']and not c.get('evidence_review'):raise ValueError('Document resources require evidence review')
     c.setdefault('ai_suggestions',False)
     if type(c['ai_suggestions'])is not bool or c['ai_suggestions']and not c['evidence_review']:raise ValueError('AI suggestions require evidence review')
     c.setdefault('editorial_summary',False)
@@ -82,7 +84,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         try:frequency_reference=Reference(Path(config['frequency_position_reference']))
         except (OSError,ValueError,sqlite3.Error):
             logging.getLogger(__name__).warning('Frequency-position reference unavailable; retaining source counts',exc_info=True)
-    base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));adapter.document_resources=config['document_resources'];domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     from .document_uploads import Documents
     documents=Documents(store,domain,private_translation=config['private_translation'],translation_limits=config['private_translation_limits'],evidence_review=config['evidence_review'],editorial_summary=config['editorial_summary'],ai_suggestions=config['ai_suggestions'])

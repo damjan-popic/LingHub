@@ -111,7 +111,7 @@ def report_blocks(review,locale='sl'):
         if finding.get('proposed_edit'):
             yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
         for alternative in finding.get('alternatives',[]):
-            yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+str(alternative.get('number',''))+')'
+            yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+({'singular':('singolare','ednina'),'dual':('duale','dvojina'),'plural':('plurale','množina')}.get(alternative.get('number'),('',''))[0 if it else 1])+')'
         yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
         yield 'quote',source['focus']['text']
         for key,label in [('recommendation_force','Moč priporočila'),('scope_note','Obseg in izjeme'),

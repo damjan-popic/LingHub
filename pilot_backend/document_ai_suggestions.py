@@ -237,7 +237,6 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     selected=ai.get('selected_revision')
     if selected:
         yield 'subheading','Bozza con suggerimenti IA selezionati dall’utente'if it else'Osnutek s predlogi umetne inteligence po izboru uporabnika'
-        yield 'body','Revisione selezionata:'if it else'Izbrana revizija:'
-        yield 'body',selected['revision_id']
+        yield 'body',('Revisione selezionata:\n'if it else'Izbrana revizija:\n')+selected['revision_id']
         yield 'body','L’accettazione non è una certificazione linguistica.'if it else'Sprejem ni jezikovno potrdilo.'
         for section in selected['sections']:yield 'body',section['document_result']['proposed_text']

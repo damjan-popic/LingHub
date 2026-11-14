@@ -210,7 +210,13 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     yield 'body','I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if it else WARNING
     if not ai:
         yield 'body','Non richiesti.'if it else'Niso bili zahtevani.';return
-    yield 'body',('Stato: 'if it else'Stanje: ')+ai['state']
+    states={'prepared':('Pripravljeno za zahtevo','Pronto per la richiesta'),'queued':('Čaka na AI obdelavo','In attesa di elaborazione IA'),
+        'running':('AI obdelava poteka','Elaborazione IA in corso'),'available':('Predlogi so pripravljeni za pregled','Suggerimenti pronti per la revisione'),
+        'unavailable':('AI predlogi niso na voljo; pregled iz virov ostaja uporaben','Suggerimenti IA non disponibili; la revisione delle fonti resta utilizzabile'),
+        'unavailable_input_limit':('Besedilo presega omejitev AI koraka; pregled iz virov ostaja uporaben','Testo oltre il limite IA; la revisione delle fonti resta utilizzabile'),
+        'failed':('AI obdelava ni uspela; pregled iz virov ostaja uporaben','Elaborazione IA non riuscita; la revisione delle fonti resta utilizzabile'),
+        'cancelled':('AI obdelava je ustavljena','Elaborazione IA interrotta')}
+    yield 'body',('Stato: 'if it else'Stanje: ')+states.get(ai['state'],('Shranjeno stanje','Stato salvato'))[1 if it else 0]
     if ai.get('stale'):yield 'body','Risultato precedente; non applicabile alla revisione attuale.'if it else'Zgodovinski rezultat; ni uporaben za sedanjo revizijo.'
     for item in ai['items']:
         action=ai['decisions'].get(item['suggestion_id'],{}).get('action','undecided')
@@ -231,6 +237,7 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     selected=ai.get('selected_revision')
     if selected:
         yield 'subheading','Bozza con suggerimenti IA selezionati dall’utente'if it else'Osnutek s predlogi umetne inteligence po izboru uporabnika'
-        yield 'body',('Revisione selezionata: 'if it else'Izbrana revizija: ')+selected['revision_id']
+        yield 'body','Revisione selezionata:'if it else'Izbrana revizija:'
+        yield 'body',selected['revision_id']
         yield 'body','L’accettazione non è una certificazione linguistica.'if it else'Sprejem ni jezikovno potrdilo.'
         for section in selected['sections']:yield 'body',section['document_result']['proposed_text']

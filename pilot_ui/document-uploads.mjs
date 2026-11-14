@@ -64,11 +64,10 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
     el('p',(locale()==='it'?'Sezione ':'Odsek ')+(item.section_index+1)+' · '+item.start+'–'+item.end),el('blockquote',item.observed_text));
    if(item.replacement!==null)detail.append(el('p',item.observed_text+' → '+item.replacement));
    detail.append(el('p',item.explanation));if(item.uncertainty)detail.append(el('p',(locale()==='it'?'Incertezza: ':'Negotovost: ')+item.uncertainty));
-   detail.append(el('p',aiWarning(),{class:'qualified-note'}));
    if(item.mechanical_issues.length)detail.append(el('p',locale()==='it'?'Non applicabile al testo: posizione, riferimento o contenuto protetto richiedono controllo. Puoi scartarlo.':'Ni mogoče vključiti v besedilo: preveriti je treba mesto, sklic ali zaščiteno vsebino. Predlog lahko zavrnete.',{class:'qualified-note'}));
    for(const ref of item.source_refs){const source=ai.source_references[ref];if(source)button(detail,locale()==='it'?'Apri fonte citata dall’IA — non prova l’applicabilità':'Odpri vir, ki ga navaja AI — ne dokazuje uporabnosti',()=>openFamily(source.family_id,{sourceId:source.evidence_id}));}
    const decision=choice=>aiAction('decision',{suggestion_id:item.suggestion_id,decision:choice,result_sha256:ai.result_sha256,evidence_manifest_sha256:ai.evidence_manifest_sha256});
-   if(aiSuggestions){const accept=button(detail,locale()==='it'?'Accetta questa modifica IA':'Sprejmi to AI spremembo',()=>decision('accept'));accept.disabled=!item.eligible_for_accept||action==='accept';button(detail,locale()==='it'?'Scarta':'Zavrni',()=>decision('dismiss'));if(action!=='undecided')button(detail,locale()==='it'?'Annulla decisione':'Razveljavi odločitev',()=>decision('undecided'));}
+   if(aiSuggestions){if(item.replacement!==null){const accept=button(detail,locale()==='it'?'Accetta questa modifica IA':'Sprejmi to AI spremembo',()=>decision('accept'));accept.disabled=!item.eligible_for_accept||action==='accept';}button(detail,locale()==='it'?'Scarta':'Zavrni',()=>decision('dismiss'));if(action!=='undecided')button(detail,locale()==='it'?'Annulla decisione':'Razveljavi odločitev',()=>decision('undecided'));}
   }
   if(ai.selected_revision){
    group.append(el('h4',locale()==='it'?'Bozza con modifiche IA selezionate':'Osnutek z izbranimi AI spremembami'),el('p',aiWarning()),el('p',locale()==='it'?'L’accettazione non è una certificazione linguistica. La bozza delle fonti rimane separata.':'Sprejem ni jezikovno potrdilo. Osnutek iz virov ostaja ločeno na voljo.'));

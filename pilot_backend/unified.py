@@ -32,7 +32,7 @@ NON_DOCUMENTARY = {'linghub', 'external_tool', 'ontology_v2_jsonl', 'xlsx_source
 ANSWER_PLAN_CLAIM_UNIT_TYPES = frozenset({'documentary_fact','construction_application',
     'terminology_equivalence','terminology_explanation','comparison_synthesis','recommendation_synthesis',
     'curated_recommendation','bounded_attestation','exact_source_excerpt','grammar_slot',
-    'source_advice','reviewed_answer','lexical_relations'})
+    'source_advice','reviewed_answer','lexical_relations','qualified_source_answer'})
 ANSWER_PLAN_BLOCK_FIELDS = frozenset({'block_id','paragraph_id','unit_id','unit_type',
     'text','claim_id','support_ids'})
 ANSWER_PLAN_CLAIM_FIELDS = frozenset({'claim_id','text','support_ids','fact_ids','section',
@@ -1678,7 +1678,7 @@ def _generate(gateway, bundle, tier, model, parent=None):
                             or (len(set(support_ids))!=len(support_ids)
                                 and block['unit_type']not in {
                                     'comparison_synthesis','recommendation_synthesis',
-                                    'reviewed_answer','construction_application'})
+                                    'reviewed_answer','construction_application','qualified_source_answer'})
                             or set(support_ids)!=set(block['support_ids'])
                             or any(row['block_id']!=block['block_id']
                                    or row['unit_id']!=block['unit_id'] for row in bound)

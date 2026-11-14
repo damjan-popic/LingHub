@@ -550,7 +550,7 @@ def test_deterministic_bounded_answer_plan_requires_and_binds_the_exact_structur
 
 @pytest.mark.parametrize('unit_type',[
     'curated_recommendation','comparison_synthesis','recommendation_synthesis',
-    'grammar_slot','source_advice','reviewed_answer'])
+    'grammar_slot','source_advice','reviewed_answer','qualified_source_answer'])
 def test_deterministic_claim_unit_types_use_the_same_bound_graph(unit_type):
     result=bounded_answer_plan_result()
     result['display_blocks'][0]['unit_type']=unit_type
@@ -2081,3 +2081,40 @@ def test_application_capture_consumes_real_gateway_contract_and_answer_plan(
                 assert drawer['status']=='draft'
         login(user,'unified-other')
         assert user.get('/api/pilot/families/'+fid+'/matches').status_code==404
+
+
+@pytest.fixture
+def actual_core_authored_answer(tmp_path,monkeypatch):
+    root=core_test_root()
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.syspath_prepend(str(root/'tests/zrc'))
+    from test_fulltext_grounded import store as core_store
+    from test_pilot import runtime as core_runtime
+    from test_pilot_authored_advice import generated_authored_answer
+    directory=tmp_path/'authored-core-store';directory.mkdir()
+    runtime=core_runtime.__wrapped__(core_store.__wrapped__(directory))
+    return generated_authored_answer(runtime,tmp_path,monkeypatch)
+
+
+def test_actual_core_qualified_authored_answer_crosses_web_with_exact_citations(actual_core_authored_answer):
+    result=actual_core_authored_answer
+    output=run_bounded_answer_plan(result,frozen_matches_from_result(result),model='auto')
+    assert output['generation']['status']=='generated',json.dumps(output,indent=2)
+    assert output['generation_status']=='deterministic_bounded_answer_plan'
+    assert output['answer_md']==result['answer_md']
+    assert output['citations']==result['citations']
+    assert output['execution']['inference_performed']is False
+    assert output['claims']and output['display_blocks'][0]['evidence_ids']
+
+
+@pytest.mark.parametrize('damage',['citation','identity','accounting','block'])
+def test_actual_authored_answer_keeps_existing_identity_and_citation_checks(actual_core_authored_answer,damage):
+    result=actual_core_authored_answer;matches=frozen_matches_from_result(result)
+    if damage=='citation':result['citations'][0]['source_revision']='f'*64
+    elif damage=='identity':result['model_identity']['model_id']='invented'
+    elif damage=='accounting':result['generation_accounting']['primary_provider_dispatches']=1
+    else:result['display_blocks'][0]['text']='Condition removed.'
+    output=run_bounded_answer_plan(result,matches,model='auto')
+    assert output['generation']['status']=='failed'
+    assert output['generation']['error_code']==(
+        'provider_identity_missing'if damage in {'identity','accounting'}else'unknown_citation')

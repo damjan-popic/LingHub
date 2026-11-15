@@ -17,7 +17,8 @@ def label_coordinates(value):
     value['coordinate_spaces']={
         'original_text_unicode_codepoint_half_open':['sections[].evidence_edits',
             'sections[].findings[].match.observed','sections[].findings[].proposed_edit',
-            'sections[].findings[].alternatives[] (where document offsets are present)'],
+            'sections[].findings[].alternatives[] (where document offsets are present)',
+            'sections[].retained_context[].occurrences','sections[].retained_context[].selection.occurrences'],
         'evidence_draft_unicode_codepoint_half_open':['sections[].coordinate_guide','new_ai_items'],
         'bound_source_original_text_unicode_codepoint_half_open':['sections[].findings[].source_focus',
             'sources[].recorded_advice[].source_span']}
@@ -27,7 +28,7 @@ def label_coordinates(value):
                 if finding.get('included_in_draft')else'historical_evidence_not_applied')
     return value
 
-CONTEXT_POLICY='document-qualified-model-context-v5'
+CONTEXT_POLICY='document-qualified-model-context-v6'
 
 
 def _context_words(projection,bundle,text):
@@ -67,7 +68,7 @@ def _source_examples(value):
 
 
 def context_nomination(record,task,words):
-    """Select whole qualified units using existing native forms/observations.
+    """Nominate eligible whole units using existing native forms/observations.
 
     A candidate connection is useful context, never a resolved sense, grammar
     judgment, applicability proof or permission to substitute the source form.
@@ -140,6 +141,93 @@ def context_nomination(record,task,words):
     occurrences=_documentary_review_occurrences(record,task)
     native=[o for o in occurrences if o['kind']=='recorded_table_form'and _whole_expression(o['text'],text)]
     return decision(cue>=2 or bool(native),'recorded_source_advice_or_native_table_occurrence'if cue>=2 or native else'peripheral_documentary_overlap_retained_in_trace',native)
+
+
+def _optional_constructions(record,nomination,text,words):
+    """Locate candidate constructions, not just their separated component lemmas.
+
+    This is a stricter delivery choice than nomination, never a dependency,
+    sense, grammatical agreement or correction certificate.
+    """
+    from .document_surface import normalized
+    if nomination['reason']!='native_component_lemmas_in_original_sentence':
+        return deepcopy(nomination['occurrences'])
+    fields=(record['native_passage'].get('original_json')or{}).get('fields')or{}
+    lemmas=[normalized(c['lemma'])for c in fields.get('components',[])if isinstance(c.get('lemma'),str)]
+    if len(lemmas)<2 or len(lemmas)!=len(fields.get('components',[])):return []
+    ordered=sorted(words,key=lambda w:w['start']);spans=[]
+    for i in range(len(ordered)-len(lemmas)+1):
+        window=ordered[i:i+len(lemmas)]
+        if [normalized(w.get('lemma')or'')for w in window]!=lemmas:continue
+        if window[0].get('sentence_id')is None or len({w.get('sentence_id')for w in window})!=1:continue
+        if any(text[a['end']:b['start']].strip()for a,b in zip(window,window[1:])):continue
+        a,b=window[0]['start'],window[-1]['end']
+        if not any(a<=o['start']<o['end']<=b for o in nomination['occurrences']):continue
+        spans.append({'start':a,'end':b,'text':text[a:b],
+            'basis':'contiguous_ordered_native_component_lemmas_candidate_only'})
+    return spans
+
+
+def optional_context_selection(by_id,decisions,finding_sources,findings,text,words):
+    """Select additional whole useful records; keep every other identity in trace.
+
+    Required finding evidence is handled independently. Optional attestations
+    inside an already-covered finding add no independent construction guidance.
+    For one located construction, an additional record is still retained when
+    it has different source facts, sense IDs, status or qualifications. This
+    comparison is about delivered information, never native-record equivalence.
+    """
+    choices={};ranked=[];covered=[]
+    for finding in findings:
+        observed=(finding.get('match')or{}).get('observed')or{}
+        if type(observed.get('start'))is int and type(observed.get('end'))is int:covered.append(observed)
+    for eid,record in by_id.items():
+        if eid in finding_sources:continue
+        nomination=decisions[eid]
+        choice={'eligible':nomination['eligible'],'selected':False,'reason':nomination['reason']}
+        choices[eid]=choice
+        if not nomination['eligible']:continue
+        spans=_optional_constructions(record,nomination,text,words)
+        collocation=record.get('capture_kind')=='ordinary_context_unit'and record['native_passage'].get('tool_kind')=='collocations'
+        if collocation and not spans:
+            choice['reason']='eligible_sentence_lemma_candidate_without_located_ordered_construction';continue
+        if collocation:
+            spans=[s for s in spans if not any(o['start']<=s['start']<s['end']<=o['end']for o in covered)]
+            if not spans:
+                choice['reason']='optional_attestation_inside_required_finding_without_independent_construction';continue
+        choice.update(occurrences=spans,nomination=deepcopy(nomination),
+            applicability_not_established=True)
+        # Prefer a literal original expression, then located lemma candidates.
+        # Retrieval order and frequency do not decide linguistic correctness.
+        strength=1 if nomination['reason']=='native_component_lemmas_in_original_sentence'else 2
+        ranked.append((-strength,-sum(s['end']-s['start']for s in spans),eid,record,collocation))
+    delivered={}
+    for _,__,eid,record,collocation in sorted(ranked):
+        choice=choices[eid];spans=choice['occurrences'];facts=None
+        if collocation:
+            native=record['native_passage'];unit=native.get('original_json')or{}
+            # Only binding/lookup mechanics are omitted from this information
+            # comparison. All unknown fields and source-owned qualifiers stay.
+            fields=deepcopy(unit.get('fields')or{})
+            for key in ('headword','headword_key','headword_lexical_unit_id','match_relation','occurrence_id','provenance'):
+                fields.pop(key,None)
+            for component in fields.get('components',[]):
+                component.pop('role',None);component.pop('role_origin',None)
+            information=deepcopy(unit)
+            for key in ('record_id','entry_id','target','match_relation'):information.pop(key,None)
+            information['fields']=fields
+            facts=digest({'source_slug':record['source_slug'],'source_revision':native.get('source_revision'),
+                'information':information,
+                'qualifications':{k:v for k,v in native.items()if k in {'source_status','edition','date','warnings','tool_scope','rights_mode'}}})
+        keys=[(s['start'],s['end'],facts)for s in spans]if facts else[]
+        if keys and all(k in delivered for k in keys):
+            choice.update(reason='optional_construction_information_already_selected',
+                selected_evidence_ids=sorted({delivered[k]for k in keys}),
+                distinct_native_record_retained_in_frozen_trace=True,record_equivalence_asserted=False)
+            continue
+        choice.update(selected=True,reason='additional_located_construction_context'if collocation else'additional_qualified_source_guidance')
+        for key in keys:delivered.setdefault(key,eid)
+    return choices
 
 
 def frozen_context_analyses(documents,owner,document):
@@ -232,17 +320,20 @@ def packet(documents,owner,document,contextual_analyses=None):
                 kept={k:deepcopy(finding[k])for k in ('finding_id','type','applicability','match','notice','proposed_edit','included_in_draft','remaining_conditions','alternatives')if k in finding}
                 kept.update(source_refs=refs,source_focus=deepcopy(source['focus']),source_qualifications=deepcopy(source['qualifications']))
                 findings.append(kept)
+            selections=optional_context_selection(by_id,decisions,finding_sources,findings,section['text'],words)
             for eid,record in by_id.items():
                 if eid in finding_sources:continue
-                nomination=decisions[eid]
-                if not nomination['eligible']:
-                    omitted.append({'evidence_id':eid,'capture_sha256':record['capture_sha256'],'reason':nomination['reason']})
+                nomination=decisions[eid];selection=selections[eid]
+                if not selection['selected']:
+                    omitted.append({'evidence_id':eid,'capture_sha256':record['capture_sha256'],'reason':selection['reason'],
+                        **({'nomination':deepcopy(nomination),'selection':deepcopy(selection)}if nomination['eligible']else{})})
                     continue
                 ordinary=record.get('capture_kind')=='ordinary_context_unit'
                 key=retain(record,section['family_id'],'model_context_not_edit_authority')
                 retained.append({'source_refs':[key],'role':'candidate_context_only'if ordinary else'qualified_source_context',
                     'applicability_not_established':True,'occurrences':deepcopy(nomination['occurrences']),
                     'nomination':deepcopy(nomination),
+                    'selection':{k:deepcopy(v)for k,v in selection.items()if k!='nomination'},
                     'native_occurrence_bindings_sha256':digest(record.get('native_bindings',[])),
                     'native_occurrence_bindings_location':'saved source reader bibliography.native_context_bindings',
                     'native_answer_eligibility':record.get('context_eligible')})
@@ -255,6 +346,7 @@ def packet(documents,owner,document,contextual_analyses=None):
                 'checks':[{'check_id':c['check_id'],'status':c['status']}for c in review['checks']],
                 'coordinate_guide':[{'start':m.start(),'end':m.end(),'text':m.group()}for m in re.finditer(r'\S+',draft)]})
             delivery.append({'section_index':section['index'],'finding_source_count':len(finding_sources),
+                'eligible_additional_context_count':sum(s['eligible']for s in selections.values()),
                 'additional_context_count':len(retained),'omitted':omitted,'omitted_findings':omitted_findings,
                 'original_finding_count':len(review['findings']),'provided_finding_count':len(findings),
                 'contextual_analysis_projection_sha256':((contextual_analyses or{}).get(section['index'])or{}).get('projection_sha256'),

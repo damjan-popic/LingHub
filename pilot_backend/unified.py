@@ -1204,9 +1204,12 @@ def _dictionary_context_target(family,found,language):
 
 
 def _lexical_context_target(family,tool_capture,language):
-    """Only already captured, primary native relations can nominate analysis."""
+    """Nominate one original scope from faithful primary native relations.
+
+    A source headword is a lemma, not a required literal surface form. Only
+    the separate original-scope analysis can establish an actual occurrence.
+    """
     from .contextual_lexical_scope import lexical_context_scope,RESOURCES
-    from .document_surface import occurrences
     task=lexical_context_scope(family.get('request_plan'),language)
     if task is None or not isinstance(tool_capture,dict)or tool_capture.get('version')!='klikai.lexical-collation.v1':return None
     caps=tool_capture.get('captures')or[]
@@ -1217,7 +1220,8 @@ def _lexical_context_target(family,tool_capture,language):
         if (kind not in task['kinds']or unit.get('provenance',{}).get('resource_id')!=RESOURCES[kind]
                 or unit.get('selection',{}).get('state')!='primary'
                 or not isinstance(unit.get('target'),str)or not unit['target']
-                or not any(occurrences(unit['target'],target['text']))):continue
+                or not isinstance(fields.get('headword'),str)or not fields['headword'].strip()
+                or unit.get('record_id')!='lexical:'+digest({k:v for k,v in unit.items()if k!='record_id'})):continue
         if (kind=='synonyms'and fields.get('sense',{}).get('relations')
                 or kind=='collocations'and len(fields.get('components',[]))==2):return target
     return None

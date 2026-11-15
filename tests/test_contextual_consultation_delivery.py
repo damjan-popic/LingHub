@@ -49,11 +49,12 @@ def lexical(f,case='COLL-P'):
     validate_capture_set(capture);return capture
 
 
-def mock_analysis(monkeypatch,*,verb='narediti',adjective=False,absent=False):
+def mock_analysis(monkeypatch,*,verb='narediti',adjective=False,absent=False,observation_factory=None):
     calls=[]
     def collect(text,config):
         calls.append(text)
         if absent:return {'status':'unavailable','reason':'mock_unavailable'}
+        if observation_factory is not None:return observation_factory(text)
         return observation(text,{'scope':'question','start':0,'end':len(text),'text':text},adjective=adjective,verb=verb)['captures'][0]['response']
     monkeypatch.setattr(syntax_analysis,'collect',collect)
     return calls
@@ -96,14 +97,14 @@ def test_source_only_question_with_context_still_never_requests_optional_analysi
     assert calls==[]
 
 
-def paired_delivery(monkeypatch,tmp_path):
+def paired_delivery(monkeypatch,tmp_path,*,family_override=None,case='COLL-P',observation_factory=None):
     from test_native_context_producer import runtime as runtime_fixture
     from test_fulltext_grounded import store
     from test_ordinary_contextual_consultation import selected_output
     runtime=runtime_fixture.__wrapped__(store.__wrapped__(tmp_path))
     runtime.settings['unified_policy']['sources']=['gradivo']
-    f=family('Kolokacije besede pogodbo?','   Želimo narediti pogodbo.')
-    tool=lexical(f);before=deepcopy(tool);calls=mock_analysis(monkeypatch)
+    f=family('Kolokacije besede pogodbo?','   Želimo narediti pogodbo.')if family_override is None else family_override
+    tool=lexical(f,case);before=deepcopy(tool);calls=mock_analysis(monkeypatch,observation_factory=observation_factory)
     class Gateway:
         klikai_url='mocked-registry'
         comma_checker={'syntax_url':'mock'}
@@ -125,23 +126,24 @@ def paired_delivery(monkeypatch,tmp_path):
         monkeypatch.setattr(web,name,lambda *a,**k:None)
     monkeypatch.setattr(web,'supplement_source_advice_morphology',lambda g,f,t,*a:t)
     gateway=Gateway();frozen=web.freeze(gateway,f,{})
-    assert calls==['Želimo narediti pogodbo.']and tool==before
+    from tools.zrc_reference.contextual_lexical_scope import lexical_context_scope
+    assert calls==[lexical_context_scope(f['request_plan'],'sl')['target_scope']['text']]and tool==before
     assert frozen['bundle']['gateway_bundle']is not None,{'error':getattr(gateway,'failure',None),'retrieval':frozen['bundle']['retrieval']}
     payload=runtime._unpack(frozen['bundle']['gateway_bundle']);registry=runtime._answer_registry(payload,'answer')
     units=[u for u in registry.units if u.get('payload',{}).get('version')==VERSION]
     assert units,[(s.get('tool_kind'),s.get('context_eligible'))for s in payload['passages']]
-    unit=next(u for u in units if u['payload']['primary']['groups'][0]['fields']['surface']=='podpisati pogodbo')
-    result=selected_output(payload,runtime,registry,[unit])
+    result=selected_output(payload,runtime,registry,units)
     delivered=web.generate(NS(request=lambda *args:deepcopy(result)),frozen['bundle'],'answer','qwen')
-    assert delivered['answer_md']==result['answer_md']and 'spremeni pomen'in delivered['answer_md']
+    assert delivered['answer_md']==result['answer_md']
     assert delivered['citations']and delivered['status']=='validated'
     return {'request':gateway.requests[0],'frozen':frozen,'payload':payload,
         'registry':registry.model_dump(),'core_result':result,'web_result':delivered,
-        'mocked_analysis_inputs':calls,'manual_unit_selection':[unit['unit_id']]}
+        'mocked_analysis_inputs':calls,'manual_unit_selection':[unit['unit_id']for unit in units]}
 
 
 def test_mocked_normal_freeze_ordinary_render_and_web_consumer(monkeypatch,tmp_path):
-    paired_delivery(monkeypatch,tmp_path)
+    result=paired_delivery(monkeypatch,tmp_path)
+    assert 'spremeni pomen'in result['web_result']['answer_md']
 
 
 def test_shared_scope_files_are_byte_identical():

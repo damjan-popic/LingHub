@@ -3,6 +3,7 @@ import json
 
 VERSION='document-ai-outcomes-v1'
 TITLES={
+ 'no_explanatory_evidence':('Ni dokazov za razlago; AI ni bila uporabljena.','Nessuna prova da spiegare; IA non utilizzata.'),
  'eligible_change':('Sprememba za človeško presojo','Modifica da valutare'),
  'valid_comment':('Komentar AI; ni sprememba besedila','Commento IA; non è una modifica del testo'),
  'rejected_item':('Zavrnjen izhod AI','Voce IA rifiutata'),

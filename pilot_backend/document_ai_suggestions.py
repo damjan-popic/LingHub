@@ -457,6 +457,7 @@ def prepare(documents,owner,identifier,payload=None):
     if set(payload)-{'purpose'}or payload.get('purpose')not in (None,explanations.PURPOSE):invalid()
     writer_purpose=payload.get('purpose')
     document=documents.get(owner,identifier,internal=True);old=document['options'].get('ai_review')
+    if old and old['packet'].get('writer_purpose')!=writer_purpose and not _terminal_review(document.get('ai_suggestions')):invalid()
     if (old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']
             and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES
             and old['packet'].get('authoring_policy')==AUTHORING_POLICY
@@ -496,6 +497,10 @@ def _prepare_units(documents,owner,identifier,stage):
         if unit['state']=='preparing':
             unit.update(state='failed',failure_type='interrupted_preparation_no_retry');_save_stage(documents,owner,identifier,stage)
         if unit['state']!='pending':continue
+        if explanations.no_inference_required(unit['packet']):
+            if unit['packet']!=scoped_packet(stage['packet'],stage['plan'],unit['unit']):invalid()
+            unit.update(state=explanations.NO_EVIDENCE,reason='no_explainable_evidence',attempted=False,inference_performed=False)
+            _save_stage(documents,owner,identifier,stage);continue
         unit['state']='preparing';_save_stage(documents,owner,identifier,stage)
         try:
             value=unit['packet'];prepared=documents.domain.request_gateway.request('/internal/pilot/document-ai-suggestions/prepare',{'packet':value})
@@ -506,7 +511,8 @@ def _prepare_units(documents,owner,identifier,stage):
         except (Failure,OSError,ValueError,KeyError,TypeError,TimeoutError)as error:
             unit.update(state='failed',failure_type=type(error).__name__)
         _save_stage(documents,owner,identifier,stage)
-    stage['state']='prepared'if any(u['state']=='prepared'for u in stage['units'])else'unavailable'
+    stage['state']='prepared'if any(u['state']=='prepared'for u in stage['units'])else(
+        explanations.NO_EVIDENCE if all(u['state']==explanations.NO_EVIDENCE for u in stage['units'])else'unavailable')
     stage['prepared']={'preparation_sha256':digest({'plan':stage['plan']['plan_sha256'],
         'units':[{'unit_id':u['unit']['unit_id'],'state':u['state'],'preparation':u['prepared']}for u in stage['units']]})}
     _save_stage(documents,owner,identifier,stage);return documents.get(owner,identifier)
@@ -545,6 +551,9 @@ def _start_units(documents,owner,identifier,document,stage):
     for unit in stage['units']:
         if unit.get('family_id')or unit['state']!='prepared':continue
         if unit['packet']!=scoped_packet(stage['packet'],stage['plan'],unit['unit']):invalid()
+        if explanations.no_inference_required(unit['packet']):
+            unit.update(state=explanations.NO_EVIDENCE,reason='no_explainable_evidence',attempted=False,inference_performed=False)
+            _save_stage(documents,owner,identifier,stage);continue
         payload={'question':'Predlogi umetne inteligence za dokončani pregled dokumenta '+document['name'],
             'context':'','locale':document['options']['locale'],'input_language':'sl','task':'reference','model':documents.domain.default_model,
             'idempotency_key':_unit_key(identifier,unit)}
@@ -587,6 +596,15 @@ def advance_units(documents):
         _start_units(documents,row['owner'],row['id'],document,stage)
 
 def validate_result(result,packet,prepared=None):
+    if isinstance(result,dict)and result.get('status')==explanations.NO_EVIDENCE:
+        if (not explanations.no_inference_required(packet)or result.get('version')!=VERSION
+                or result.get('packet_sha256')!=packet['packet_sha256']or result.get('evidence_manifest_sha256')!=packet['evidence_manifest_sha256']
+                or result.get('result_sha256')!=digest({k:v for k,v in result.items()if k!='result_sha256'})
+                or result.get('origin')!='server_determined'or result.get('authority')!='no_writer_inference'
+                or result.get('items')!=[]or result.get('attempted')is not False or result.get('inference_performed')is not False
+                or any(k in result for k in ('raw_content','raw_response','failure_type'))
+                or prepared is not None and result.get('preparation_sha256')!=prepared['preparation_sha256']):raise Failure('invalid_answer',502)
+        return result
     if (not isinstance(result,dict)or result.get('version')!=VERSION or result.get('packet_sha256')!=packet['packet_sha256']
             or result.get('evidence_manifest_sha256')!=packet['evidence_manifest_sha256']
             or result.get('result_sha256')!=digest({k:v for k,v in result.items()if k!='result_sha256'})
@@ -600,12 +618,21 @@ def validate_result(result,packet,prepared=None):
     elif result.get('items')!=[]:raise Failure('invalid_answer',502)
     return result
 
+def _terminal_review(public):
+    if not public:return False
+    if 'units'in public:return public.get('finished')is True
+    return public.get('state')in {'available','unavailable','unavailable_input_limit','failed','cancelled',explanations.NO_EVIDENCE}
+
+
 def public_review(documents,owner,document,options):
     public=_public_review(documents,owner,document,options)
     stage=options.get('ai_review')or{}
     if public is not None and stage.get('packet',{}).get('writer_purpose')==explanations.PURPOSE:
         public['writer_purpose']=explanations.PURPOSE
         public['explanation_anchors']=explanations.anchors(stage['packet'])
+    elif (public is not None and not public.get('stale')and _terminal_review(public)
+            and document.get('state')=='complete'and document.get('options',{}).get('review_strategy')=='evidence_review_v1'):
+        public['can_request_explanations']=True
     if public is not None and 'presentation'not in public:public['presentation']=outcome_presentation(public)
     return public
 
@@ -647,13 +674,16 @@ def _public_units(documents,owner,document,options,stage):
     packet=stage['packet'];plan=stage['plan'];manifest=(document.get('review_manifest')or{}).get('manifest_sha256')
     if plan!=advice_plan(packet)or [u['unit']for u in stage['units']]!=plan['units']:invalid()
     stale=packet['evidence_manifest_sha256']!=manifest
-    summaries=[];raw=[];owners=[];unit_results={};terminal={'completed','empty','unavailable','unavailable_input_limit','unavailable_dispatch_limit','failed','cancelled'}
+    summaries=[];raw=[];owners=[];unit_results={};terminal={'completed','empty','unavailable','unavailable_input_limit','unavailable_dispatch_limit','failed','cancelled',explanations.NO_EVIDENCE}
     for saved in stage['units']:
         unit=saved['unit'];summary={'unit_id':unit['unit_id'],'section_index':unit['section_index'],
             'original_span':unit['original_span'],'draft_span':unit['draft_span'],'source_refs':unit['source_refs'],
             'item_limit':unit['item_limit'],'state':saved['state'],'packet_sha256':(saved.get('packet')or{}).get('packet_sha256'),
             'preparation_sha256':(saved.get('prepared')or{}).get('preparation_sha256'),
             **{key:saved.get(key)for key in ('family_id','job_id','run_id','failure_type')}}
+        if saved['state']==explanations.NO_EVIDENCE:
+            if saved['packet']!=scoped_packet(packet,plan,unit)or not explanations.no_inference_required(saved['packet'])or saved.get('family_id'):invalid()
+            summary.update(attempted=False,inference_performed=False,reason='no_explainable_evidence')
         if saved.get('family_id'):
             if not unit['dispatch_eligible']or saved['packet']!=scoped_packet(packet,plan,unit):invalid()
             with documents.store.connect()as db:
@@ -664,7 +694,7 @@ def _public_units(documents,owner,document,options,stage):
                 try:
                     validate_result(result,saved['packet'],saved['prepared'])
                     unit_results[unit['unit_id']]=result
-                    summary.update(state=('completed'if result['items']else'empty')if result['status']=='available'else'unavailable',
+                    summary.update(state=('completed'if result['items']else'empty')if result['status']=='available'else explanations.NO_EVIDENCE if result['status']==explanations.NO_EVIDENCE else'unavailable',
                         result_sha256=result['result_sha256'],attempted=result.get('attempted'),inference_performed=result.get('inference_performed'))
                     if result.get('failure_type'):summary['failure_type']=result['failure_type']
                     if result['status']=='available':
@@ -672,11 +702,13 @@ def _public_units(documents,owner,document,options,stage):
                 except (Failure,ValueError,TypeError,KeyError):summary.update(state='failed',failure_type='invalid_unit_result')
         summaries.append(summary)
     states=[s['state']for s in summaries];success=sum(s in {'completed','empty'}for s in states)
-    complete=success==len(states);finished=all(s in terminal for s in states)
+    not_required=states.count(explanations.NO_EVIDENCE)
+    complete=success+not_required==len(states);finished=all(s in terminal for s in states)
     if 'running'in states:state='running'
     elif 'queued'in states:state='queued'
     elif stage['state']=='preparing':state='preparing'
     elif any(s in {'prepared','pending','preparing'}for s in states):state=('queued'if stage.get('started')else'prepared')if 'prepared'in states else'preparing'
+    elif not_required==len(states):state=explanations.NO_EVIDENCE
     elif complete:state='available'
     elif success:state='partial'
     elif all(s=='cancelled'for s in states):state='cancelled'
@@ -697,6 +729,8 @@ def _public_units(documents,owner,document,options,stage):
         **{key:stage.get(key)for key in ('family_id','job_id','run_id')},
         'decisions':deepcopy(options.get('ai_decisions',{})),'selected_revision':None,
         'source_references':{key:{'title':s.get('title'),**s['reader']}for key,s in packet['sources'].items()}}
+    if state==explanations.NO_EVIDENCE:
+        public.update(origin='server_determined',authority='no_writer_inference',attempted=False,inference_performed=False)
     # Display is deliberately outside result_hash/IDs and saved decisions.
     public['presentation']=outcome_presentation(public,unit_results)
     accepted=[i['suggestion_id']for i in items if public['decisions'].get(i['suggestion_id'],{}).get('action')=='accept']
@@ -819,6 +853,7 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
         'failed':('AI obdelava ni uspela; pregled iz virov ostaja uporaben','Elaborazione IA non riuscita; la revisione delle fonti resta utilizzabile'),
         'cancelled':('AI obdelava je ustavljena','Elaborazione IA interrotta')}
     states.update(partial=('Delna obdelava AI je končana; glejte izide','Elaborazione IA parziale conclusa; vedi gli esiti'),preparing=('Priprava AI pregleda','Preparazione della revisione IA'))
+    states[explanations.NO_EVIDENCE]=('Ni dokazov za razlago; AI ni bila uporabljena.','Nessuna prova da spiegare; IA non utilizzata.')
     yield 'body',('Stato: 'if it else'Stanje: ')+states.get(ai['state'],('Shranjeno stanje','Stato salvato'))[1 if it else 0]
     outcome=ai.get('presentation')or outcome_presentation(ai)
     yield 'body',outcome['labels'][locale]['counts']
@@ -831,8 +866,11 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
             yield 'subheading','Risposta IA originale, non modificata'if it else'Izvirni odgovor AI, nespremenjen'
             yield 'body',legacy['raw_content']
     if ai.get('units'):
-        yield 'body',('Revisione IA parziale: le parti senza risultato restano non riesaminate.'if it else'Delni AI pregled: deli brez rezultata ostajajo nepregledani.')if not ai['review_complete']else(
-            'Tutte le parti assegnate hanno restituito un risultato; non è una certificazione linguistica.'if it else'Vsi dodeljeni deli so vrnili rezultat; to ni jezikovno potrdilo.')
+        if explains and ai['review_complete']:
+            yield 'body','Tutte le parti hanno un esito registrato; quelle senza prove non richiedono IA.'if it else'Vsi deli imajo zabeležen izid; deli brez dokazov ne zahtevajo AI.'
+        else:
+            yield 'body',('Revisione IA parziale: le parti senza risultato restano non riesaminate.'if it else'Delni AI pregled: deli brez rezultata ostajajo nepregledani.')if not ai['review_complete']else(
+                'Tutte le parti assegnate hanno restituito un risultato; non è una certificazione linguistica.'if it else'Vsi dodeljeni deli so vrnili rezultat; to ni jezikovno potrdilo.')
         for unit in ai['units']:
             display=outcome['units'][unit['unit_id']]
             yield 'body',('Sezione 'if it else'Odsek ')+str(unit['section_index']+1)+' · '+unit['original_span']['text']+' — '+display['labels'][locale]['title']

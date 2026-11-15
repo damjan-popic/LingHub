@@ -171,3 +171,18 @@ def test_future_coordinate_labels_keep_length_changing_historical_evidence_exact
     item,=checked_output({'items':[row]},value)
     assert item['eligible_for_accept']and item['original_span']=={'start':9,'end':13}
     assert section['original_text'][9:13]==section['evidence_draft'][10:14]=='opis'
+
+
+def test_authoring_version_uses_new_packet_identity_without_reusing_old_job(rig,monkeypatch):
+    app,client,documents,gateway,headers,identifier,_=setup(rig);root='/api/pilot/documents/'+identifier
+    current=ai.AUTHORING_POLICY
+    monkeypatch.setattr(ai,'AUTHORING_POLICY','old-authoring-mechanical-fixture')
+    old=client.post(root+'/ai/prepare',headers=headers,json={}).json()['ai_suggestions']
+    assert client.post(root+'/ai/start',headers=headers,json={}).status_code==200;finish(app)
+    old_family=client.get(root).json()['ai_suggestions']['units'][0]['family_id']
+    monkeypatch.setattr(ai,'AUTHORING_POLICY',current)
+    new=client.post(root+'/ai/prepare',headers=headers,json={}).json()['ai_suggestions']
+    assert old['packet_sha256']!=new['packet_sha256']
+    assert client.post(root+'/ai/start',headers=headers,json={}).status_code==200;finish(app)
+    assert client.get(root).json()['ai_suggestions']['units'][0]['family_id']!=old_family
+    assert gateway.calls.count('/internal/pilot/document-ai-suggestions')==2

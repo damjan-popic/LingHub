@@ -4,6 +4,7 @@ import hashlib,json,re
 from .store import canonical,digest,stamp
 from .document_source_body import source_body,body_binding
 from .security import Failure
+from .document_ai_outcomes import presentation as outcome_presentation
 from .document_ai_contract import (VERSION,PACKET,AI_LABEL,EVIDENCE_LABEL,WARNING,checked_packet,checked_output,selected_sections,
     SCOPES,advice_plan,scoped_packet)
 
@@ -32,6 +33,7 @@ def label_coordinates(value):
     return value
 
 CONTEXT_POLICY='document-qualified-model-context-v8'
+AUTHORING_POLICY='document-ai-response-brief-v1'
 
 
 def _context_words(projection,bundle,text):
@@ -435,13 +437,15 @@ def packet(documents,owner,document,contextual_analyses=None):
             'resource_context_delivery':delivery,'document_warnings':deepcopy(document['warnings'])},
         'authority':'AI comments/suggestions only; original source findings and evidence draft remain unchanged'}
     value['context_selection_policy']=CONTEXT_POLICY
+    value['authoring_policy']=AUTHORING_POLICY
     label_coordinates(value);value['packet_sha256']=digest(value);return checked_packet(value)
 
 def prepare(documents,owner,identifier):
     if not documents.ai_suggestions:invalid()
     document=documents.get(owner,identifier,internal=True);old=document['options'].get('ai_review')
     if (old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']
-            and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES):
+            and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES
+            and old['packet'].get('authoring_policy')==AUTHORING_POLICY):
         return _prepare_units(documents,owner,identifier,old)if old['state']=='preparing'else documents.get(owner,identifier)
     analyses=frozen_context_analyses(documents,owner,document)
     value=packet(documents,owner,document,analyses)
@@ -582,6 +586,12 @@ def validate_result(result,packet,prepared=None):
     return result
 
 def public_review(documents,owner,document,options):
+    public=_public_review(documents,owner,document,options)
+    if public is not None and 'presentation'not in public:public['presentation']=outcome_presentation(public)
+    return public
+
+
+def _public_review(documents,owner,document,options):
     stage=options.get('ai_review')
     if not stage:return None
     if 'plan'in stage:return _public_units(documents,owner,document,options,stage)
@@ -601,6 +611,7 @@ def public_review(documents,owner,document,options):
     if row['state']!='complete'or result is None:return public
     validate_result(result,packet);public.update(state=result['status'],result_sha256=result['result_sha256'],items=deepcopy(result['items']))
     if result.get('failure_type'):public['failure_type']=result['failure_type']
+    public['presentation']=outcome_presentation(public,{'legacy':result})
     accepted=[i['suggestion_id']for i in result['items']if public['decisions'].get(i['suggestion_id'],{}).get('action')=='accept']
     if accepted and not stale:
         try:sections=selected_sections(packet,result['items'],public['decisions'])
@@ -617,7 +628,7 @@ def _public_units(documents,owner,document,options,stage):
     packet=stage['packet'];plan=stage['plan'];manifest=(document.get('review_manifest')or{}).get('manifest_sha256')
     if plan!=advice_plan(packet)or [u['unit']for u in stage['units']]!=plan['units']:invalid()
     stale=packet['evidence_manifest_sha256']!=manifest
-    summaries=[];raw=[];owners=[];terminal={'completed','empty','unavailable','unavailable_input_limit','unavailable_dispatch_limit','failed','cancelled'}
+    summaries=[];raw=[];owners=[];unit_results={};terminal={'completed','empty','unavailable','unavailable_input_limit','unavailable_dispatch_limit','failed','cancelled'}
     for saved in stage['units']:
         unit=saved['unit'];summary={'unit_id':unit['unit_id'],'section_index':unit['section_index'],
             'original_span':unit['original_span'],'draft_span':unit['draft_span'],'source_refs':unit['source_refs'],
@@ -633,6 +644,7 @@ def _public_units(documents,owner,document,options,stage):
             if row['state']=='complete':
                 try:
                     validate_result(result,saved['packet'],saved['prepared'])
+                    unit_results[unit['unit_id']]=result
                     summary.update(state=('completed'if result['items']else'empty')if result['status']=='available'else'unavailable',
                         result_sha256=result['result_sha256'],attempted=result.get('attempted'),inference_performed=result.get('inference_performed'))
                     if result.get('failure_type'):summary['failure_type']=result['failure_type']
@@ -666,6 +678,8 @@ def _public_units(documents,owner,document,options,stage):
         **{key:stage.get(key)for key in ('family_id','job_id','run_id')},
         'decisions':deepcopy(options.get('ai_decisions',{})),'selected_revision':None,
         'source_references':{key:{'title':s.get('title'),**s['reader']}for key,s in packet['sources'].items()}}
+    # Display is deliberately outside result_hash/IDs and saved decisions.
+    public['presentation']=outcome_presentation(public,unit_results)
     accepted=[i['suggestion_id']for i in items if public['decisions'].get(i['suggestion_id'],{}).get('action')=='accept']
     if accepted and not stale and finished:
         try:sections=selected_sections(packet,items,public['decisions'])
@@ -759,7 +773,11 @@ def generate(gateway,bundle,tier,model,parent=None):
     if bundle.get('contract')!=CONTRACT or bundle.get('snapshot_sha256')!=digest({k:v for k,v in bundle.items()if k!='snapshot_sha256'}):invalid()
     packet=bundle['document_ai']['packet'];checked_packet(packet)
     response=gateway.request('/internal/pilot/document-ai-suggestions',bundle['document_ai']);validate_result(response,packet,bundle['document_ai']['prepared'])
-    text=AI_LABEL+'\n'+WARNING+'\n'+('Predlogi so pripravljeni za posamezni pregled.'if response['status']=='available'else'Predlogi umetne inteligence niso na voljo. Pregled iz virov ostaja uporaben.')
+    outcome=outcome_presentation({'state':response['status'],'items':response['items']},{'legacy':response})
+    locale=packet['locale'];label='Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso'if locale=='it'else AI_LABEL
+    warning='I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if locale=='it'else WARNING
+    text=label+'\n'+warning+'\n'+outcome['labels'][locale]['counts']
+    if outcome['counts']['invalid_responses']:text+='\n'+outcome['labels'][locale]['invalid_responses']
     return {'status':'ok','short_answer':text,'answer_md':text,'answer_kind':'ai_suggestions','generation_status':'generated'if response.get('inference_performed')is True else'uncertain_dispatch'if response.get('attempted')else'not_generated',
         'document_ai_suggestions':response,'evidence':[],'source_badges':[],'blocks':[{'block_id':'ai-suggestions-label','text':text}],
         'execution':{'scope':'optional_ai_suggestions','writer_inference_performed':response.get('inference_performed'),'completion_attempted':response.get('attempted'),
@@ -773,31 +791,43 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     if not ai:
         yield 'body','Non richiesti.'if it else'Niso bili zahtevani.';return
     states={'prepared':('Pripravljeno za zahtevo','Pronto per la richiesta'),'queued':('Čaka na AI obdelavo','In attesa di elaborazione IA'),
-        'running':('AI obdelava poteka','Elaborazione IA in corso'),'available':('Predlogi so pripravljeni za pregled','Suggerimenti pronti per la revisione'),
+        'running':('AI obdelava poteka','Elaborazione IA in corso'),'available':('Obdelava AI je končana; glejte izide','Elaborazione IA conclusa; vedi gli esiti'),
         'unavailable':('AI predlogi niso na voljo; pregled iz virov ostaja uporaben','Suggerimenti IA non disponibili; la revisione delle fonti resta utilizzabile'),
         'unavailable_input_limit':('Besedilo presega omejitev AI koraka; pregled iz virov ostaja uporaben','Testo oltre il limite IA; la revisione delle fonti resta utilizzabile'),
         'failed':('AI obdelava ni uspela; pregled iz virov ostaja uporaben','Elaborazione IA non riuscita; la revisione delle fonti resta utilizzabile'),
         'cancelled':('AI obdelava je ustavljena','Elaborazione IA interrotta')}
-    states.update(partial=('Delni AI pregled je pripravljen','Revisione IA parziale disponibile'),preparing=('Priprava AI pregleda','Preparazione della revisione IA'))
+    states.update(partial=('Delna obdelava AI je končana; glejte izide','Elaborazione IA parziale conclusa; vedi gli esiti'),preparing=('Priprava AI pregleda','Preparazione della revisione IA'))
     yield 'body',('Stato: 'if it else'Stanje: ')+states.get(ai['state'],('Shranjeno stanje','Stato salvato'))[1 if it else 0]
+    outcome=ai.get('presentation')or outcome_presentation(ai)
+    yield 'body',outcome['labels'][locale]['counts']
+    if outcome['counts']['invalid_responses']:yield 'body',outcome['labels'][locale]['invalid_responses']
     if ai.get('units'):
         yield 'body',('Revisione IA parziale: le parti senza risultato restano non riesaminate.'if it else'Delni AI pregled: deli brez rezultata ostajajo nepregledani.')if not ai['review_complete']else(
             'Tutte le parti assegnate hanno restituito un risultato; non è una certificazione linguistica.'if it else'Vsi dodeljeni deli so vrnili rezultat; to ni jezikovno potrdilo.')
-        labels={'completed':('Predlogi pripravljeni','Suggerimenti pronti'),'empty':('Brez dodatnih predlogov','Nessun suggerimento aggiuntivo'),
-            'unavailable_dispatch_limit':('Zunaj omejitve te obdelave','Oltre il limite di questa elaborazione')}
         for unit in ai['units']:
-            yield 'body',('Sezione 'if it else'Odsek ')+str(unit['section_index']+1)+' · '+unit['original_span']['text']+' — '+labels.get(unit['state'],states.get(unit['state'],('Shranjeno stanje','Stato salvato')))[1 if it else 0]
+            display=outcome['units'][unit['unit_id']]
+            yield 'body',('Sezione 'if it else'Odsek ')+str(unit['section_index']+1)+' · '+unit['original_span']['text']+' — '+display['labels'][locale]['title']
+            yield 'body',display['labels'][locale]['counts']
+            if display['kind']=='invalid_response':
+                if display.get('recorded_failure_type'):yield 'body',('Tipo di errore registrato: 'if it else'Zabeležen tip napake: ')+display['recorded_failure_type']
+                if 'raw_content'in display:
+                    yield 'subheading','Risposta IA originale, non modificata'if it else'Izvirni odgovor AI, nespremenjen'
+                    yield 'body',display['raw_content']
     if ai.get('stale'):yield 'body','Risultato precedente; non applicabile alla revisione attuale.'if it else'Zgodovinski rezultat; ni uporaben za sedanjo revizijo.'
     for item in ai['items']:
         action=ai['decisions'].get(item['suggestion_id'],{}).get('action','undecided')
         labels={'accept':('Accettato dall’utente; IA non verificata','Sprejel uporabnik; nepreverjen AI predlog'),
             'dismiss':('Scartato','Zavrnjen'),'undecided':('Da decidere','Neodločen')}
-        yield 'subheading',('Suggerimento IA'if it else'Predlog umetne inteligence')+' · '+labels[action][0 if it else 1]
+        display=outcome['items'][item['suggestion_id']];title=display['labels'][locale]['title']
+        if display['kind']=='eligible_change':title+=' · '+labels[action][0 if it else 1]
+        yield 'subheading',title
+        if display['kind']!='eligible_change'and item['suggestion_id']in ai['decisions']:
+            yield 'body',('Decisione salvata: 'if it else'Shranjena odločitev: ')+labels[action][0 if it else 1]
         yield 'body',item['observed_text']
         if item['replacement']is not None:yield 'body',item['observed_text']+' → '+item['replacement']
         yield 'body',item['explanation']
         if item['uncertainty']:yield 'body',('Valutazione dell’incertezza del modello: 'if it else'Modelova ocena negotovosti: ')+item['uncertainty']
-        if item['mechanical_issues']:yield 'body','Non applicabile automaticamente al testo; controllare posizione o contenuto protetto.'if it else'Ni mogoče vključiti v besedilo; preverite mesto ali zaščiteno vsebino.'
+        for reason in display['labels'][locale]['reasons']:yield 'body',reason['text']+' ['+reason['code']+']'
         for ref in item['source_refs']:
             source=ai.get('source_references',{}).get(ref)
             if source:

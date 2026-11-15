@@ -1,0 +1,831 @@
+{
+  "cases": {
+    "A": {
+      "context_sections": [
+        {
+          "index": 0,
+          "text": "Želimo narediti odločitev o nadaljevanju projekta."
+        },
+        {
+          "index": 1,
+          "text": "Želimo podpisati pogodbo."
+        },
+        {
+          "index": 2,
+          "text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+        },
+        {
+          "index": 3,
+          "text": "Na postaji pričakujemo hiter vlak."
+        }
+      ],
+      "document_source": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-unit-trial-20261115/RECOVERED_DOCUMENT.json",
+      "provenance": {
+        "U02bdeb3f13a734450b47b6f9": {
+          "original_result_sha256": "700ef59385fd42ad251ab85c99e6461c71c0195a324719e67b1e5c573d0af27d",
+          "source_file_sha256": "6da6b02939d45740f8587ce01571297cfe22bfee1e9f5ad67e66ef717aa1d344",
+          "source_path": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-unit-trial-20261115/units/U02bdeb3f13a734450b47b6f9/core-result.json"
+        }
+      },
+      "public": {
+        "coverage": {
+          "provided_sections": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "decisions": {},
+        "evidence_manifest_sha256": "63e0150d9481bf6bc864872c488270c987721dc889048999410f4af36866f97a",
+        "items": [
+          {
+            "authority": "not_source_authorized",
+            "draft_sha256": "acbf8b76249ee5b862833ee6f84e1ceb53619b59eb3ae298c3af576cf9f9a252",
+            "eligible_for_accept": true,
+            "end": 50,
+            "explanation": "The phrase 'sprejeti odločitev' is a recorded collocation with high frequency and lexical fit. It maintains the original meaning and grammatical structure while using a more natural and attested alternative. The replacement is a direct substitution of the verb 'narediti' with 'sprejeti' based on a source-attested collocation.",
+            "finding_ids": [],
+            "kind": "additional_suggestion",
+            "mechanical_issues": [],
+            "observed_text": "Želimo narediti odločitev o nadaljevanju projekta.",
+            "origin": "ai_generated",
+            "original_span": {
+              "end": 50,
+              "start": 0
+            },
+            "replacement": "Želimo sprejeti odločitev o nadaljevanju projekta.",
+            "section_index": 0,
+            "source_refs": [
+              "Se7087fd86eed52a6"
+            ],
+            "start": 0,
+            "suggestion_id": "A819f91b31fd1ad3b092571e7",
+            "uncertainty": "The intended meaning and register must be verified, as 'sprejeti odločitev' may carry subtle differences in formality or context compared to 'narediti odločitev'.",
+            "unit_id": "U02bdeb3f13a734450b47b6f9"
+          }
+        ],
+        "packet_sha256": "85e1bf23af2975fd148754e012c80805e98e0403b4f8ff4909705b8c58b4d242",
+        "partial": true,
+        "result_sha256": "ffd696f0a157c8dd314dab228d1794f2be8527a4d7352d75f994eb6a3c4101e6",
+        "review_complete": false,
+        "source_references": {
+          "S0df7b3be48328ecd": {
+            "evidence_id": "tool:e1ec700c81516674a67bdf0915c9142f37f0a5d8b9d4118a021c8b651e716130",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "S13ae1eae730f3868": {
+            "evidence_id": "tool:9855d08d53d0c2b4d08c3ed835a3c3e8136a06e6461a3981bcab19fa6f59cc65",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          },
+          "S1e6aea146f5cff44": {
+            "evidence_id": "tool:a70c829f759271afe2ecc708260566c25e8dd82b45e2c3a00dadf7fdea931bca",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S2b157e976a7b12c1": {
+            "evidence_id": "tool:991daa0bfd6119c55b48c3af34ea79c49d1227b21fe08afbe92139eec7fec7f9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "S36debc0350a227c3": {
+            "evidence_id": "tool:172459f6b60381db7be96cd0ad124875e7011b70bee9ccc21b1dfa445185f00b",
+            "family_id": "46961ed3-0495-424b-923b-ce1ea88f4dc8",
+            "title": "Kolokacije · podpisati"
+          },
+          "S5108c91bd376f01c": {
+            "evidence_id": "tool:0a1903aff4cc359f1ad033c43bd3b38c41787b831a9caf0b575e389eaeeb4cf9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          },
+          "S543b95557f592edf": {
+            "evidence_id": "tool:e2ab926805342679747882613c40affb09d40fc034f207b8fec0cb56e0871ea5",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Kolokacije · vlak"
+          },
+          "S6eaf49a750b58c1e": {
+            "evidence_id": "tool:a0a4937c04ceebb036cd826d9a0ef89f4f5b6c9d84f46bb9292012fcffefd003",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S7ab936472bf508b0": {
+            "evidence_id": "tool:0475356c6fd83961f90d1f2fa4214484e42544e5b937e9d8da48525618b15953",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Sopomenke · dogovorjene"
+          },
+          "S7b880d5a684a4d02": {
+            "evidence_id": "tool:152a1ca280ceff39b006f010e3ae432efa53500dd734bb80a2785001398f135f",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Sopomenke · dogovorjene"
+          },
+          "S82aaea6627743111": {
+            "evidence_id": "tool:79aad57a1725debe24e62534451f6ea7a2c1e523ae878adb597a4bb4d9636d08",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S8615155e66f4f0fa": {
+            "evidence_id": "tool:c31f69edc094fa7524f0c3969404a73c92b99535fe93356acf4718868ffe82ca",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S88630e8d1d8184fd": {
+            "evidence_id": "tool:5a7b9dc607a9cbbf6aafa93ce29724e23f29ea8545c06d6be6d5d5728a816d72",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sa4282db6212fa34b": {
+            "evidence_id": "tool:1d2e585b461736b87e25a61c47d12e2ffe8560d2dde1abe26ef2526157c1928f",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sc98654c02cdf6799": {
+            "evidence_id": "tool:302b139ad39e6c82d7bebb6229d3d6366f5fb0ef3e555bd5d31bb7cf0dcc8fb2",
+            "family_id": "46961ed3-0495-424b-923b-ce1ea88f4dc8",
+            "title": "Kolokacije · pogodbo"
+          },
+          "Se7087fd86eed52a6": {
+            "evidence_id": "tool:f9dacff2e2bda35a52e0ec86bd8d9c7df0d90bd65f9337485c66a0e712f277c9",
+            "family_id": "cfde833e-4018-4b7c-a62f-afb7540b836e",
+            "title": "Kolokacije · odločitev"
+          },
+          "Sf9c5ea784f35bab9": {
+            "evidence_id": "tool:90b9946c4678629d467fa5cefe9e11c7ccb94d5b4caa26fb61f99fa2f9640dc4",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sff5c0f4bc75496dd": {
+            "evidence_id": "tool:b155248654039f88b3a648ed85c39666928552284e5cdc57105dc2d4686a58e9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          }
+        },
+        "stale": false,
+        "state": "partial",
+        "units": [
+          {
+            "attempted": true,
+            "draft_span": {
+              "end": 50,
+              "start": 0,
+              "text": "Želimo narediti odločitev o nadaljevanju projekta."
+            },
+            "failure_type": null,
+            "family_id": "edeac854-a0b5-4b9e-9aba-c5177775abc1",
+            "inference_performed": true,
+            "item_limit": 5,
+            "job_id": "8e36236c-3a93-4a23-9263-2df924a53d3c",
+            "original_span": {
+              "end": 50,
+              "start": 0,
+              "text": "Želimo narediti odločitev o nadaljevanju projekta."
+            },
+            "packet_sha256": "d30ff91308d81b9403b1501907cb0e4891ab5268dfc920f8f1ddb295b566b586",
+            "preparation_sha256": "ca475379d2ba2b823035455e6c1441f25e72745665c681f98a799022d7b3eb80",
+            "result_sha256": "700ef59385fd42ad251ab85c99e6461c71c0195a324719e67b1e5c573d0af27d",
+            "run_id": "d386a8ff-9b2f-40b2-b0d2-8f142d33e4f5",
+            "section_index": 0,
+            "source_refs": [
+              "Se7087fd86eed52a6"
+            ],
+            "state": "completed",
+            "unit_id": "U02bdeb3f13a734450b47b6f9"
+          },
+          {
+            "draft_span": {
+              "end": 25,
+              "start": 0,
+              "text": "Želimo podpisati pogodbo."
+            },
+            "failure_type": null,
+            "family_id": "3509076e-bf99-45f1-98a7-f1f9544a4eee",
+            "item_limit": 5,
+            "job_id": "538723d2-f479-4beb-ba23-a23e12448485",
+            "original_span": {
+              "end": 25,
+              "start": 0,
+              "text": "Želimo podpisati pogodbo."
+            },
+            "packet_sha256": "2ea9a5625634cbe9085cc53ddfcb8f24723e44fde49c84601fecf8e65d3b8711",
+            "preparation_sha256": "1274a031f941422587811634c0086963391d1cead7cdfa22b3f9d50aba667166",
+            "run_id": "c955e766-5304-402f-b6d9-ea594a3ad367",
+            "section_index": 1,
+            "source_refs": [
+              "S36debc0350a227c3",
+              "Sc98654c02cdf6799"
+            ],
+            "state": "cancelled",
+            "unit_id": "Uc0d9ca01f8e2bac907decd07"
+          },
+          {
+            "draft_span": {
+              "end": 52,
+              "start": 0,
+              "text": "Pripravili bomo pogodbo in jo po pregledu podpisali."
+            },
+            "failure_type": null,
+            "family_id": "a54a3102-e933-4061-994a-b31371196420",
+            "item_limit": 5,
+            "job_id": "e6421883-aeab-4b4c-9700-12053bd74543",
+            "original_span": {
+              "end": 52,
+              "start": 0,
+              "text": "Pripravili bomo pogodbo in jo po pregledu podpisali."
+            },
+            "packet_sha256": "e4be9b533381780ef31660b2b60493ba8fe3f122178357ccd23f6c293b7464d1",
+            "preparation_sha256": "8195478359815044bbad2d9868b904514d30a3421b5f00744c114ccc2bcfcf00",
+            "run_id": "7a396837-e92a-4b00-ba09-8aa3a9273f2f",
+            "section_index": 2,
+            "source_refs": [
+              "S13ae1eae730f3868",
+              "S5108c91bd376f01c",
+              "Sff5c0f4bc75496dd"
+            ],
+            "state": "cancelled",
+            "unit_id": "Uea902180bbd949c99f4c8ca1"
+          },
+          {
+            "draft_span": {
+              "end": 110,
+              "start": 53,
+              "text": "Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+            },
+            "failure_type": null,
+            "family_id": null,
+            "item_limit": 5,
+            "job_id": null,
+            "original_span": {
+              "end": 110,
+              "start": 53,
+              "text": "Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+            },
+            "packet_sha256": "fe36c69f012443d90556626304673b498814bd0240149b1edfee8099571d3e10",
+            "preparation_sha256": "9a7510fd50e1069402f3a5f27cec0b23e85254b2385db53b902a878fc2bca7b9",
+            "run_id": null,
+            "section_index": 2,
+            "source_refs": [
+              "S0df7b3be48328ecd",
+              "S2b157e976a7b12c1",
+              "S7ab936472bf508b0",
+              "S7b880d5a684a4d02",
+              "S88630e8d1d8184fd",
+              "Sa4282db6212fa34b",
+              "Sf9c5ea784f35bab9"
+            ],
+            "state": "unavailable_input_limit",
+            "unit_id": "Ub13d23521bcbf0e088852f04"
+          },
+          {
+            "draft_span": {
+              "end": 34,
+              "start": 0,
+              "text": "Na postaji pričakujemo hiter vlak."
+            },
+            "failure_type": null,
+            "family_id": "8adcba71-04f0-48d2-9620-4338ef76a087",
+            "item_limit": 4,
+            "job_id": "c905469d-29a7-4544-ba78-cff3fa0f9288",
+            "original_span": {
+              "end": 34,
+              "start": 0,
+              "text": "Na postaji pričakujemo hiter vlak."
+            },
+            "packet_sha256": "c9213febce88b46329685b581b7b031ce938f587cf3de25aa50828663fe16a44",
+            "preparation_sha256": "2deed14bede2bb01846371768774b226b3ac734c53adbfa1128f9541b631bff4",
+            "run_id": "d9caec6f-2f07-4933-b858-fab0d9297076",
+            "section_index": 3,
+            "source_refs": [
+              "S1e6aea146f5cff44",
+              "S543b95557f592edf",
+              "S6eaf49a750b58c1e",
+              "S82aaea6627743111",
+              "S8615155e66f4f0fa"
+            ],
+            "state": "cancelled",
+            "unit_id": "U88a25f89dedd86533b586dfb"
+          }
+        ],
+        "version": "klikai.document-ai-suggestions.v1"
+      },
+      "results": {
+        "U02bdeb3f13a734450b47b6f9": {
+          "attempted": true,
+          "inference_performed": true,
+          "items": [
+            {
+              "authority": "not_source_authorized",
+              "draft_sha256": "acbf8b76249ee5b862833ee6f84e1ceb53619b59eb3ae298c3af576cf9f9a252",
+              "eligible_for_accept": true,
+              "end": 50,
+              "explanation": "The phrase 'sprejeti odločitev' is a recorded collocation with high frequency and lexical fit. It maintains the original meaning and grammatical structure while using a more natural and attested alternative. The replacement is a direct substitution of the verb 'narediti' with 'sprejeti' based on a source-attested collocation.",
+              "finding_ids": [],
+              "kind": "additional_suggestion",
+              "mechanical_issues": [],
+              "observed_text": "Želimo narediti odločitev o nadaljevanju projekta.",
+              "origin": "ai_generated",
+              "original_span": {
+                "end": 50,
+                "start": 0
+              },
+              "replacement": "Želimo sprejeti odločitev o nadaljevanju projekta.",
+              "section_index": 0,
+              "source_refs": [
+                "Se7087fd86eed52a6"
+              ],
+              "start": 0,
+              "suggestion_id": "Afcb379b84731cde1f06dfb98",
+              "uncertainty": "The intended meaning and register must be verified, as 'sprejeti odločitev' may carry subtle differences in formality or context compared to 'narediti odločitev'."
+            }
+          ],
+          "raw_content": "{\n  \"items\": [\n    {\n      \"kind\": \"additional_suggestion\",\n      \"section_index\": 0,\n      \"start\": 0,\n      \"end\": 50,\n      \"observed_text\": \"Želimo narediti odločitev o nadaljevanju projekta.\",\n      \"replacement\": \"Želimo sprejeti odločitev o nadaljevanju projekta.\",\n      \"explanation\": \"The phrase 'sprejeti odločitev' is a recorded collocation with high frequency and lexical fit. It maintains the original meaning and grammatical structure while using a more natural and attested alternative. The replacement is a direct substitution of the verb 'narediti' with 'sprejeti' based on a source-attested collocation.\",\n      \"uncertainty\": \"The intended meaning and register must be verified, as 'sprejeti odločitev' may carry subtle differences in formality or context compared to 'narediti odločitev'.\",\n      \"finding_ids\": [],\n      \"source_refs\": [\"Se7087fd86eed52a6\"]\n    }\n  ]\n}",
+          "status": "available"
+        }
+      }
+    },
+    "remaining": {
+      "context_sections": [
+        {
+          "index": 0,
+          "text": "Želimo narediti odločitev o nadaljevanju projekta."
+        },
+        {
+          "index": 1,
+          "text": "Želimo podpisati pogodbo."
+        },
+        {
+          "index": 2,
+          "text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+        },
+        {
+          "index": 3,
+          "text": "Na postaji pričakujemo hiter vlak."
+        }
+      ],
+      "document_source": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-remaining-three-trial-20261115/FINAL_DOCUMENT.json",
+      "provenance": {
+        "U88a25f89dedd86533b586dfb": {
+          "original_result_sha256": "a897f86bd5f49783f7ebede3240c1befefdc2af26ac56773d0a084cc948f3a8e",
+          "source_file_sha256": "16d7e58898c00c06b4a0514c3d4afc0cff2ab4477afa451fe425a25d36597bec",
+          "source_path": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-remaining-three-trial-20261115/units/U88a25f89dedd86533b586dfb/core-result.json"
+        },
+        "Uc0d9ca01f8e2bac907decd07": {
+          "original_result_sha256": "ac6a82e2f315a582d2a4a669d84c10f84f7402e2bc92fa6b98c7e7e353ed13a4",
+          "source_file_sha256": "b268e755607b279d13eeaba19d48d98bd9c168003f273280c8fcd6f062cedcb1",
+          "source_path": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-remaining-three-trial-20261115/units/Uc0d9ca01f8e2bac907decd07/core-result.json"
+        },
+        "Uea902180bbd949c99f4c8ca1": {
+          "original_result_sha256": "e59450c478ae1ac544d2480af275bec797f4dbdef7d0bb7952ee797e9d42f947",
+          "source_file_sha256": "64c112f2aa01c7847ee841fcca9f3ae50b2f3c1886232ac1d22c5ccd308020f0",
+          "source_path": "/mnt/c/Users/damja/Documents/ChatGPT/KLIKai/document-advice-remaining-three-trial-20261115/units/Uea902180bbd949c99f4c8ca1/core-result.json"
+        }
+      },
+      "public": {
+        "coverage": {
+          "provided_sections": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "decisions": {},
+        "evidence_manifest_sha256": "63e0150d9481bf6bc864872c488270c987721dc889048999410f4af36866f97a",
+        "items": [
+          {
+            "authority": "not_source_authorized",
+            "draft_sha256": "28a0b3b3d8b11dad19ed18848faf6bd2a48456611f9db4ec7d483ef0f7e28f10",
+            "eligible_for_accept": false,
+            "end": 25,
+            "explanation": "Besedna zveza »podpisati pogodbo« je v viru Kolokacije zabeležena kot pogosta in slovnično pravilna. Predlagana sprememba ohranja originalni pomen in izboljša jasnost ter skladnost z zabeleženimi kolokacijami.",
+            "finding_ids": [],
+            "kind": "additional_suggestion",
+            "mechanical_issues": [
+              "no_op"
+            ],
+            "observed_text": "Želimo podpisati pogodbo.",
+            "origin": "ai_generated",
+            "original_span": {
+              "end": 25,
+              "start": 0
+            },
+            "replacement": "Želimo podpisati pogodbo.",
+            "section_index": 1,
+            "source_refs": [
+              "S36debc0350a227c3",
+              "Sc98654c02cdf6799"
+            ],
+            "start": 0,
+            "suggestion_id": "Ac01c5f17686bc982e862d872",
+            "uncertainty": "Sprememba je predlagana na podlagi zabeleženih kolokacij v viru Kolokacije, vendar ni mogoče zagotoviti, da je to najbolj pogosta ali pričakovana oblika v vseh kontekstih.",
+            "unit_id": "Uc0d9ca01f8e2bac907decd07"
+          },
+          {
+            "authority": "not_source_authorized",
+            "draft_sha256": "3fa08a7f70ba4366eab31bfe3cb08dbc15c019506621167994e9a4639a7ea0b6",
+            "eligible_for_accept": false,
+            "end": 52,
+            "explanation": "Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.",
+            "finding_ids": [],
+            "kind": "additional_suggestion",
+            "mechanical_issues": [
+              "span_not_bound"
+            ],
+            "observed_text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+            "origin": "ai_generated",
+            "original_span": null,
+            "replacement": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+            "section_index": 2,
+            "source_refs": [
+              "S13ae1eae730f3868",
+              "S5108c91bd376f01c",
+              "Sff5c0f4bc75496dd"
+            ],
+            "start": 0,
+            "suggestion_id": "A120fdac1dc6766256262db8b",
+            "uncertainty": "N/A",
+            "unit_id": "Uea902180bbd949c99f4c8ca1"
+          },
+          {
+            "authority": "not_source_authorized",
+            "draft_sha256": "3fa08a7f70ba4366eab31bfe3cb08dbc15c019506621167994e9a4639a7ea0b6",
+            "eligible_for_accept": false,
+            "end": 52,
+            "explanation": "Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.",
+            "finding_ids": [],
+            "kind": "additional_suggestion",
+            "mechanical_issues": [
+              "span_not_bound"
+            ],
+            "observed_text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+            "origin": "ai_generated",
+            "original_span": null,
+            "replacement": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+            "section_index": 2,
+            "source_refs": [
+              "S13ae1eae730f3868",
+              "S5108c91bd376f01c",
+              "Sff5c0f4bc75496dd"
+            ],
+            "start": 0,
+            "suggestion_id": "A61982b60c98e084ea7e29600",
+            "uncertainty": "N/A",
+            "unit_id": "Uea902180bbd949c99f4c8ca1"
+          }
+        ],
+        "packet_sha256": "85e1bf23af2975fd148754e012c80805e98e0403b4f8ff4909705b8c58b4d242",
+        "partial": true,
+        "result_sha256": "aeae808edf371f04e2c00d44c379ccd61c04e362401857c35b4bd27fbead0759",
+        "review_complete": false,
+        "source_references": {
+          "S0df7b3be48328ecd": {
+            "evidence_id": "tool:e1ec700c81516674a67bdf0915c9142f37f0a5d8b9d4118a021c8b651e716130",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "S13ae1eae730f3868": {
+            "evidence_id": "tool:9855d08d53d0c2b4d08c3ed835a3c3e8136a06e6461a3981bcab19fa6f59cc65",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          },
+          "S1e6aea146f5cff44": {
+            "evidence_id": "tool:a70c829f759271afe2ecc708260566c25e8dd82b45e2c3a00dadf7fdea931bca",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S2b157e976a7b12c1": {
+            "evidence_id": "tool:991daa0bfd6119c55b48c3af34ea79c49d1227b21fe08afbe92139eec7fec7f9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "S36debc0350a227c3": {
+            "evidence_id": "tool:172459f6b60381db7be96cd0ad124875e7011b70bee9ccc21b1dfa445185f00b",
+            "family_id": "46961ed3-0495-424b-923b-ce1ea88f4dc8",
+            "title": "Kolokacije · podpisati"
+          },
+          "S5108c91bd376f01c": {
+            "evidence_id": "tool:0a1903aff4cc359f1ad033c43bd3b38c41787b831a9caf0b575e389eaeeb4cf9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          },
+          "S543b95557f592edf": {
+            "evidence_id": "tool:e2ab926805342679747882613c40affb09d40fc034f207b8fec0cb56e0871ea5",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Kolokacije · vlak"
+          },
+          "S6eaf49a750b58c1e": {
+            "evidence_id": "tool:a0a4937c04ceebb036cd826d9a0ef89f4f5b6c9d84f46bb9292012fcffefd003",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S7ab936472bf508b0": {
+            "evidence_id": "tool:0475356c6fd83961f90d1f2fa4214484e42544e5b937e9d8da48525618b15953",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Sopomenke · dogovorjene"
+          },
+          "S7b880d5a684a4d02": {
+            "evidence_id": "tool:152a1ca280ceff39b006f010e3ae432efa53500dd734bb80a2785001398f135f",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Sopomenke · dogovorjene"
+          },
+          "S82aaea6627743111": {
+            "evidence_id": "tool:79aad57a1725debe24e62534451f6ea7a2c1e523ae878adb597a4bb4d9636d08",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S8615155e66f4f0fa": {
+            "evidence_id": "tool:c31f69edc094fa7524f0c3969404a73c92b99535fe93356acf4718868ffe82ca",
+            "family_id": "544d0c04-f6e8-4f4c-9933-722dd7d39d31",
+            "title": "Sopomenke · hiter"
+          },
+          "S88630e8d1d8184fd": {
+            "evidence_id": "tool:5a7b9dc607a9cbbf6aafa93ce29724e23f29ea8545c06d6be6d5d5728a816d72",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sa4282db6212fa34b": {
+            "evidence_id": "tool:1d2e585b461736b87e25a61c47d12e2ffe8560d2dde1abe26ef2526157c1928f",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sc98654c02cdf6799": {
+            "evidence_id": "tool:302b139ad39e6c82d7bebb6229d3d6366f5fb0ef3e555bd5d31bb7cf0dcc8fb2",
+            "family_id": "46961ed3-0495-424b-923b-ce1ea88f4dc8",
+            "title": "Kolokacije · pogodbo"
+          },
+          "Se7087fd86eed52a6": {
+            "evidence_id": "tool:f9dacff2e2bda35a52e0ec86bd8d9c7df0d90bd65f9337485c66a0e712f277c9",
+            "family_id": "cfde833e-4018-4b7c-a62f-afb7540b836e",
+            "title": "Kolokacije · odločitev"
+          },
+          "Sf9c5ea784f35bab9": {
+            "evidence_id": "tool:90b9946c4678629d467fa5cefe9e11c7ccb94d5b4caa26fb61f99fa2f9640dc4",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogoje"
+          },
+          "Sff5c0f4bc75496dd": {
+            "evidence_id": "tool:b155248654039f88b3a648ed85c39666928552284e5cdc57105dc2d4686a58e9",
+            "family_id": "3e78c37c-8e09-44d6-ae70-e22da2fb648c",
+            "title": "Kolokacije · pogodbo"
+          }
+        },
+        "stale": false,
+        "state": "partial",
+        "units": [
+          {
+            "draft_span": {
+              "end": 50,
+              "start": 0,
+              "text": "Želimo narediti odločitev o nadaljevanju projekta."
+            },
+            "failure_type": null,
+            "family_id": null,
+            "item_limit": 5,
+            "job_id": null,
+            "original_span": {
+              "end": 50,
+              "start": 0,
+              "text": "Želimo narediti odločitev o nadaljevanju projekta."
+            },
+            "packet_sha256": "d30ff91308d81b9403b1501907cb0e4891ab5268dfc920f8f1ddb295b566b586",
+            "preparation_sha256": "ca475379d2ba2b823035455e6c1441f25e72745665c681f98a799022d7b3eb80",
+            "run_id": null,
+            "section_index": 0,
+            "source_refs": [
+              "Se7087fd86eed52a6"
+            ],
+            "state": "cancelled",
+            "unit_id": "U02bdeb3f13a734450b47b6f9"
+          },
+          {
+            "attempted": true,
+            "draft_span": {
+              "end": 25,
+              "start": 0,
+              "text": "Želimo podpisati pogodbo."
+            },
+            "failure_type": null,
+            "family_id": "7e26799c-5940-49c0-b06a-97ec99cd030c",
+            "inference_performed": true,
+            "item_limit": 5,
+            "job_id": "d80f39ef-8f37-46b6-b18f-f76a50682460",
+            "original_span": {
+              "end": 25,
+              "start": 0,
+              "text": "Želimo podpisati pogodbo."
+            },
+            "packet_sha256": "2ea9a5625634cbe9085cc53ddfcb8f24723e44fde49c84601fecf8e65d3b8711",
+            "preparation_sha256": "1274a031f941422587811634c0086963391d1cead7cdfa22b3f9d50aba667166",
+            "result_sha256": "ac6a82e2f315a582d2a4a669d84c10f84f7402e2bc92fa6b98c7e7e353ed13a4",
+            "run_id": "b78b563c-c642-4c95-8a7d-117c2000eff8",
+            "section_index": 1,
+            "source_refs": [
+              "S36debc0350a227c3",
+              "Sc98654c02cdf6799"
+            ],
+            "state": "completed",
+            "unit_id": "Uc0d9ca01f8e2bac907decd07"
+          },
+          {
+            "attempted": true,
+            "draft_span": {
+              "end": 52,
+              "start": 0,
+              "text": "Pripravili bomo pogodbo in jo po pregledu podpisali."
+            },
+            "failure_type": null,
+            "family_id": "5518c411-b30f-4836-82a9-b4f1c4be812a",
+            "inference_performed": true,
+            "item_limit": 5,
+            "job_id": "59ec74a3-2342-453d-929e-63b83134fdda",
+            "original_span": {
+              "end": 52,
+              "start": 0,
+              "text": "Pripravili bomo pogodbo in jo po pregledu podpisali."
+            },
+            "packet_sha256": "e4be9b533381780ef31660b2b60493ba8fe3f122178357ccd23f6c293b7464d1",
+            "preparation_sha256": "8195478359815044bbad2d9868b904514d30a3421b5f00744c114ccc2bcfcf00",
+            "result_sha256": "e59450c478ae1ac544d2480af275bec797f4dbdef7d0bb7952ee797e9d42f947",
+            "run_id": "1d957448-f69d-492a-a15d-a3f9a84eda84",
+            "section_index": 2,
+            "source_refs": [
+              "S13ae1eae730f3868",
+              "S5108c91bd376f01c",
+              "Sff5c0f4bc75496dd"
+            ],
+            "state": "completed",
+            "unit_id": "Uea902180bbd949c99f4c8ca1"
+          },
+          {
+            "draft_span": {
+              "end": 110,
+              "start": 53,
+              "text": "Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+            },
+            "failure_type": null,
+            "family_id": null,
+            "item_limit": 5,
+            "job_id": null,
+            "original_span": {
+              "end": 110,
+              "start": 53,
+              "text": "Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje."
+            },
+            "packet_sha256": "fe36c69f012443d90556626304673b498814bd0240149b1edfee8099571d3e10",
+            "preparation_sha256": "9a7510fd50e1069402f3a5f27cec0b23e85254b2385db53b902a878fc2bca7b9",
+            "run_id": null,
+            "section_index": 2,
+            "source_refs": [
+              "S0df7b3be48328ecd",
+              "S2b157e976a7b12c1",
+              "S7ab936472bf508b0",
+              "S7b880d5a684a4d02",
+              "S88630e8d1d8184fd",
+              "Sa4282db6212fa34b",
+              "Sf9c5ea784f35bab9"
+            ],
+            "state": "unavailable_input_limit",
+            "unit_id": "Ub13d23521bcbf0e088852f04"
+          },
+          {
+            "attempted": true,
+            "draft_span": {
+              "end": 34,
+              "start": 0,
+              "text": "Na postaji pričakujemo hiter vlak."
+            },
+            "failure_type": "ValueError",
+            "family_id": "af369e3f-a4a3-4450-a7ee-3ed03aa98e27",
+            "inference_performed": true,
+            "item_limit": 4,
+            "job_id": "69e69dc6-9cd3-4d2a-9268-3fa340ede289",
+            "original_span": {
+              "end": 34,
+              "start": 0,
+              "text": "Na postaji pričakujemo hiter vlak."
+            },
+            "packet_sha256": "c9213febce88b46329685b581b7b031ce938f587cf3de25aa50828663fe16a44",
+            "preparation_sha256": "2deed14bede2bb01846371768774b226b3ac734c53adbfa1128f9541b631bff4",
+            "result_sha256": "a897f86bd5f49783f7ebede3240c1befefdc2af26ac56773d0a084cc948f3a8e",
+            "run_id": "981e7c06-1283-470e-a116-dac09ad0e8ea",
+            "section_index": 3,
+            "source_refs": [
+              "S1e6aea146f5cff44",
+              "S543b95557f592edf",
+              "S6eaf49a750b58c1e",
+              "S82aaea6627743111",
+              "S8615155e66f4f0fa"
+            ],
+            "state": "unavailable",
+            "unit_id": "U88a25f89dedd86533b586dfb"
+          }
+        ],
+        "version": "klikai.document-ai-suggestions.v1"
+      },
+      "results": {
+        "U88a25f89dedd86533b586dfb": {
+          "attempted": true,
+          "failure_type": "ValueError",
+          "inference_performed": true,
+          "items": [],
+          "raw_content": "{\n  \"items\": [\n    {\n      \"kind\": \"finding_comment\",\n      \"section_index\": 3,\n      \"start\": 23,\n      \"end\": 34,\n      \"observed_text\": \"hiter vlak\",\n      \"replacement\": \"bliskovit vlak\",\n      \"explanation\": \"The adjective 'hiter' (fast) is semantically appropriate, but 'bliskovit' (lightning-fast) is a more intense synonym that better conveys the intended meaning of a very fast train. It is a direct synonym from the same source and fits the context without grammatical or domain issues.\",\n      \"uncertainty\": \"The intended meaning is not explicitly stated, but 'bliskovit' is a stronger synonym that aligns with the expectation of a fast train.\",\n      \"finding_ids\": [\"S6eaf49a750b58c1e\"],\n      \"source_refs\": [\"S6eaf49a750b58c1e\"]\n    }\n  ]\n}",
+          "status": "unavailable"
+        },
+        "Uc0d9ca01f8e2bac907decd07": {
+          "attempted": true,
+          "inference_performed": true,
+          "items": [
+            {
+              "authority": "not_source_authorized",
+              "draft_sha256": "28a0b3b3d8b11dad19ed18848faf6bd2a48456611f9db4ec7d483ef0f7e28f10",
+              "eligible_for_accept": false,
+              "end": 25,
+              "explanation": "Besedna zveza »podpisati pogodbo« je v viru Kolokacije zabeležena kot pogosta in slovnično pravilna. Predlagana sprememba ohranja originalni pomen in izboljša jasnost ter skladnost z zabeleženimi kolokacijami.",
+              "finding_ids": [],
+              "kind": "additional_suggestion",
+              "mechanical_issues": [
+                "no_op"
+              ],
+              "observed_text": "Želimo podpisati pogodbo.",
+              "origin": "ai_generated",
+              "original_span": {
+                "end": 25,
+                "start": 0
+              },
+              "replacement": "Želimo podpisati pogodbo.",
+              "section_index": 1,
+              "source_refs": [
+                "S36debc0350a227c3",
+                "Sc98654c02cdf6799"
+              ],
+              "start": 0,
+              "suggestion_id": "A65a633f52b3a14d4525dd49d",
+              "uncertainty": "Sprememba je predlagana na podlagi zabeleženih kolokacij v viru Kolokacije, vendar ni mogoče zagotoviti, da je to najbolj pogosta ali pričakovana oblika v vseh kontekstih."
+            }
+          ],
+          "raw_content": "{\n  \"items\": [\n    {\n      \"kind\": \"additional_suggestion\",\n      \"section_index\": 1,\n      \"start\": 0,\n      \"end\": 25,\n      \"observed_text\": \"Želimo podpisati pogodbo.\",\n      \"replacement\": \"Želimo podpisati pogodbo.\",\n      \"explanation\": \"Besedna zveza »podpisati pogodbo« je v viru Kolokacije zabeležena kot pogosta in slovnično pravilna. Predlagana sprememba ohranja originalni pomen in izboljša jasnost ter skladnost z zabeleženimi kolokacijami.\",\n      \"uncertainty\": \"Sprememba je predlagana na podlagi zabeleženih kolokacij v viru Kolokacije, vendar ni mogoče zagotoviti, da je to najbolj pogosta ali pričakovana oblika v vseh kontekstih.\",\n      \"finding_ids\": [],\n      \"source_refs\": [\"S36debc0350a227c3\", \"Sc98654c02cdf6799\"]\n    }\n  ]\n}",
+          "status": "available"
+        },
+        "Uea902180bbd949c99f4c8ca1": {
+          "attempted": true,
+          "inference_performed": true,
+          "items": [
+            {
+              "authority": "not_source_authorized",
+              "draft_sha256": "3fa08a7f70ba4366eab31bfe3cb08dbc15c019506621167994e9a4639a7ea0b6",
+              "eligible_for_accept": false,
+              "end": 52,
+              "explanation": "Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.",
+              "finding_ids": [],
+              "kind": "additional_suggestion",
+              "mechanical_issues": [
+                "span_not_bound"
+              ],
+              "observed_text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+              "origin": "ai_generated",
+              "original_span": null,
+              "replacement": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+              "section_index": 2,
+              "source_refs": [
+                "S13ae1eae730f3868",
+                "S5108c91bd376f01c",
+                "Sff5c0f4bc75496dd"
+              ],
+              "start": 0,
+              "suggestion_id": "A92ba48d8312cd9e6f0c2e895",
+              "uncertainty": "N/A"
+            },
+            {
+              "authority": "not_source_authorized",
+              "draft_sha256": "3fa08a7f70ba4366eab31bfe3cb08dbc15c019506621167994e9a4639a7ea0b6",
+              "eligible_for_accept": false,
+              "end": 52,
+              "explanation": "Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.",
+              "finding_ids": [],
+              "kind": "additional_suggestion",
+              "mechanical_issues": [
+                "span_not_bound"
+              ],
+              "observed_text": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+              "origin": "ai_generated",
+              "original_span": null,
+              "replacement": "Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.",
+              "section_index": 2,
+              "source_refs": [
+                "S13ae1eae730f3868",
+                "S5108c91bd376f01c",
+                "Sff5c0f4bc75496dd"
+              ],
+              "start": 0,
+              "suggestion_id": "Af5b7918762f487852a156a2c",
+              "uncertainty": "N/A"
+            }
+          ],
+          "raw_content": "{\n  \"items\": [\n    {\n      \"kind\": \"additional_suggestion\",\n      \"section_index\": 2,\n      \"start\": 0,\n      \"end\": 52,\n      \"observed_text\": \"Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.\",\n      \"replacement\": \"Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.\",\n      \"explanation\": \"Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.\",\n      \"uncertainty\": \"N/A\",\n      \"finding_ids\": [],\n      \"source_refs\": [\"S13ae1eae730f3868\", \"S5108c91bd376f01c\", \"Sff5c0f4bc75496dd\"]\n    },\n    {\n      \"kind\": \"additional_suggestion\",\n      \"section_index\": 2,\n      \"start\": 0,\n      \"end\": 52,\n      \"observed_text\": \"Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.\",\n      \"replacement\": \"Pripravili bomo pogodbo in jo po pregledu podpisali. Pri oblikovanju pogodbe bomo ohranili dogovorjene pogoje.\",\n      \"explanation\": \"Besedilo je slovnično pravilno in jasno. Ni potrebnih sprememb.\",\n      \"uncertainty\": \"N/A\",\n      \"finding_ids\": [],\n      \"source_refs\": [\"S13ae1eae730f3868\", \"S5108c91bd376f01c\", \"Sff5c0f4bc75496dd\"]\n    }\n  ]\n}",
+          "status": "available"
+        }
+      }
+    }
+  },
+  "kind": "Selected unchanged actual fields; not new outputs or full-result replacements"
+}

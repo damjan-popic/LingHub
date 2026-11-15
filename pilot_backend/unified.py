@@ -1154,6 +1154,103 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         return tool_capture
 
 
+def collect_native_context_syntax(gateway,family,found,tool_capture):
+    """One optional original-use observation after an already retained contrast.
+
+    The authoritative consultation scope is the gate, not a new classifier.
+    Lexical evidence stays untouched and never supplies dependency links.
+    """
+    plan=family.get('request_plan')or{};consult=plan.get('consultation')or{}
+    language=family.get('input_language')
+    if language in {None,'und'}and isinstance(tool_capture,dict)and tool_capture.get('version')=='klikai.lexical-collation.v1':
+        language=(tool_capture.get('captures')or[{}])[0].get('response',{}).get('query',{}).get('lang')
+    if (consult.get('requested')is not False or not {'usage','register'}&set(consult.get('supporting_dimensions',[]))
+            or plan.get('ambiguities')or plan.get('requested_grammar_slots')
+            or plan.get('requested_source')not in {None,'epravopis','epravopis-slovar'}
+            or plan.get('requested_edition')is not None or plan.get('translation_language')
+            or set(plan.get('requested_facets',[]))&{'orthography','spacing','frequency','synonyms','collocations','morphology','inflection','conjugation','translation'}
+            or language!='sl'):return None,None
+    from .original_projection import checked
+    from .document_surface import occurrences
+    groups={}
+    for row in found:
+        raw=row.get('capture')or{}
+        if (row.get('capture_kind')!='resource_record'or row.get('source_slug')!='epravopis-slovar'
+                or row.get('context_eligible',True)is False or row.get('rights_mode')not in {'owned','open','restricted'}
+                or raw.get('normative_status')!='proposal'or not raw.get('source_status')
+                or not isinstance(raw.get('original_text'),str)or not raw['original_text'].strip()
+                or digest(raw)!=row.get('capture_sha256')or raw.get('original_projection')is None):continue
+        projection=checked(raw['original_projection'],source_slug=row['source_slug'],record_id=row['external_id'])
+        if projection['homograph_discrepancy']or not projection['tables']or not projection['homograph_marker']:continue
+        groups.setdefault(projection['headword'],[]).append(projection)
+    heads=[head for head,rows in groups.items()if len({r['homograph_marker']for r in rows})>1
+        and len({digest(r['tables'])for r in rows})>1]
+    if not heads:return None,None
+    question=family.get('original_question',family['question']);context=family.get('context','')
+    def scope_for(host,a,b,origin):
+        if type(a)is not int or type(b)is not int or not 0<=a<b<=len(host):return None
+        text=host[a:b]
+        if len(re.findall(r"[^\W_]+(?:[-’'][^\W_]+)*",text))<2 or not any(any(occurrences(h,text))for h in heads):return None
+        return {'scope':origin,'start':a,'end':b,'text':text}
+    target=scope_for(context,len(context)-len(context.lstrip()),len(context.rstrip()),'context')if context.strip()else None
+    if target is None:
+        scope=consult.get('scope')or{}
+        if consult.get('kind')in {'example','expression'}:
+            target=scope_for(question,scope.get('start'),scope.get('end'),'question')
+        elif consult.get('kind')=='judgment':
+            # Only a bound submitted expression, never the judgment wrapper.
+            targets=plan.get('target_spans')or[]
+            if len(targets)==1:
+                span=targets[0]
+                if span.get('basis')=='quotation'or span.get('text')!=scope.get('text'):
+                    if span.get('span_scope')=='context':
+                        shift=len(question)+1
+                        target=scope_for(context,span.get('start',0)-shift,span.get('end',0)-shift,'context')
+                    else:target=scope_for(question,span.get('start'),span.get('end'),'question')
+    if target is None:return None,None
+    status={'family':'native_row_context_syntax','source_label':'Jezikovna analiza','status':'unavailable',
+        'returned_count':0,'limit':1,'has_more':False,'requested':False,'routing_kind':'native_row_context_syntax',
+        'target_scope':deepcopy(target),'normative_conclusion':'not_established'}
+    from core.syntax_analysis import collect as collect_syntax, _analysis, MAX_CHARACTERS
+    def checked_observation(observed):
+        if (observed.get('schema')!='linghub.syntax-observation.v1'or observed.get('status')!='ok'
+                or observed.get('input_text')!=target['text']
+                or observed.get('input_sha256')!=__import__('hashlib').sha256(target['text'].encode()).hexdigest()):
+            raise ValueError('syntax_input_binding')
+        _analysis(observed.get('analysis'),target['text'])
+    if isinstance(tool_capture,dict)and tool_capture.get('version')=='klikai.syntax-collation.v1':
+        caps=tool_capture.get('captures')or[]
+        if len(caps)!=1 or digest(caps)!=tool_capture.get('capture_set_sha256')or digest(caps[0].get('response'))!=caps[0].get('response_sha256'):
+            raise ValueError('Existing syntax capture changed')
+        observed=caps[0]['response'];existing=observed.get('target_scope')or{}
+        if all(existing.get(k)==target[k]for k in ('scope','start','end','text')):
+            checked_observation(observed)
+            return None,dict(status,status='not_documentary',tool_outcome='reused',capture_count=1,additional_requests=0)
+    if len(target['text'])>MAX_CHARACTERS:
+        return None,dict(status,tool_outcome='too_long',reason='selected_text_limit',additional_requests=0)
+    config=getattr(gateway,'comma_checker',None)
+    if not isinstance(config,dict)or not config.get('syntax_url'):
+        return None,dict(status,tool_outcome='unavailable',reason='syntax_worker_unconfigured',additional_requests=0)
+    try:
+        observed=collect_syntax(target['text'],config)
+        if not isinstance(observed,dict):raise ValueError('syntax_response_invalid')
+        if observed.get('status')!='ok':
+            return None,dict(status,tool_outcome=observed.get('status','unavailable'),reason=observed.get('reason','syntax_unavailable'),
+                execution=deepcopy(observed.get('execution',{})))
+        checked_observation(observed)
+        observed=deepcopy(observed);observed['target_scope']=deepcopy(target)
+        cap={'operation':'syntax','request':{'text':target['text']},'response':observed,
+            'response_sha256':digest(observed),'duration_ms':observed.get('elapsed_ms',0)}
+        capture={'version':'klikai.syntax-collation.v1','plan':{'status':'ready','routing_kind':'native_row_context_syntax','focus':target['text']},
+            'captures':[cap],'capture_set_sha256':digest([cap])}
+        if len(canonical(capture).encode())>256*1024:
+            return None,dict(status,tool_outcome='omitted',reason='syntax_capture_bound',whole_capture_omitted=True)
+        return capture,dict(status,status='not_documentary',tool_outcome='captured',capture_count=1,
+            execution=deepcopy(observed.get('execution',{})))
+    except (ValueError,KeyError,TypeError):
+        return None,dict(status,tool_outcome='unavailable',reason='syntax_response_invalid')
+
+
 def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None):
     # One request plan travels to source discovery, lexical profiles, writer and
     # cards. Family/history text remains immutable; only this request copy is used.
@@ -1215,9 +1312,19 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
     found = merge_source_matches(found)
     coverage.sort(key=lambda x: x['family'])
     external = [{k: deepcopy(v) for k, v in item.items() if k != 'source'} for item in found]
-    packet = {'version': PACKET, 'matches': external, 'retrieval': coverage}
+    packet = {'version': PACKET, 'matches': external, 'retrieval': deepcopy(coverage)}
     if len(canonical(packet).encode()) > MAX_BYTES:
         raise Failure('unified_capture_too_large', 413)
+    syntax_capture,syntax_status=collect_native_context_syntax(gateway,family,found,tool_capture)
+    if syntax_status is not None:
+        coverage.append(syntax_status);coverage.sort(key=lambda x:x['family'])
+        extended=dict(packet,retrieval=coverage)
+        if len(coverage)>64 or len(canonical(extended).encode())>MAX_BYTES:
+            syntax_capture=None
+            syntax_status.update(status='unavailable',tool_outcome='omitted',reason='optional_syntax_context_bound',whole_capture_omitted=True)
+            # Keep the complete original CORE packet; the outer coverage keeps
+            # the optional omission without consuming its existing bound.
+        else:packet=extended
     timings['evidence_preparation_ms'] = round((time.monotonic() - stage_started) * 1000, 3)
     child = None
     gateway_timings = {}
@@ -1232,7 +1339,8 @@ def freeze(gateway, family, policy,*,interpretation=None,comma_observation=None)
             'policy': policy, 'unified_evidence': packet, 'request_plan': family['request_plan'],
             'interpretation_input_sha256': interpretation['interpretation_input_sha256'],
             'request_plan_sha256': interpretation['request_plan_sha256'],
-            **({'tool_evidence':tool_capture}if tool_capture is not None else{})}))
+            **({'tool_evidence':tool_capture}if tool_capture is not None else{}),
+            **({'syntax_evidence':syntax_capture}if syntax_capture is not None else{})}))
         response = gateway.request('/internal/pilot/freeze', freeze_request)
         remote = response.get('matches')
         if not isinstance(response.get('bundle'), dict) or not isinstance(remote, list):

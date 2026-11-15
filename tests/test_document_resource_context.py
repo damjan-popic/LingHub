@@ -141,6 +141,8 @@ def test_model_context_distinguishes_publisher_identity_and_incidental_prose_fro
     head=record({'original_projection':{'headword':'polje'},'original_text':'Dictionary paradigm.','language':'sl'})
     assert not context_nomination(head,task,[])['eligible']
     assert context_nomination(head,{**task,'source_text':'polje'},[])['eligible']
+    head['capture']['examples']=['oznako in polje']
+    assert context_nomination(head,task,[])['eligible']
     prose='To je dokument, ki vsebuje oznako in polje za podpis.'
     incidental=record({'language':'sl','original_text':prose,'advice_units':[{'source_span':{
         'char_start':0,'char_end':len(prose),'text_sha256':sha(prose)}}]})

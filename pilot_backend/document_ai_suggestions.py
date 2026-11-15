@@ -131,7 +131,11 @@ def context_nomination(record,task,words):
         spans=list(surface.occurrences(head,text))
         if spans and surface.normalized(head)==surface.normalized(text):
             return decision(True,'whole_section_publisher_head_operand_senses_unresolved',spans)
-        return decision(False,'routine_publisher_entry_head_without_local_application_nomination')
+        # A bare head is insufficient. Independent source-owned examples or
+        # existing recorded advice/construction cues below can still nominate
+        # this whole dictionary unit without a deterministic finding.
+        spans=[span for form in _source_examples(raw)+_source_examples(projection)for span in _whole_expression(form,text)]
+        if spans:return decision(True,'publisher_source_owned_example_in_original',spans)
     cue=_native_review_cue(record,text,task['source_language'])
     occurrences=_documentary_review_occurrences(record,task)
     native=[o for o in occurrences if o['kind']=='recorded_table_form'and _whole_expression(o['text'],text)]

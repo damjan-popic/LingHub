@@ -30,7 +30,7 @@ def test_ai_packet_retains_native_candidate_context_with_no_evidence_finding():
     text='Hiter vlak je prispel.';sha=hashlib.sha256(text.encode()).hexdigest()
     native={'passage_id':'tool:synthetic-sense','source_id':'native:sense-1','source_slug':'cjvt-thesaurus',
         'source_revision':'2'*64,'role':'tool_result','tool_kind':'synonyms','text':'Complete source relation.',
-        'context_eligible':False,'original_json':{'target':'Hiter','fields':{'sense':{'domain':'railway','relations':[{'raw_text':'ekspresen'}]}}}}
+        'context_eligible':False,'original_json':{'target':'Hiter','fields':{'sense':{'examples':['Hiter vlak'],'domain':'railway','relations':[{'raw_text':'ekspresen'}]}}}}
     context={'version':VERSION,'source_sha256':sha,'envelopes':[{'occurrence':{'section':0,'start':0,'end':5,
         'text':'Hiter','original_sha256':sha},'language':'sl','source_passages':[],'tool_passages':[native]}]}
     context['context_sha256']=digest(context)
@@ -52,6 +52,12 @@ def test_ai_packet_retains_native_candidate_context_with_no_evidence_finding():
     assert source['native_answer_eligibility']is False
     assert source['admission_roles']==['model_context_not_edit_authority']
     assert value['coverage']['resource_context_delivery'][0]['additional_context_count']==1
+    # A domain label alone does not bind this occurrence to a source sense.
+    native['original_json']['fields']['sense'].pop('examples')
+    context['context_sha256']=digest({k:v for k,v in context.items()if k!='context_sha256'})
+    unscoped=ai.packet(documents,'owner',document)
+    assert unscoped['sources']=={}
+    assert unscoped['coverage']['resource_context_delivery'][0]['omitted'][0]['reason']=='unscoped_synonym_senses_retained_in_candidate_trace'
     native['incomplete']=True;native['context_eligible']=True
     context['context_sha256']=digest({k:v for k,v in context.items()if k!='context_sha256'})
     blocked=ai.packet(documents,'owner',document)
@@ -103,3 +109,25 @@ def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path)
         assert adapter.reader_contracts[-1]==doc.CONTRACT
         assert client.post('/api/pilot/login',json={'username':'reader-two','password':password},headers={'Origin':origin}).status_code==200
         assert client.get(url).status_code==404
+
+
+def test_collocation_nomination_uses_original_native_sentence_and_keeps_uncertainty():
+    from pilot_backend.document_ai_suggestions import context_nomination
+    text='Pripravili smo pogodbo.'
+    occurrence={'start':15,'end':22,'text':'pogodbo'}
+    passage={'tool_kind':'collocations','original_json':{'fields':{'headword':'pogodba',
+        'surface':'pripraviti pogodbo','components':[{'lemma':'pripraviti'},{'lemma':'pogodba'}]}}}
+    record={'capture':{},'capture_kind':'ordinary_context_unit','rights_mode':'owned',
+        'model_context_eligible':True,'context_eligible':False,'native_passage':passage,'occurrences':[occurrence]}
+    task={'source_text':text,'source_language':'sl'}
+    words=[{'start':0,'end':10,'lemma':'pripraviti','sentence_id':0},
+           {'start':15,'end':22,'lemma':'pogodba','sentence_id':0}]
+    from copy import deepcopy
+    before=deepcopy(record)
+    nomination=context_nomination(record,task,words)
+    assert nomination['eligible']and nomination['applicability_not_established']
+    assert record==before
+    words[0]['sentence_id']=1
+    assert not context_nomination(record,task,words)['eligible']
+    words[0]['sentence_id']=0;words[1]['lemma']='other'
+    assert not context_nomination(record,task,words)['eligible']

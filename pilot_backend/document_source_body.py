@@ -1,5 +1,5 @@
 """Source-owned document bodies; capture identity and field ownership stay intact."""
-import json
+import json,re
 
 def source_body(record):
     raw=record.get('capture')or{}
@@ -22,3 +22,12 @@ def body_binding(record):
         'capture_kind':record.get('capture_kind'),
         'rendering':'native_original_text'if isinstance((record.get('capture')or{}).get('original_text'),str)
             else'source_owned_fields_with_explicit_field_labels'}
+
+
+def source_topics(record):
+    """Unchanged quoted source expressions, not inferred document subjects."""
+    raw=record.get('capture')or{};unit=raw.get('source_unit')or{}
+    context=unit.get('context');question=context.get('question')if isinstance(context,dict)else None
+    topic='\n'.join(v for v in (raw.get('title'),raw.get('question_original'),question)if isinstance(v,str))
+    quoted=re.findall(r'»([^»«\n]+)«|«([^«»\n]+)»|“([^“”\n]+)”|"([^"\n]+)"',topic)
+    return list(dict.fromkeys(next(v for v in row if v)for row in quoted))

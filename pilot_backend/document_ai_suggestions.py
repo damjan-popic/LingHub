@@ -801,6 +801,13 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     outcome=ai.get('presentation')or outcome_presentation(ai)
     yield 'body',outcome['labels'][locale]['counts']
     if outcome['counts']['invalid_responses']:yield 'body',outcome['labels'][locale]['invalid_responses']
+    legacy=outcome.get('legacy_response')
+    if legacy:
+        yield 'body',legacy['labels'][locale]['title']
+        if legacy.get('recorded_failure_type'):yield 'body',('Tipo di errore registrato: 'if it else'Zabeležen tip napake: ')+legacy['recorded_failure_type']
+        if 'raw_content'in legacy:
+            yield 'subheading','Risposta IA originale, non modificata'if it else'Izvirni odgovor AI, nespremenjen'
+            yield 'body',legacy['raw_content']
     if ai.get('units'):
         yield 'body',('Revisione IA parziale: le parti senza risultato restano non riesaminate.'if it else'Delni AI pregled: deli brez rezultata ostajajo nepregledani.')if not ai['review_complete']else(
             'Tutte le parti assegnate hanno restituito un risultato; non è una certificazione linguistica.'if it else'Vsi dodeljeni deli so vrnili rezultat; to ni jezikovno potrdilo.')

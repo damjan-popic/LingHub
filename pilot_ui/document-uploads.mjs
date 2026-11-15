@@ -55,6 +55,12 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   group.append(el('p',(states[ai.state]||['Stanje je shranjeno','Stato salvato'])[locale()==='it'?1:0],{role:'status','aria-live':'polite'}));
   const presentation=ai.presentation,displayLocale=locale()==='it'?'it':'sl';
   if(presentation){group.append(el('p',presentation.labels[displayLocale].counts,{'data-ai-outcome-counts':''}));if(presentation.counts.invalid_responses)group.append(el('p',presentation.labels[displayLocale].invalid_responses));}
+  const legacy=presentation?.legacy_response;
+  if(legacy){
+   group.append(el('p',legacy.labels[displayLocale].title,{'data-ai-legacy-outcome':legacy.kind}));
+   if(legacy.recorded_failure_type)group.append(el('p',(locale()==='it'?'Tipo di errore registrato: ':'Zabeležen tip napake: ')+legacy.recorded_failure_type));
+   if(typeof legacy.raw_content==='string'){const raw=el('details',undefined,{'data-ai-raw-response':'legacy'});raw.append(el('summary',locale()==='it'?'Risposta IA originale, non modificata':'Izvirni odgovor AI, nespremenjen'),el('pre',legacy.raw_content,{class:'document-text'}));group.append(raw);}
+  }
   group.append(el('p',(locale()==='it'?'Sezioni estratte incluse nella richiesta: ':'Izvlečeni odseki, vključeni v zahtevo: ')+ai.coverage.provided_sections.map(i=>i+1).join(', ')));
   if(ai.units){
    group.append(el('p',ai.review_complete?(locale()==='it'?'Tutte le parti assegnate hanno restituito un risultato. Non è una certificazione linguistica.':'Vsi dodeljeni deli so vrnili rezultat. To ni jezikovno potrdilo.'):(locale()==='it'?'Revisione IA parziale: le parti senza risultato restano non riesaminate.':'Delni AI pregled: deli brez rezultata ostajajo nepregledani.'),{class:'qualified-note','data-ai-partial':String(!ai.review_complete)}));

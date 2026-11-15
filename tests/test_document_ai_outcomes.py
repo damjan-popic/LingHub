@@ -75,3 +75,29 @@ def test_unknown_issue_is_preserved_without_inventing_a_diagnosis():
     results['fixture']['items']=ai['items'];display=presentation(ai,results)
     reason=display['items'][item['suggestion_id']]['labels']['sl']['reasons'][0]
     assert reason['code']=='future_unknown_reason'and 'Drug zabeležen'in reason['text']
+
+
+def legacy_invalid_fixture():
+    """Mechanical retained-response fixture, not a language/model result."""
+    ai={'state':'unavailable','items':[],'decisions':{},'coverage':{'provided_sections':[0]}}
+    result={'status':'unavailable','items':[],'raw_content':'{"items":[{"fixture":"invalid retained response"}]}',
+        'inference_performed':True,'failure_type':'ValueError'}
+    return ai,{'legacy':result}
+
+
+def test_legacy_invalid_response_keeps_recorded_reason_and_raw_text_on_reports():
+    from pilot_backend import document_files
+    from io import BytesIO
+    from zipfile import ZipFile
+    from xml.etree import ElementTree as ET
+    ai,results=legacy_invalid_fixture();before=deepcopy((ai,results));display=presentation(ai,results)
+    assert display['counts']['invalid_responses']==1 and display['counts']['returned_items']==1
+    assert display['legacy_response']['raw_content']==results['legacy']['raw_content']
+    assert display['legacy_response']['recorded_failure_type']=='ValueError'
+    for locale in ('sl','it'):
+        public={**ai,'presentation':display};blocks=list(report_blocks(public,locale));text='\n'.join(str(v)for _,v in blocks)
+        assert results['legacy']['raw_content']in text and 'ValueError'in text
+        with ZipFile(BytesIO(document_files._text_docx(blocks,styled=True)))as package:
+            word='\n'.join(n.text or''for n in ET.fromstring(package.read('word/document.xml')).iter(document_files.W+'t'))
+        assert results['legacy']['raw_content']in word and 'ValueError'in word
+    assert (ai,results)==before

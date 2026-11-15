@@ -86,7 +86,7 @@ def presentation(ai,results=None):
     their array size is known. Those are not invented checked/rejected items.
     Invalid responses remain a separate count and retain only recorded detail.
     """
-    results=results or{};items=ai.get('items',[]);units={};invalid=0;unknown_raw=False;returned=0
+    results=results or{};items=ai.get('items',[]);units={};invalid=0;unknown_raw=False;returned=0;legacy=None
     for unit in ai.get('units',[]):
         uid=unit['unit_id'];result=results.get(uid)or{}
         checked=result.get('items',[])if result else[i for i in items if i.get('unit_id')==uid]
@@ -108,8 +108,13 @@ def presentation(ai,results=None):
         if failure:units[uid]['recorded_failure_type']=failure
     if not ai.get('units'):
         result=results.get('legacy')or{};returned=_raw_count(result,len(items));unknown_raw=returned is None
-        if ai.get('state')=='unavailable'and(result.get('inference_performed')is True or isinstance(result.get('raw_content'),str)):invalid=1
+        if ai.get('state')=='unavailable'and(result.get('inference_performed')is True or isinstance(result.get('raw_content'),str)):
+            invalid=1;legacy={'kind':'invalid_response','labels':{locale:{'title':localized(TITLES['invalid_response'],locale)}for locale in ('sl','it')}}
+            if isinstance(result.get('raw_content'),str):legacy['raw_content']=result['raw_content']
+            if result.get('failure_type'):legacy['recorded_failure_type']=result['failure_type']
     counts=_counts(items);counts.update(returned_items=None if unknown_raw else returned,invalid_responses=invalid)
-    return {'version':VERSION,'counts':counts,'items':{i['suggestion_id']:item_display(i)for i in items},'units':units,
+    value={'version':VERSION,'counts':counts,'items':{i['suggestion_id']:item_display(i)for i in items},'units':units,
         'labels':{locale:{'counts':count_text(counts,locale),'invalid_responses':(
             ('Neveljavni odgovori AI: 'if locale=='sl'else'Risposte IA non valide: ')+str(invalid))}for locale in ('sl','it')}}
+    if legacy is not None:value['legacy_response']=legacy
+    return value

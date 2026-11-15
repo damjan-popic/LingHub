@@ -548,6 +548,10 @@ class Documents:
             if current['state'] not in ACTIVE:
                 self.cancel(row['owner'], row['id'])
 
+        if self.ai_suggestions:
+            from .document_ai_suggestions import advance_units
+            advance_units(self)
+
     def start_worker(self):
         if self.thread is None:
             self.thread = threading.Thread(target=self.loop, name='pilot-documents', daemon=True)

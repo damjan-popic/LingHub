@@ -4,7 +4,8 @@ import hashlib,json,re
 from .store import canonical,digest,stamp
 from .document_source_body import source_body,body_binding
 from .security import Failure
-from .document_ai_contract import VERSION,PACKET,AI_LABEL,EVIDENCE_LABEL,WARNING,checked_packet,checked_output,selected_sections
+from .document_ai_contract import (VERSION,PACKET,AI_LABEL,EVIDENCE_LABEL,WARNING,checked_packet,checked_output,selected_sections,
+    SCOPES,advice_plan,scoped_packet)
 
 CONTRACT='klikai.document-ai-job.v1'
 def invalid():raise Failure('document_ai_unavailable',409)
@@ -439,25 +440,63 @@ def packet(documents,owner,document,contextual_analyses=None):
 def prepare(documents,owner,identifier):
     if not documents.ai_suggestions:invalid()
     document=documents.get(owner,identifier,internal=True);old=document['options'].get('ai_review')
-    if old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']and old['packet'].get('context_selection_policy')==CONTEXT_POLICY:return documents.get(owner,identifier)
+    if (old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']
+            and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES):
+        return _prepare_units(documents,owner,identifier,old)if old['state']=='preparing'else documents.get(owner,identifier)
     analyses=frozen_context_analyses(documents,owner,document)
     value=packet(documents,owner,document,analyses)
-    prepared=documents.domain.request_gateway.request('/internal/pilot/document-ai-suggestions/prepare',{'packet':value})
-    if (prepared.get('version')!=VERSION or prepared.get('packet_sha256')!=value['packet_sha256']
-            or prepared.get('preparation_sha256')!=digest({k:v for k,v in prepared.items()if k!='preparation_sha256'})
-            or prepared.get('status')not in {'prepared','unavailable_input_limit'}):invalid()
-    stage={'packet':value,'prepared':prepared,'state':prepared['status'],'created':stamp(),'family_id':None,'job_id':None,'run_id':None}
+    plan=advice_plan(value)
+    stage={'packet':value,'plan':plan,'prepared':{'preparation_sha256':None},'state':'preparing','created':stamp(),
+        'family_id':None,'job_id':None,'run_id':None,'cancel_requested':False,
+        'units':[{'unit':u,'packet':scoped_packet(value,plan,u)if u['dispatch_eligible']else None,'prepared':None,
+            'state':'pending'if u['dispatch_eligible']else'unavailable_dispatch_limit',
+            'family_id':None,'job_id':None,'run_id':None}for u in plan['units']]}
     with documents.store.tx()as db:
         row=documents.owned(db,owner,identifier);options=json.loads(row['options'])
         if old:options.setdefault('ai_history',[]).append({**old,'decisions':deepcopy(options.get('ai_decisions',{})),'decision_history':deepcopy(options.get('ai_decision_history',[]))})
         options.update(ai_review=stage,ai_decisions={},ai_decision_history=[])
         db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
-    return documents.get(owner,identifier)
+    return _prepare_units(documents,owner,identifier,stage)
+
+
+def _save_stage(documents,owner,identifier,stage):
+    with documents.store.tx()as db:
+        row=documents.owned(db,owner,identifier);options=json.loads(row['options']);current=options['ai_review']
+        if (current['packet']['packet_sha256']!=stage['packet']['packet_sha256']
+                or current.get('plan',{}).get('plan_sha256')!=stage['plan']['plan_sha256']):invalid()
+        if current.get('cancel_requested')and not stage.get('cancel_requested'):invalid()
+        options['ai_review']=deepcopy(stage)
+        db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
+
+
+def _prepare_units(documents,owner,identifier,stage):
+    # Persist intent before each possible count. A process interruption never
+    # rearms a possibly attempted preparation; pending units alone can resume.
+    if stage.get('cancel_requested'):return documents.get(owner,identifier)
+    for unit in stage['units']:
+        if unit['state']=='preparing':
+            unit.update(state='failed',failure_type='interrupted_preparation_no_retry');_save_stage(documents,owner,identifier,stage)
+        if unit['state']!='pending':continue
+        unit['state']='preparing';_save_stage(documents,owner,identifier,stage)
+        try:
+            value=unit['packet'];prepared=documents.domain.request_gateway.request('/internal/pilot/document-ai-suggestions/prepare',{'packet':value})
+            if (prepared.get('version')!=VERSION or prepared.get('packet_sha256')!=value['packet_sha256']
+                    or prepared.get('preparation_sha256')!=digest({k:v for k,v in prepared.items()if k!='preparation_sha256'})
+                    or prepared.get('status')not in {'prepared','unavailable_input_limit'}):invalid()
+            unit.update(prepared=prepared,state=prepared['status'])
+        except (Failure,OSError,ValueError,KeyError,TypeError,TimeoutError)as error:
+            unit.update(state='failed',failure_type=type(error).__name__)
+        _save_stage(documents,owner,identifier,stage)
+    stage['state']='prepared'if any(u['state']=='prepared'for u in stage['units'])else'unavailable'
+    stage['prepared']={'preparation_sha256':digest({'plan':stage['plan']['plan_sha256'],
+        'units':[{'unit_id':u['unit']['unit_id'],'state':u['state'],'preparation':u['prepared']}for u in stage['units']]})}
+    _save_stage(documents,owner,identifier,stage);return documents.get(owner,identifier)
 
 def start(documents,owner,identifier):
     if not documents.ai_suggestions:invalid()
     document=documents.get(owner,identifier,internal=True);stage=document['options'].get('ai_review')
     if not stage or stage['packet']['evidence_manifest_sha256']!=document['review_manifest']['manifest_sha256']:invalid()
+    if 'plan'in stage:return _start_units(documents,owner,identifier,document,stage)
     if stage.get('family_id'):return documents.get(owner,identifier)
     if stage['state']!='prepared':invalid()
     payload={'question':'Predlogi umetne inteligence za dokončani pregled dokumenta '+document['name'],
@@ -472,12 +511,62 @@ def start(documents,owner,identifier):
         db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
     return documents.get(owner,identifier)
 
-def validate_result(result,packet):
+
+def _start_units(documents,owner,identifier,document,stage):
+    if stage['plan']!=advice_plan(stage['packet']):invalid()
+    if stage.get('cancel_requested'):return documents.get(owner,identifier)
+    stage.update(started=True,scheduling=True);_save_stage(documents,owner,identifier,stage)
+    for unit in stage['units']:
+        if unit.get('family_id')or unit['state']!='prepared':continue
+        if unit['packet']!=scoped_packet(stage['packet'],stage['plan'],unit['unit']):invalid()
+        payload={'question':'Predlogi umetne inteligence za dokončani pregled dokumenta '+document['name'],
+            'context':'','locale':document['options']['locale'],'input_language':'sl','task':'reference','model':documents.domain.default_model,
+            'idempotency_key':_unit_key(identifier,unit)}
+        try:accepted=documents.domain.create_family(owner,payload,document_ai={'packet':unit['packet'],'prepared':unit['prepared']})
+        except Failure as error:
+            if error.code not in {'queue_full','generation_waiting_capacity'}:raise
+            stage['queue_issue']=error.code;break
+        unit.update(family_id=accepted['family']['answer_family_id'],job_id=accepted['job']['job_id'],
+            run_id=accepted['family']['short']['run_id'],state='queued')
+        # The existing domain idempotency record survives a crash before this
+        # save. Repeating start reattaches the same job; it never retries it.
+        stage['state']='queued'
+        if len(stage['units'])==1:
+            for key in ('family_id','job_id','run_id'):stage[key]=unit[key]
+        try:_save_stage(documents,owner,identifier,stage)
+        except Failure:
+            # Cancellation or a newer stage may have won after durable family
+            # acceptance. Retire this accepted job through normal cancellation.
+            documents.domain.cancel(owner,unit['job_id']);raise
+    stage['scheduling']=any(u['state']=='prepared'and not u.get('family_id')for u in stage['units'])
+    _save_stage(documents,owner,identifier,stage);return documents.get(owner,identifier)
+
+
+def _unit_key(identifier,unit):return 'document-ai-'+identifier+'-'+unit['packet']['packet_sha256'][:32]
+
+
+def advance_units(documents):
+    """Continue already-started advice through the existing document scheduler.
+
+    Only not-yet-linked prepared units advance. Completed, failed, ambiguous
+    and cancelled jobs never return to the dispatch queue.
+    """
+    with documents.store.connect()as db:
+        rows=[dict(r)for r in db.execute("SELECT id,owner FROM uploaded_documents WHERE state='complete' "
+            "AND json_extract(options,'$.ai_review.scheduling')=1 ORDER BY created")]
+    for row in rows:
+        document=documents.get(row['owner'],row['id'],internal=True);stage=document['options']['ai_review']
+        if stage.get('cancel_requested')or stage['packet']['evidence_manifest_sha256']!=document['review_manifest']['manifest_sha256']:
+            stage['scheduling']=False;_save_stage(documents,row['owner'],row['id'],stage);continue
+        _start_units(documents,row['owner'],row['id'],document,stage)
+
+def validate_result(result,packet,prepared=None):
     if (not isinstance(result,dict)or result.get('version')!=VERSION or result.get('packet_sha256')!=packet['packet_sha256']
             or result.get('evidence_manifest_sha256')!=packet['evidence_manifest_sha256']
             or result.get('result_sha256')!=digest({k:v for k,v in result.items()if k!='result_sha256'})
             or result.get('origin')!='ai_generated'or result.get('authority')!='not_source_authorized'
             or result.get('status')not in {'available','unavailable'}):raise Failure('invalid_answer',502)
+    if prepared is not None and result.get('preparation_sha256')!=prepared['preparation_sha256']:raise Failure('invalid_answer',502)
     if result['status']=='available':
         try:items=checked_output(json.loads(result['raw_content']),packet)
         except(ValueError,TypeError,KeyError):raise Failure('invalid_answer',502)from None
@@ -488,6 +577,7 @@ def validate_result(result,packet):
 def public_review(documents,owner,document,options):
     stage=options.get('ai_review')
     if not stage:return None
+    if 'plan'in stage:return _public_units(documents,owner,document,options,stage)
     packet=stage['packet'];manifest=(document.get('review_manifest')or{}).get('manifest_sha256')
     stale=packet['evidence_manifest_sha256']!=manifest
     public={'version':VERSION,'state':stage['state'],'stale':stale,'coverage':packet['coverage'],
@@ -515,12 +605,76 @@ def public_review(documents,owner,document,options):
             'acceptance_is_certification':False}
     return public
 
+
+def _public_units(documents,owner,document,options,stage):
+    packet=stage['packet'];plan=stage['plan'];manifest=(document.get('review_manifest')or{}).get('manifest_sha256')
+    if plan!=advice_plan(packet)or [u['unit']for u in stage['units']]!=plan['units']:invalid()
+    stale=packet['evidence_manifest_sha256']!=manifest
+    summaries=[];raw=[];owners=[];terminal={'completed','empty','unavailable','unavailable_input_limit','unavailable_dispatch_limit','failed','cancelled'}
+    for saved in stage['units']:
+        unit=saved['unit'];summary={'unit_id':unit['unit_id'],'section_index':unit['section_index'],
+            'original_span':unit['original_span'],'draft_span':unit['draft_span'],'source_refs':unit['source_refs'],
+            'item_limit':unit['item_limit'],'state':saved['state'],'packet_sha256':(saved.get('packet')or{}).get('packet_sha256'),
+            'preparation_sha256':(saved.get('prepared')or{}).get('preparation_sha256'),
+            **{key:saved.get(key)for key in ('family_id','job_id','run_id','failure_type')}}
+        if saved.get('family_id'):
+            if not unit['dispatch_eligible']or saved['packet']!=scoped_packet(packet,plan,unit):invalid()
+            with documents.store.connect()as db:
+                row=db.execute('SELECT state,result FROM runs WHERE id=?AND family_id=?',(saved['run_id'],saved['family_id'])).fetchone()
+            if row is None:invalid()
+            summary['state']=row['state'];result=json.loads(row['result']or'{}').get('document_ai_suggestions')
+            if row['state']=='complete':
+                try:
+                    validate_result(result,saved['packet'],saved['prepared'])
+                    summary.update(state=('completed'if result['items']else'empty')if result['status']=='available'else'unavailable',
+                        result_sha256=result['result_sha256'],attempted=result.get('attempted'),inference_performed=result.get('inference_performed'))
+                    if result.get('failure_type'):summary['failure_type']=result['failure_type']
+                    if result['status']=='available':
+                        rows=json.loads(result['raw_content'])['items'];raw.extend(rows);owners.extend([unit['unit_id']]*len(rows))
+                except (Failure,ValueError,TypeError,KeyError):summary.update(state='failed',failure_type='invalid_unit_result')
+        summaries.append(summary)
+    states=[s['state']for s in summaries];success=sum(s in {'completed','empty'}for s in states)
+    complete=success==len(states);finished=all(s in terminal for s in states)
+    if 'running'in states:state='running'
+    elif 'queued'in states:state='queued'
+    elif any(s in {'prepared','pending','preparing'}for s in states):state=('queued'if stage.get('started')else'prepared')if 'prepared'in states else'preparing'
+    elif complete:state='available'
+    elif success:state='partial'
+    elif all(s=='cancelled'for s in states):state='cancelled'
+    elif all(s=='unavailable_input_limit'for s in states):state='unavailable_input_limit'
+    else:state='unavailable'
+    items=checked_output({'items':raw},packet)
+    for item,unit_id in zip(items,owners):item['unit_id']=unit_id
+    result_hash=digest({'plan':plan['plan_sha256'],'units':summaries,'items':items})
+    public={'version':VERSION,'state':state,'stale':stale,'coverage':packet['coverage'],'review_complete':complete,
+        'partial':not complete,'units':summaries,'completed_units':success,'total_units':len(states),'finished':finished,
+        'can_start':not stage.get('started')and not stage.get('cancel_requested')and any(u['state']=='prepared'and not u.get('family_id')for u in stage['units']),
+        'can_prepare':stage['state']=='preparing'and not stage.get('cancel_requested'),
+        'can_cancel':not finished and not stage.get('cancel_requested'),'cancel_requested':stage.get('cancel_requested',False),
+        'global_suggestion_limit':plan['max_document_items'],'max_potential_dispatches':plan['max_potential_dispatches'],
+        'plan_sha256':plan['plan_sha256'],'packet_sha256':packet['packet_sha256'],'evidence_manifest_sha256':packet['evidence_manifest_sha256'],
+        'preparation_sha256':stage['prepared']['preparation_sha256'],'result_sha256':result_hash,
+        'origin':'ai_generated','authority':'not_source_authorized','items':items,
+        **{key:stage.get(key)for key in ('family_id','job_id','run_id')},
+        'decisions':deepcopy(options.get('ai_decisions',{})),'selected_revision':None,
+        'source_references':{key:{'title':s.get('title'),**s['reader']}for key,s in packet['sources'].items()}}
+    accepted=[i['suggestion_id']for i in items if public['decisions'].get(i['suggestion_id'],{}).get('action')=='accept']
+    if accepted and not stale and finished:
+        try:sections=selected_sections(packet,items,public['decisions'])
+        except ValueError:public['selection_issue']='overlapping_or_stale_selection';return public
+        identity={'packet_sha256':packet['packet_sha256'],'ai_result_sha256':result_hash,
+            'evidence_manifest_sha256':manifest,'decisions':public['decisions'],'sections':sections}
+        public['selected_revision']={'revision_id':'U'+digest(identity),'accepted_ids':accepted,'sections':sections,
+            'evidence_manifest_sha256':manifest,'ai_result_sha256':result_hash,'origin':'user_selected_unverified_ai',
+            'acceptance_is_certification':False,'partial_advice':not complete}
+    return public
+
 def decide(documents,owner,identifier,payload):
     if not documents.ai_suggestions:invalid()
     if not isinstance(payload,dict)or set(payload)!={'suggestion_id','decision','result_sha256','evidence_manifest_sha256'}:invalid()
     if payload['decision']not in {'accept','dismiss','undecided'}:invalid()
     document=documents.get(owner,identifier,internal=True);public=document['ai_suggestions'];options=document['options']
-    if (not public or public['state']!='available'or public['stale']or public.get('result_sha256')!=payload['result_sha256']
+    if (not public or public['state']not in {'available','partial'}or public['stale']or public.get('result_sha256')!=payload['result_sha256']
             or public['evidence_manifest_sha256']!=payload['evidence_manifest_sha256']):raise Failure('document_ai_stale',409)
     item=next((i for i in public['items']if i['suggestion_id']==payload['suggestion_id']),None)
     if item is None:invalid()
@@ -543,6 +697,23 @@ def decide(documents,owner,identifier,payload):
 
 def cancel(documents,owner,identifier):
     options=_options(documents,owner,identifier);stage=options.get('ai_review')
+    if stage and 'plan'in stage:
+        stage.update(cancel_requested=True,scheduling=False)
+        # A family may have been durably accepted just before linking was
+        # interrupted. The same existing idempotency record owns cancellation.
+        with documents.store.connect()as db:
+            for unit in stage['units']:
+                if unit.get('family_id')or not unit.get('packet'):continue
+                saved=db.execute("SELECT response FROM request_keys WHERE owner=?AND scope='family'AND key=?",
+                    (owner,_unit_key(identifier,unit))).fetchone()
+                if saved:
+                    link=json.loads(saved[0]);unit.update(family_id=link['family_id'],job_id=link['job_id'],run_id=link['run_id'],state='queued')
+        for unit in stage['units']:
+            if not unit.get('job_id')and unit['state']in {'pending','preparing','prepared'}:unit['state']='cancelled'
+        _save_stage(documents,owner,identifier,stage)
+        for unit in stage['units']:
+            if unit.get('job_id'):documents.domain.cancel(owner,unit['job_id'])
+        return documents.get(owner,identifier)
     if not stage or not stage.get('job_id'):invalid()
     documents.domain.cancel(owner,stage['job_id']);return documents.get(owner,identifier)
 
@@ -550,6 +721,7 @@ def selected_export(documents,owner,identifier,fmt,revision,partial=False):
     from . import document_files as files
     document=documents.get(owner,identifier,internal=True);ai=document.get('ai_suggestions')or{};selected=ai.get('selected_revision')
     if fmt not in {'txt','docx'}or not selected or selected['revision_id']!=revision:raise Failure('document_ai_stale',409)
+    if selected.get('partial_advice')and not partial:raise Failure('document_ai_partial',409)
     assembled={**document,'sections':[{**old,**new}for old,new in zip(document['sections'],selected['sections'])]}
     if partial:
         if fmt!='docx':invalid()
@@ -564,7 +736,7 @@ def selected_export(documents,owner,identifier,fmt,revision,partial=False):
     else:data=files.draft_docx(assembled)
     if partial:
         from .document_word import label_partial_review
-        return label_partial_review(data,document['options']['locale'])
+        return label_partial_review(data,document['options']['locale'],ai=selected.get('partial_advice',False))
     return data
 
 def freeze(gateway,family,policy):
@@ -578,7 +750,7 @@ def generate(gateway,bundle,tier,model,parent=None):
     if tier not in {'short','answer'}or parent is not None:raise Failure('expansion_unavailable',409)
     if bundle.get('contract')!=CONTRACT or bundle.get('snapshot_sha256')!=digest({k:v for k,v in bundle.items()if k!='snapshot_sha256'}):invalid()
     packet=bundle['document_ai']['packet'];checked_packet(packet)
-    response=gateway.request('/internal/pilot/document-ai-suggestions',bundle['document_ai']);validate_result(response,packet)
+    response=gateway.request('/internal/pilot/document-ai-suggestions',bundle['document_ai']);validate_result(response,packet,bundle['document_ai']['prepared'])
     text=AI_LABEL+'\n'+WARNING+'\n'+('Predlogi so pripravljeni za posamezni pregled.'if response['status']=='available'else'Predlogi umetne inteligence niso na voljo. Pregled iz virov ostaja uporaben.')
     return {'status':'ok','short_answer':text,'answer_md':text,'answer_kind':'ai_suggestions','generation_status':'generated'if response.get('inference_performed')is True else'uncertain_dispatch'if response.get('attempted')else'not_generated',
         'document_ai_suggestions':response,'evidence':[],'source_badges':[],'blocks':[{'block_id':'ai-suggestions-label','text':text}],
@@ -598,7 +770,15 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
         'unavailable_input_limit':('Besedilo presega omejitev AI koraka; pregled iz virov ostaja uporaben','Testo oltre il limite IA; la revisione delle fonti resta utilizzabile'),
         'failed':('AI obdelava ni uspela; pregled iz virov ostaja uporaben','Elaborazione IA non riuscita; la revisione delle fonti resta utilizzabile'),
         'cancelled':('AI obdelava je ustavljena','Elaborazione IA interrotta')}
+    states.update(partial=('Delni AI pregled je pripravljen','Revisione IA parziale disponibile'),preparing=('Priprava AI pregleda','Preparazione della revisione IA'))
     yield 'body',('Stato: 'if it else'Stanje: ')+states.get(ai['state'],('Shranjeno stanje','Stato salvato'))[1 if it else 0]
+    if ai.get('units'):
+        yield 'body',('Revisione IA parziale: le parti senza risultato restano non riesaminate.'if it else'Delni AI pregled: deli brez rezultata ostajajo nepregledani.')if not ai['review_complete']else(
+            'Tutte le parti assegnate hanno restituito un risultato; non è una certificazione linguistica.'if it else'Vsi dodeljeni deli so vrnili rezultat; to ni jezikovno potrdilo.')
+        labels={'completed':('Predlogi pripravljeni','Suggerimenti pronti'),'empty':('Brez dodatnih predlogov','Nessun suggerimento aggiuntivo'),
+            'unavailable_dispatch_limit':('Zunaj omejitve te obdelave','Oltre il limite di questa elaborazione')}
+        for unit in ai['units']:
+            yield 'body',('Sezione 'if it else'Odsek ')+str(unit['section_index']+1)+' · '+unit['original_span']['text']+' — '+labels.get(unit['state'],states.get(unit['state'],('Shranjeno stanje','Stato salvato')))[1 if it else 0]
     if ai.get('stale'):yield 'body','Risultato precedente; non applicabile alla revisione attuale.'if it else'Zgodovinski rezultat; ni uporaben za sedanjo revizijo.'
     for item in ai['items']:
         action=ai['decisions'].get(item['suggestion_id'],{}).get('action','undecided')

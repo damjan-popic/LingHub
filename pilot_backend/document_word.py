@@ -526,11 +526,14 @@ def rewrite(original_docx_bytes, sections):
         _unavailable()
 
 
-def _label_partial_review(data, locale='sl'):
+def _label_partial_review(data, locale='sl', ai=False):
     """Add a visible partial-review label without rewriting existing markup."""
     label=('Bozza parziale di revisione'if locale=='it'else'Delni osnutek jezikovnega pregleda')
     note=('Contiene soltanto le proposte disponibili. Le altre parti conservano il testo originale. Non è una revisione completa; controlla le modifiche e il rapporto con limiti e fonti.'if locale=='it'else
           'Vsebuje razpoložljive predloge popravkov. Drugi deli ohranijo izvirno besedilo. To ni popoln jezikovni pregled; preverite spremembe in poročilo z omejitvami ter viri.')
+    if ai:
+        note=('Revisione IA parziale: contiene la bozza basata sulle fonti e le modifiche IA selezionate dall’utente. Le altre parti conservano la bozza delle fonti. Controlla le modifiche e le parti senza risultato nel rapporto.'if locale=='it'else
+            'Delni AI pregled: vsebuje osnutek na podlagi virov in AI spremembe po izboru uporabnika. Drugi deli ohranijo osnutek iz virov. Preverite spremembe in dele brez rezultata v poročilu.')
     namespace=files.W[1:-1]
     def paragraph(text,bold=False):
         return ('<kp:p xmlns:kp="'+namespace+'">'+('<kp:pPr><kp:pStyle kp:val="Title"/><kp:pBdr><kp:top kp:val="nil"/><kp:left kp:val="nil"/><kp:bottom kp:val="nil"/><kp:right kp:val="nil"/><kp:between kp:val="nil"/></kp:pBdr></kp:pPr>'if bold else'')+'<kp:r>'+
@@ -554,7 +557,7 @@ def _label_partial_review(data, locale='sl'):
     return output.getvalue()
 
 
-def label_partial_review(data,locale='sl'):
-    try:return _label_partial_review(data,locale)
+def label_partial_review(data,locale='sl',ai=False):
+    try:return _label_partial_review(data,locale,ai)
     except Failure:raise
     except(BadZipFile,OSError,RuntimeError,ValueError,KeyError,TypeError,expat.ExpatError):_unavailable()

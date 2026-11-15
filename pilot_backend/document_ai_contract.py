@@ -8,6 +8,9 @@ import hashlib,json,re
 from .document_protection import protected
 VERSION='klikai.document-ai-suggestions.v1'
 PACKET='klikai.document-ai-packet.v1'
+SCOPES='klikai.document-advice-scopes.v1'
+MAX_DOCUMENT_ITEMS=24
+MAX_DOCUMENT_DISPATCHES=8
 EVIDENCE_LABEL='Predlogi na podlagi virov KLIKai'
 AI_LABEL='Predlogi umetne inteligence — preverite pred uporabo'
 WARNING='Predlogi umetne inteligence lahko vsebujejo napake ali spremenijo pomen. Pred uporabo jih preverite. Predlogi niso samodejno vključeni v besedilo.'
@@ -40,6 +43,7 @@ def checked_packet(packet):
     for section in packet['sections']:
         _checked_lexical_context(section,packet['sources'])
     if packet.get('coverage',{}).get('provided_sections')!=[s['index']for s in packet['sections']]:raise ValueError('Coverage differs')
+    if 'review_scope'in packet:_checked_review_scope(packet)
     return packet
 
 
@@ -114,7 +118,8 @@ def original_span(section,start,end):
 
 def checked_output(raw,packet):
     checked_packet(packet)
-    if not isinstance(raw,dict)or set(raw)!={'items'}or not isinstance(raw['items'],list)or len(raw['items'])>24:
+    scope=packet.get('review_scope');limit=scope['unit']['item_limit']if scope else MAX_DOCUMENT_ITEMS
+    if not isinstance(raw,dict)or set(raw)!={'items'}or not isinstance(raw['items'],list)or len(raw['items'])>limit:
         raise ValueError('AI output shape differs')
     sections={s['index']:s for s in packet['sections']};known_findings={f['finding_id']for s in packet['sections']for f in s['findings']}
     result=[]
@@ -129,6 +134,12 @@ def checked_output(raw,packet):
                 or not all(isinstance(row[k],list)and len(row[k])<=64 and all(isinstance(v,str)for v in row[k])for k in ('finding_ids','source_refs'))
                 or any(marker in row['explanation']for marker in ('<think>','</think>','|channel|'))):
             raise ValueError('Invalid AI item')
+        if scope:
+            unit=scope['unit'];span=unit['draft_span']
+            if (row['section_index']!=unit['section_index']or not span['start']<=row['start']<row['end']<=span['end']
+                    or not set(row['source_refs'])<=set(unit['source_refs'])
+                    or not set(row['finding_ids'])<=set(unit['finding_ids'])):
+                raise ValueError('AI item escapes assigned responsibility or delivered sources')
         flags=[];section=sections.get(row['section_index']);mapped=None
         if section is None:flags.append('unknown_section')
         elif (not 0<=row['start']<row['end']<=len(section['evidence_draft'])
@@ -159,6 +170,123 @@ def checked_output(raw,packet):
             'original_span':{'start':mapped[0],'end':mapped[1]}if mapped is not None else None}
         result.append(item)
     return result
+
+
+def _draft_boundary(section,value,end=False):
+    shift=0
+    for edit in section['evidence_edits']:
+        if value<edit['start']:break
+        if value<edit['end']:return edit['start']+shift+(len(edit['replacement'])if end else 0)
+        shift+=len(edit['replacement'])-(edit['end']-edit['start'])
+    return value+shift
+
+
+def advice_plan(parent):
+    """Partition review responsibility from existing original-coordinate ties.
+
+    Native sentence contexts stay whole. Overlapping constructions/findings
+    and evidence edits connect them; uncovered text still receives an owner.
+    This never resolves meanings, ranks sources, clips units or estimates fit.
+    """
+    checked_packet(parent)
+    if 'review_scope'in parent:raise ValueError('Cannot scope another unit')
+    units=[]
+    for section in parent['sections']:
+        text=section['original_text'];options=section.get('lexical_context',{}).get('options',[])
+        findings=section['findings'];contexts=section.get('retained_context',[])
+        spans=[(o['construction']['context']['start'],o['construction']['context']['end'])for o in options]
+        if not spans:spans=[(0,len(text))]
+        def observed(row):
+            candidates=row.get('occurrences')or[row.get('match',{}).get('observed',{})]
+            return [(s['start'],s['end'])for s in candidates if type(s.get('start'))is int
+                and type(s.get('end'))is int and 0<=s['start']<=s['end']<=len(text)]
+        # Unknown/unlocated source responsibility must remain whole-section;
+        # never silently orphan a selected record through a guessed sentence.
+        links=[observed(row)or[(0,len(text))]for row in findings+contexts]
+        spans.extend(span for row in links for span in row)
+        spans.extend((e['start'],e['end'])for e in section['evidence_edits'])
+        if not spans:spans=[(0,len(text))]
+        def merged(values):
+            result=[]
+            for a,b in sorted(values,key=lambda span:(span[0],span[1])):
+                if result and(a<result[-1][1]or a==b==result[-1][1]):result[-1][1]=max(result[-1][1],b)
+                else:result.append([a,b])
+            return result
+        groups=merged(spans);gaps=[];last=0
+        for a,b in groups+[[len(text),len(text)]]:
+            fragment=text[last:a];left=len(fragment)-len(fragment.lstrip());right=len(fragment.rstrip())
+            if right>left:gaps.append((last+left,last+right))
+            last=max(last,b)
+        groups=merged(groups+gaps)
+        for a,b in groups:
+            intersects=lambda spans:any(max(a,c)<min(b,d)or a==b==c==d for c,d in spans)
+            owned_options=[o for o in options if intersects([(o['construction']['context']['start'],o['construction']['context']['end'])])]
+            owned_findings=[f for f in findings if intersects(observed(f)or[(0,len(text))])]
+            owned_contexts=[i for i,c in enumerate(contexts)if intersects(observed(c)or[(0,len(text))])]
+            refs={r for o in owned_options for alt in o['alternatives']for r in alt['source_refs']}
+            refs.update(r for f in owned_findings for r in f['source_refs'])
+            refs.update(r for i in owned_contexts for r in contexts[i]['source_refs'])
+            da,db=_draft_boundary(section,a),_draft_boundary(section,b,True)
+            units.append({'section_index':section['index'],'original_span':{'start':a,'end':b,'text':text[a:b]},
+                'draft_span':{'start':da,'end':db,'text':section['evidence_draft'][da:db]},
+                'source_refs':sorted(refs),'finding_ids':[f['finding_id']for f in owned_findings],
+                'lexical_option_ids':[o['option_id']for o in owned_options],'retained_context_indices':owned_contexts})
+    if set(parent['sources'])!={r for u in units for r in u['source_refs']}:raise ValueError('Selected source has no review owner')
+    runnable=min(len(units),MAX_DOCUMENT_DISPATCHES)
+    for index,unit in enumerate(units):
+        unit['dispatch_eligible']=index<runnable
+        unit['item_limit']=(MAX_DOCUMENT_ITEMS//runnable+(index<MAX_DOCUMENT_ITEMS%runnable))if index<runnable else 0
+        unit['unit_id']='U'+digest({'parent':parent['packet_sha256'],'unit':unit})[:24]
+    plan={'version':SCOPES,'parent_packet_sha256':parent['packet_sha256'],'document_id':parent['document_id'],
+        'document_revision':parent['document_revision'],'evidence_manifest_sha256':parent['evidence_manifest_sha256'],
+        'max_document_items':MAX_DOCUMENT_ITEMS,'max_potential_dispatches':MAX_DOCUMENT_DISPATCHES,'units':units}
+    plan['plan_sha256']=digest(plan);return plan
+
+
+def scoped_packet(parent,plan,unit):
+    if plan!=advice_plan(parent)or unit not in plan['units']:raise ValueError('Frozen review plan differs')
+    value=deepcopy(parent);value.pop('packet_sha256')
+    value['sources']={r:deepcopy(parent['sources'][r])for r in unit['source_refs']}
+    for section in value['sections']:
+        owned=section['index']==unit['section_index'];section['context_only']=not owned
+        section['findings']=[f for f in section['findings']if owned and f['finding_id']in unit['finding_ids']]
+        section['retained_context']=[c for i,c in enumerate(section.get('retained_context',[]))if owned and i in unit['retained_context_indices']]
+        lexical=section.get('lexical_context')
+        if lexical:
+            lexical['options']=[o for o in lexical['options']if owned and o['option_id']in unit['lexical_option_ids']]
+            if not lexical['options']:section.pop('lexical_context')
+            else:
+                lexical['displayed_option_count']=len(lexical['options'])
+                lexical['parent_lexical_context_ref']='/sections/'+str(section['index'])+'/lexical_context'
+                lexical['delivery']={'selected_options':len(lexical['options']),'omitted_options':[],
+                    'scope':'Complete choices owned by this responsibility. Other selected choices and original omission reasons stay in the bound parent packet; no meaning is ruled out.'}
+    value['coverage'].pop('resource_context_delivery',None)
+    value['coverage'].update(scope='All section texts are read-only context except the explicit assigned draft span. Only owned complete selected sources are delivered.',
+        parent_coverage_ref='full_parent_packet.coverage',review_complete=False)
+    value['review_scope']={'version':SCOPES,'parent_packet_sha256':parent['packet_sha256'],
+        'parent_document_revision':parent['document_revision'],'parent_evidence_manifest_sha256':parent['evidence_manifest_sha256'],
+        'plan_sha256':plan['plan_sha256'],'unit':deepcopy(unit),
+        'context_rule':'All original/evidence-draft texts and edit maps remain visible. Review only assigned span, in draft coordinates. Other text is context, never another editable section.',
+        'source_rule':'Cite only delivered owned source_refs; generated advice from another unit is never evidence.'}
+    value['packet_sha256']=digest(value);return checked_packet(value)
+
+
+def _checked_review_scope(packet):
+    scope=packet['review_scope'];unit=scope['unit'];section=next((s for s in packet['sections']if s['index']==unit['section_index']),None)
+    if section is None:raise ValueError('Review section differs')
+    if (scope.get('version')!=SCOPES or scope.get('parent_document_revision')!=packet['document_revision']
+            or scope.get('parent_evidence_manifest_sha256')!=packet['evidence_manifest_sha256']
+            or any(not re.fullmatch('[0-9a-f]{64}',str(scope.get(k)))for k in ('parent_packet_sha256','plan_sha256'))
+            or unit['unit_id']!='U'+digest({'parent':scope['parent_packet_sha256'],'unit':{k:v for k,v in unit.items()if k!='unit_id'}})[:24]
+            or unit['source_refs']!=sorted(packet['sources'])or type(unit['item_limit'])is not int
+            or not 0<=unit['item_limit']<=MAX_DOCUMENT_ITEMS or type(unit['dispatch_eligible'])is not bool
+            or unit['dispatch_eligible']!=(unit['item_limit']>0)):raise ValueError('Review responsibility differs')
+    for field,text in [('original_span',section['original_text']),('draft_span',section['evidence_draft'])]:
+        span=unit[field];a,b=span['start'],span['end']
+        if type(a)is not int or type(b)is not int or not 0<=a<=b<=len(text)or span['text']!=text[a:b]:raise ValueError('Review span differs')
+    if (unit['draft_span']['start']!=_draft_boundary(section,unit['original_span']['start'])
+            or unit['draft_span']['end']!=_draft_boundary(section,unit['original_span']['end'],True)):
+        raise ValueError('Review edit mapping differs')
 
 def selected_sections(packet,items,decisions):
     checked_packet(packet);by_section={s['index']:[]for s in packet['sections']}

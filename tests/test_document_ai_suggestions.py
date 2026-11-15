@@ -23,6 +23,7 @@ class SyntheticGateway:
               'uncertainty':'','finding_ids':[],'source_refs':[]}
         raw={'items':[item,deepcopy(item)]}
         result={'version':VERSION,'packet_sha256':packet['packet_sha256'],'evidence_manifest_sha256':packet['evidence_manifest_sha256'],
+            'preparation_sha256':payload['prepared']['preparation_sha256'],
             'origin':'ai_generated','authority':'not_source_authorized','status':'unavailable'if self.unavailable else'available',
             'attempted':False,'inference_performed':False,'retries':0,'items':[]if self.unavailable else checked_output(raw,packet),
             'raw_content':json.dumps(raw),'coverage':packet['coverage']}

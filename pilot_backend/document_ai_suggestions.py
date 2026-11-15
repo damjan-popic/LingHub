@@ -512,9 +512,16 @@ def start(documents,owner,identifier):
     return documents.get(owner,identifier)
 
 
+def _preparation_pending(stage):
+    return stage['state']=='preparing'or any(u['state']in {'pending','preparing'}for u in stage['units'])
+
+
 def _start_units(documents,owner,identifier,document,stage):
     if stage['plan']!=advice_plan(stage['packet']):invalid()
     if stage.get('cancel_requested'):return documents.get(owner,identifier)
+    # A partial preparation pass must settle before any job is submitted, so
+    # Start cannot replace the state that exposes no-retry preparation recovery.
+    if _preparation_pending(stage):invalid()
     stage.update(started=True,scheduling=True);_save_stage(documents,owner,identifier,stage)
     for unit in stage['units']:
         if unit.get('family_id')or unit['state']!='prepared':continue
@@ -637,6 +644,7 @@ def _public_units(documents,owner,document,options,stage):
     complete=success==len(states);finished=all(s in terminal for s in states)
     if 'running'in states:state='running'
     elif 'queued'in states:state='queued'
+    elif stage['state']=='preparing':state='preparing'
     elif any(s in {'prepared','pending','preparing'}for s in states):state=('queued'if stage.get('started')else'prepared')if 'prepared'in states else'preparing'
     elif complete:state='available'
     elif success:state='partial'
@@ -648,7 +656,7 @@ def _public_units(documents,owner,document,options,stage):
     result_hash=digest({'plan':plan['plan_sha256'],'units':summaries,'items':items})
     public={'version':VERSION,'state':state,'stale':stale,'coverage':packet['coverage'],'review_complete':complete,
         'partial':not complete,'units':summaries,'completed_units':success,'total_units':len(states),'finished':finished,
-        'can_start':not stage.get('started')and not stage.get('cancel_requested')and any(u['state']=='prepared'and not u.get('family_id')for u in stage['units']),
+        'can_start':not _preparation_pending(stage)and not stage.get('started')and not stage.get('cancel_requested')and any(u['state']=='prepared'and not u.get('family_id')for u in stage['units']),
         'can_prepare':stage['state']=='preparing'and not stage.get('cancel_requested'),
         'can_cancel':not finished and not stage.get('cancel_requested'),'cancel_requested':stage.get('cancel_requested',False),
         'global_suggestion_limit':plan['max_document_items'],'max_potential_dispatches':plan['max_potential_dispatches'],

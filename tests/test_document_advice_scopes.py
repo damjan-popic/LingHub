@@ -149,6 +149,36 @@ def test_interrupted_preparation_is_not_retried_but_pending_part_can_prepare(rig
     assert client.get(root).json()['ai_suggestions']['state']=='partial'
 
 
+def test_mixed_interrupted_preparation_must_resume_before_normal_start(rig,monkeypatch):
+    env=multi(rig,count=3);app,client,documents,gateway,headers,identifier,root,evidence,owner=env
+    request=gateway.request;attempts=[];once=[True]
+    def interrupted_second(path,payload):
+        if path.endswith('/prepare'):
+            index=payload['packet']['review_scope']['unit']['section_index'];attempts.append(index)
+            if index==1 and once[0]:once[0]=False;raise Interrupted('Synthetic second-unit preparation interruption')
+        return request(path,payload)
+    monkeypatch.setattr(gateway,'request',interrupted_second)
+    with pytest.raises(Interrupted):documents.prepare_ai(owner,identifier)
+    state=client.get(root).json()['ai_suggestions']
+    assert [u['state']for u in state['units']]==['prepared','preparing','pending']
+    assert state['can_prepare']and not state['can_start']
+    blocked=client.post(root+'/ai/start',headers=headers,json={});assert blocked.status_code==409
+    state=client.get(root).json()['ai_suggestions']
+    assert state['can_prepare']and all(not u['family_id']for u in state['units'])and attempts==[0,1]
+    resumed=client.post(root+'/ai/prepare',headers=headers,json={});assert resumed.status_code==200
+    state=resumed.json()['ai_suggestions']
+    assert [u['state']for u in state['units']]==['prepared','failed','prepared']
+    assert attempts==[0,1,2]and state['can_start']and not state['can_prepare']
+    assert client.post(root+'/ai/start',headers=headers,json={}).status_code==200
+    finish(app);state=client.get(root).json()['ai_suggestions']
+    assert state['finished']and state['state']=='partial'
+    assert [u['state']for u in state['units']]==['completed','failed','completed']
+    assert attempts==[0,1,2]and sum(not p.endswith('/prepare')for p,i in gateway.calls)==2
+    accepted=decide(client,headers,identifier,state,state['items'][0],'accept');assert accepted.status_code==200
+    assert accepted.json()['ai_suggestions']['selected_revision']['partial_advice']
+    assert client.get(root).json()['review_manifest']==evidence['review_manifest']
+
+
 def test_cancellation_winning_during_job_link_cannot_be_overwritten(rig,monkeypatch):
     from pilot_backend.security import Failure
     env=multi(rig);app,client,documents,gateway,_,identifier,root,_,owner=env

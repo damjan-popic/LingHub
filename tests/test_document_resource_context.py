@@ -131,3 +131,21 @@ def test_collocation_nomination_uses_original_native_sentence_and_keeps_uncertai
     assert not context_nomination(record,task,words)['eligible']
     words[0]['sentence_id']=0;words[1]['lemma']='other'
     assert not context_nomination(record,task,words)['eligible']
+
+
+def test_model_context_distinguishes_publisher_identity_and_incidental_prose_from_advice():
+    from pilot_backend.document_ai_suggestions import context_nomination
+    sha=lambda s:hashlib.sha256(s.encode()).hexdigest()
+    def record(raw):return {'capture':raw,'capture_kind':'resource_record','rights_mode':'owned','context_eligible':True}
+    task={'source_text':'Obrazec vsebuje oznako in polje.','source_language':'sl','mode':'review'}
+    head=record({'original_projection':{'headword':'polje'},'original_text':'Dictionary paradigm.','language':'sl'})
+    assert not context_nomination(head,task,[])['eligible']
+    assert context_nomination(head,{**task,'source_text':'polje'},[])['eligible']
+    prose='To je dokument, ki vsebuje oznako in polje za podpis.'
+    incidental=record({'language':'sl','original_text':prose,'advice_units':[{'source_span':{
+        'char_start':0,'char_end':len(prose),'text_sha256':sha(prose)}}]})
+    assert not context_nomination(incidental,task,[])['eligible']
+    body='napram | ⇨ | do'
+    advice=record({'language':'sl','original_text':body,'advice_units':[{'source_span':{
+        'char_start':0,'char_end':len(body),'text_sha256':sha(body)}}]})
+    assert context_nomination(advice,{**task,'source_text':'Odnos napram drugim.'},[])['eligible']

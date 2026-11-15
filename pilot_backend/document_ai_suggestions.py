@@ -27,7 +27,7 @@ def label_coordinates(value):
                 if finding.get('included_in_draft')else'historical_evidence_not_applied')
     return value
 
-CONTEXT_POLICY='document-qualified-model-context-v2'
+CONTEXT_POLICY='document-qualified-model-context-v4'
 
 
 def _context_words(projection,bundle,text):
@@ -129,10 +129,12 @@ def context_nomination(record,task,words):
     head=projection.get('headword')or raw.get('published_headword')
     if isinstance(head,str)and head:
         spans=list(surface.occurrences(head,text))
-        if spans:return decision(True,'publisher_entry_head_in_original_sense_unresolved',spans)
+        if spans and surface.normalized(head)==surface.normalized(text):
+            return decision(True,'whole_section_publisher_head_operand_senses_unresolved',spans)
+        return decision(False,'routine_publisher_entry_head_without_local_application_nomination')
     cue=_native_review_cue(record,text,task['source_language'])
     occurrences=_documentary_review_occurrences(record,task)
-    native=[o for o in occurrences if o['kind']=='recorded_advice_phrase'or raw.get('native_table_projection')and o['kind']=='recorded_table_form']
+    native=[o for o in occurrences if o['kind']=='recorded_table_form'and _whole_expression(o['text'],text)]
     return decision(cue>=2 or bool(native),'recorded_source_advice_or_native_table_occurrence'if cue>=2 or native else'peripheral_documentary_overlap_retained_in_trace',native)
 
 
@@ -201,8 +203,14 @@ def packet(documents,owner,document,contextual_analyses=None):
             findings=[];finding_sources=set();retained=[];omitted=[];omitted_findings=[]
             for finding in review['findings']:
                 references=finding.get('related_source_captures')or[{'evidence_id':finding['source']['evidence_id']}]
-                authoritative=finding.get('included_in_draft')or finding.get('type')in {'executable_application','application_proposal'}
-                if not authoritative and not all(decisions.get(linked['evidence_id'],{}).get('eligible')for linked in references):
+                preserve_application=finding.get('included_in_draft')or finding.get('type')in {'executable_application','application_proposal'}
+                # A signed, located complete native first-cell comparison is
+                # already a useful qualified source relation. Preserve it
+                # independently of broad raw-candidate nomination.
+                match=finding.get('match')or{}
+                located_relation=(finding.get('type')=='recorded_contrast'and match.get('basis')=='complete_native_cell'
+                    and match.get('recorded_cell_order')=='first'and bool(finding.get('source',{}).get('native_table')))
+                if not(preserve_application or located_relation)and not all(decisions.get(linked['evidence_id'],{}).get('eligible')for linked in references):
                     omitted_findings.append({'finding_id':finding['finding_id'],'finding_sha256':digest(finding),
                         'reason':'historical_lookup_finding_not_fully_locally_nominated','source_decisions':{linked['evidence_id']:decisions.get(linked['evidence_id'])for linked in references}})
                     continue

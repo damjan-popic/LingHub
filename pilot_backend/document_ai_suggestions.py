@@ -18,7 +18,9 @@ def label_coordinates(value):
         'original_text_unicode_codepoint_half_open':['sections[].evidence_edits',
             'sections[].findings[].match.observed','sections[].findings[].proposed_edit',
             'sections[].findings[].alternatives[] (where document offsets are present)',
-            'sections[].retained_context[].occurrences','sections[].retained_context[].selection.occurrences'],
+            'sections[].retained_context[].occurrences','sections[].retained_context[].selection.occurrences',
+            'sections[].lexical_context.options[].construction.observed','sections[].lexical_context.options[].construction.context',
+            'sections[].lexical_context.options[].construction.witnesses'],
         'evidence_draft_unicode_codepoint_half_open':['sections[].coordinate_guide','new_ai_items'],
         'bound_source_original_text_unicode_codepoint_half_open':['sections[].findings[].source_focus',
             'sources[].recorded_advice[].source_span']}
@@ -28,7 +30,7 @@ def label_coordinates(value):
                 if finding.get('included_in_draft')else'historical_evidence_not_applied')
     return value
 
-CONTEXT_POLICY='document-qualified-model-context-v6'
+CONTEXT_POLICY='document-qualified-model-context-v7'
 
 
 def _context_words(projection,bundle,text):
@@ -289,6 +291,21 @@ def packet(documents,owner,document,contextual_analyses=None):
             bundle=json.loads(row[0]or'{}')if row else{};context=(bundle.get('review_observations')or{}).get('ordinary_resources')
             by_id={r['evidence_id']:r for r in bundle.get('source_bundle',{}).get('matches',[])}
             by_id.update({r['evidence_id']:r for r in ordinary_records(context,section['text'],hashlib.sha256(section['text'].encode()).hexdigest())})
+            lexical=deepcopy(review.get('lexical_context'));lexical_source_ids=set()
+            if lexical:
+                if lexical.get('version')!='recorded-contextual-lexical-choices-v1':invalid()
+                for option in lexical['options']:
+                    for alternative in option['alternatives']:
+                        record=by_id.get(alternative['evidence_id'])
+                        if (not record or record['capture_sha256']!=alternative['capture_sha256']
+                                or not record.get('model_context_eligible')
+                                or record.get('rights_mode')in {'linked_only','metadata_only','unknown'}):invalid()
+                        alternative['source_refs']=[retain(record,section['family_id'],'contextual_lexical_choice_not_edit_authority')]
+                        lexical_source_ids.add(record['evidence_id'])
+                        # The complete ordinary unit is already supplied once.
+                        # A pointer keeps its ownership without duplicating it.
+                        alternative.pop('source_facts',None)
+                        alternative['source_facts_ref']='/sources/'+alternative['source_refs'][0]+'/original_text'
             task={'source_text':section['text'],'mode':'review','source_language':document['options']['source_language']}
             words=_context_words((contextual_analyses or{}).get(section['index']),bundle,section['text'])
             decisions={eid:context_nomination(record,task,words)for eid,record in by_id.items()}
@@ -322,7 +339,7 @@ def packet(documents,owner,document,contextual_analyses=None):
                 findings.append(kept)
             selections=optional_context_selection(by_id,decisions,finding_sources,findings,section['text'],words)
             for eid,record in by_id.items():
-                if eid in finding_sources:continue
+                if eid in finding_sources or eid in lexical_source_ids:continue
                 nomination=decisions[eid];selection=selections[eid]
                 if not selection['selected']:
                     omitted.append({'evidence_id':eid,'capture_sha256':record['capture_sha256'],'reason':selection['reason'],
@@ -345,7 +362,10 @@ def packet(documents,owner,document,contextual_analyses=None):
                 'findings':findings,'retained_context':retained,'evidence_manifest_sha256':review['manifest_sha256'],
                 'checks':[{'check_id':c['check_id'],'status':c['status']}for c in review['checks']],
                 'coordinate_guide':[{'start':m.start(),'end':m.end(),'text':m.group()}for m in re.finditer(r'\S+',draft)]})
+            if lexical:sections[-1]['lexical_context']=lexical
             delivery.append({'section_index':section['index'],'finding_source_count':len(finding_sources),
+                'lexical_choice_source_count':len(lexical_source_ids),
+                'lexical_choice_option_count':len(lexical['options'])if lexical else 0,
                 'eligible_additional_context_count':sum(s['eligible']for s in selections.values()),
                 'additional_context_count':len(retained),'omitted':omitted,'omitted_findings':omitted_findings,
                 'original_finding_count':len(review['findings']),'provided_finding_count':len(findings),

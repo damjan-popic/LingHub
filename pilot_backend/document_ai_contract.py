@@ -37,8 +37,52 @@ def checked_packet(packet):
     for key,source in packet['sources'].items():
         if (not re.fullmatch('S[0-9a-f]{16}',key)or source.get('body_sha256')!=sha(source['original_text'])):
             raise ValueError('Qualified source differs')
+    for section in packet['sections']:
+        _checked_lexical_context(section,packet['sources'])
     if packet.get('coverage',{}).get('provided_sections')!=[s['index']for s in packet['sections']]:raise ValueError('Coverage differs')
     return packet
+
+
+def _checked_lexical_context(section,sources):
+    """Bind optional phrase choices to original text and complete owned units.
+
+    This is a mechanical reference check, never semantic approval.
+    """
+    context=section.get('lexical_context')
+    if context is None:return
+    if (context.get('version')!='recorded-contextual-lexical-choices-v1'
+            or context.get('semantic_selection_performed')is not False
+            or not isinstance(context.get('options'),list)or len(context['options'])>12):
+        raise ValueError('Lexical context differs')
+    text=section['original_text']
+    for option in context['options']:
+        if (option.get('error_asserted')is not False or option.get('replacement')is not None
+                or option.get('frequency_comparison')is not None
+                or not 1<=len(option.get('alternatives',[]))<=4):raise ValueError('Lexical choice authority differs')
+        construction=option['construction']
+        for span in [construction['observed'],construction['context']]+construction['witnesses']:
+            a,b=span['start'],span['end']
+            if type(a)is not int or type(b)is not int or not 0<=a<b<=len(text)or text[a:b]!=span['text']:
+                raise ValueError('Lexical construction span differs')
+        for alternative in option['alternatives']:
+            refs=alternative.get('source_refs')
+            if not isinstance(refs,list)or len(refs)!=1 or refs[0]not in sources:raise ValueError('Lexical source differs')
+            source=sources[refs[0]]
+            if (alternative.get('source_facts_ref')!='/sources/'+refs[0]+'/original_text'
+                    or {'evidence_id':alternative['evidence_id'],'capture_sha256':alternative['capture_sha256']}not in source.get('related_captures',[])):
+                raise ValueError('Lexical capture differs')
+            unit=json.loads(source['original_text']);fields=unit.get('fields')or{}
+            if option['kind']=='collocations':
+                origin=fields.get('provenance')or{}
+                identity=[unit['provenance'].get('version'),origin.get('build_id'),fields.get('occurrence_id'),fields.get('sense_id'),fields.get('structure_id')]
+                bound=alternative.get('attested_text')==fields.get('surface')
+            elif option['kind']=='synonyms':
+                sense=fields.get('sense')or{}
+                identity=[unit['provenance'].get('version'),sense.get('sense_id')]
+                captured=[r['raw_text']for r in sense.get('relations',[])if r.get('relation_type')=='synonym'and isinstance(r.get('raw_text'),str)and r['raw_text'].strip()]
+                bound=alternative.get('attested_texts')==captured[:3]
+            else:raise ValueError('Lexical resource differs')
+            if not bound or alternative.get('identity')!=identity:raise ValueError('Lexical attestation differs')
 
 def overlap(a,b,c,d):return max(a,c)<min(b,d)or a==b and c<=a<=d or c==d and a<=c<=b
 

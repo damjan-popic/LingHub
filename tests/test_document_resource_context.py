@@ -65,7 +65,8 @@ def test_ai_packet_retains_native_candidate_context_with_no_evidence_finding():
     assert blocked['coverage']['resource_context_delivery'][0]['omitted'][0]['reason']=='native_content_incomplete_or_missing'
 
 
-def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path):
+@pytest.mark.parametrize('complete_expert',[False,True])
+def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path,complete_expert):
     import json
     from argon2 import PasswordHasher,Type
     from fastapi.testclient import TestClient
@@ -83,6 +84,12 @@ def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path)
                 'context_eligible':False,'incomplete':True}
             context={'version':VERSION,'source_sha256':sha,'envelopes':[{'occurrence':{'section':0,'start':0,'end':len(text),
                 'text':text,'original_sha256':sha},'language':'sl','tool_passages':[native]}]}
+            if complete_expert:
+                from test_frozen_document_reader_group import fixture
+                saved,_,_=fixture();passages=saved['envelopes'][0]['source_passages']
+                context['envelopes'][0].update(tool_passages=[],source_passages=passages,query=text,
+                    reference_response={'contract':'klikai.reference-source-context.v1','source_only':True,
+                        'question':text,'passages':passages})
             context['context_sha256']=digest(context);b['review_observations']={'ordinary_resources':context}
             b['snapshot_sha256']=digest({k:v for k,v in b.items()if k!='snapshot_sha256'})
             self.result=response(b);return value
@@ -102,10 +109,15 @@ def test_owned_document_reader_keeps_native_context_and_owner_boundary(tmp_path)
         created=app.state.domain.create_family(owner,{'question':'Pregled naloženega dokumenta','locale':'sl','input_language':'sl',
             'model':'auto','task':'reference','idempotency_key':'native-reader-owner-test'},document_task=task())
         app.state.jobs.execute(app.state.jobs.claim());fid=created['family']['answer_family_id']
-        url='/api/pilot/families/'+fid+'/sources/tool:owned-native?tier=answer'
+        url='/api/pilot/families/'+fid+'/sources/'+('saved:0'if complete_expert else'tool:owned-native')+'?tier=answer'
         opened=client.get(url);assert opened.status_code==200,opened.text
-        assert 'Complete retained native content.'in opened.json()['excerpt']
-        assert opened.json()['reader_blocks'][0]['heading']=='Omejitev zajetega gradiva'
+        if complete_expert:
+            assert opened.json()['excerpt'].endswith('Pogoj A. ')
+            assert opened.json()['reader_blocks'][-1]['text']=='Pogoj A. Odgovor B.'
+            assert opened.json()['frozen_native_group']['requested_passage_id']=='saved:0'
+        else:
+            assert 'Complete retained native content.'in opened.json()['excerpt']
+            assert opened.json()['reader_blocks'][0]['heading']=='Omejitev zajetega gradiva'
         assert adapter.reader_contracts[-1]==doc.CONTRACT
         assert client.post('/api/pilot/login',json={'username':'reader-two','password':password},headers={'Origin':origin}).status_code==200
         assert client.get(url).status_code==404

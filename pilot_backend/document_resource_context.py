@@ -41,6 +41,48 @@ def reference_nomination(passage,occurrence_text):
     words=lambda v:{w for w in re.findall(r'[^\W\d_]{3,}',norm(v))if w not in stop}
     return 'source_question_title_topic_overlap'if len(words(topic)&words(occurrence_text))>=2 else None
 
+def frozen_reader_group(record,context):
+    """Display one complete captured answer, keeping its requested chunk intact.
+
+    Reuse the per-response sibling bindings established by ``records``. Never
+    fill a gap with a sibling from another lookup or infer a missing ending.
+    """
+    requested=record['native_passage']
+    if requested.get('role')!='expert_answer'or record['source']['bibliography'].get('context_exclusion'):return None
+    for binding in record['native_bindings']:
+        if not binding['reader_complete_group']or binding['native_exclusion']:continue
+        envelope=context['envelopes'][binding['envelope_index']]
+        reference=envelope.get('reference_response')or{}
+        if digest(reference)!=binding['reference_response_sha256']:continue
+        available={p['passage_id']:p for p in envelope.get('source_passages',[])}
+        siblings=[]
+        for member in binding['native_siblings']:
+            passage=available.get(member['passage_id'])
+            if passage is None or digest(passage)!=member['passage_sha256']:break
+            siblings.append(passage)
+        else:
+            siblings.sort(key=lambda p:(p.get('span')or{}).get('char_start',-1))
+            body='';valid=bool(siblings)
+            for passage in siblings:
+                span=passage.get('span')or{};a,b=span.get('char_start'),span.get('char_end');text=passage['text']
+                if (type(a)is not int or type(b)is not int or not 0<=a<b
+                        or b-a!=len(text)or a>len(body)
+                        or body[a:min(b,len(body))]!=text[:max(0,min(b,len(body))-a)]):
+                    valid=False;break
+                body+=text[max(0,len(body)-a):]
+            if not valid:continue
+            return {'requested_passage_id':record['evidence_id'],
+                'requested_passage_sha256':digest(requested),
+                'requested_span':deepcopy(requested['span']),
+                'requested_text_sha256':hashlib.sha256(requested['text'].encode()).hexdigest(),
+                'source_group':deepcopy(binding['source_group']),'post_id':binding['post_id'],
+                'reference_response_sha256':binding['reference_response_sha256'],
+                'members':deepcopy(binding['native_siblings']),
+                'original_text':body,'body_sha256':hashlib.sha256(body.encode()).hexdigest(),
+                'coordinate_base':'assembled_frozen_group_unicode_codepoint_half_open',
+                'question':native_question(siblings[0]),'scope':'one_complete_frozen_reader_response'}
+    return None
+
 def records(value,text,source_sha256):
     if value is None:return []
     if (value.get('version')!=VERSION or value.get('source_sha256')!=source_sha256
@@ -164,6 +206,8 @@ def records(value,text,source_sha256):
             row['source']['reader_blocks'].insert(0,{'heading':'Omejitev zajetega gradiva','text':'Gradivo je nepopolno ali omejeno in se ne uporablja kot vsebinsko priporočilo.'})
         elif local_partial:
             row['source']['reader_blocks'].insert(0,{'heading':'Omejitev posamezne poizvedbe','text':'Ena poizvedba je vrnila le del skupine. Za navedeni izvirni odsek se uporablja ločeno zajeta popolna skupina; sled delne poizvedbe ostaja shranjena.'})
+        group=frozen_reader_group(row,value)
+        if group is not None:row['source']['frozen_native_group']=group
     if len(found)>512:raise ValueError('Document context unit bound')
     return list(found.values())
 

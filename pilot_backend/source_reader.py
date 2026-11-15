@@ -240,6 +240,22 @@ def source_view(source, locale='sl'):
                     pass
             lines.append(line)
         rows = [{'heading': '', 'text': '\n'.join(lines)}]
+    group=source.get('frozen_native_group')
+    if isinstance(group,dict):
+        # The original excerpt, locator and native unit still identify the
+        # requested chunk. Only this additive display uses the complete group.
+        import hashlib
+        body=group.get('original_text');native=source.get('native_source_unit')or{}
+        span=native.get('span')or source.get('locator')or{};a,b=span.get('char_start'),span.get('char_end')
+        if (isinstance(body,str)and hashlib.sha256(body.encode()).hexdigest()==group.get('body_sha256')
+                and group.get('requested_passage_id')==native.get('passage_id',source.get('evidence_id'))
+                and type(a)is int and type(b)is int and 0<=a<b<=len(body)
+                and hashlib.sha256(body[a:b].encode()).hexdigest()==group.get('requested_text_sha256')
+                and original.endswith(body[a:b])):
+            question=group.get('question')
+            rows=([{'heading':'Domanda originale'if locale=='it'else'Izvirno vprašanje','text':question}]
+                if isinstance(question,str)and question else[])
+            rows.append({'heading':'Risposta congelata completa'if locale=='it'else'Celoten zamrznjeni odgovor','text':prose(body)})
     identity = ' '.join(str(source.get(k, '')) for k in
                         ('source_id', 'source_slug', 'source_label', 'title')).casefold()
     if 'epravopis' in identity:

@@ -421,7 +421,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
                 binding_question,tier,answer_evidence,citation,frozen_source_record)
             if binding is None:raise Failure('source_binding_mismatch',502)
         from .source_reader import source_view
-        result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view','original_projection')if k in result}
+        result={k:result[k]for k in ('evidence_id','source_label','excerpt','locator','url','status','edition','bibliography','title','publication_scope','annual_scope','current_original_lookup','original_view','original_projection','frozen_native_group')if k in result}
         if binding is not None:result['source_binding']=binding
         return source_view(result,f['locale'])
     @app.get(api+'/families/{fid}/sources/{eid:path}/current-original')

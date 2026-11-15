@@ -87,6 +87,15 @@ def test_collector_synonym_context_is_eligible_and_wrong_language_or_source_scop
     assert len(calls)==1
 
 
+@pytest.mark.parametrize('question',['Kje najdem vir za sopomenke besede hiter?',
+    'Navedi samo vire za sopomenke besede hiter.','Iz katerega vira je podatek o besedi hiter?'])
+def test_source_only_question_with_context_still_never_requests_optional_analysis(monkeypatch,question):
+    calls=mock_analysis(monkeypatch,adjective=True)
+    f=family(question,'Po progi prihaja hiter vlak.')
+    assert web.collect_native_context_syntax(NS(comma_checker={'syntax_url':'mock'}),f,[],lexical(f,'SYN-P'))==(None,None)
+    assert calls==[]
+
+
 def paired_delivery(monkeypatch,tmp_path):
     from test_native_context_producer import runtime as runtime_fixture
     from test_fulltext_grounded import store

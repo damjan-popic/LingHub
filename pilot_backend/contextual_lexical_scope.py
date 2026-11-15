@@ -4,6 +4,21 @@ import re
 RESOURCES={'synonyms':'cjvt-thesaurus','collocations':'cjvt-ksss'}
 
 
+def _source_only_wrapper(question):
+    """Veto optional analysis for a single explicit source-navigation request.
+
+    This cannot add an intent, target, route or source. A mixed request keeps
+    its authoritative task handling rather than being reduced to its prefix.
+    """
+    clauses=[s.strip()for s in re.split(r'[.!?;]\s*',question)if s.strip()]
+    return len(clauses)==1 and bool(re.match(
+        r'\s*(?:kje\s+(?:lahko\s+)?(?:najdem|poiščem)|kateri\s+(?:vir|viri|slovar)|'
+        r'iz\s+katerega\s+(?:vira|slovarja)|(?:navedi|pokaži|prikaži)\s+(?:mi\s+)?(?:samo|le)\s+(?:vire|vir|slovar\w*)|'
+        r'dove\s+(?:trovo|posso\s+trovare)|da\s+quale\s+(?:fonte|dizionario)|'
+        r'(?:mostra|indica|elenca)\s+(?:solo|soltanto)\s+(?:le\s+)?fonti|'
+        r'which\s+(?:source|dictionary)|(?:show|list)\s+only\s+(?:the\s+)?sources)\b',clauses[0],re.I))
+
+
 def lexical_context_scope(plan,language):
     if not isinstance(plan,dict)or language!='sl':return None
     facets=set(plan.get('requested_facets',[]));consult=plan.get('consultation')or{}
@@ -12,6 +27,7 @@ def lexical_context_scope(plan,language):
             or plan.get('requested_source')not in {None,*RESOURCES.values()}
             or facets&{'orthography','spacing','frequency','morphology','inflection','conjugation','translation'}):return None
     explicit=facets&RESOURCES.keys()
+    if _source_only_wrapper(plan.get('original','')):return None
     if not explicit and not (consult.get('requested')is False
             and {'usage','register'}&set(consult.get('supporting_dimensions',[]))):return None
     question=plan.get('original','');context=plan.get('context','');scope=None

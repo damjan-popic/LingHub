@@ -457,11 +457,12 @@ def prepare(documents,owner,identifier,payload=None):
     if set(payload)-{'purpose'}or payload.get('purpose')not in (None,explanations.PURPOSE):invalid()
     writer_purpose=payload.get('purpose')
     document=documents.get(owner,identifier,internal=True);old=document['options'].get('ai_review')
-    if old and old['packet'].get('writer_purpose')!=writer_purpose and not _terminal_review(document.get('ai_suggestions')):invalid()
+    same_representation=writer_purpose!=explanations.PURPOSE or old is not None and old.get('representation_policy')==explanations.REPRESENTATION
+    if old and (old['packet'].get('writer_purpose')!=writer_purpose or not same_representation)and not _terminal_review(document.get('ai_suggestions')):invalid()
     if (old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']
             and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES
             and old['packet'].get('authoring_policy')==AUTHORING_POLICY
-            and old['packet'].get('writer_purpose')==writer_purpose):
+            and old['packet'].get('writer_purpose')==writer_purpose and same_representation):
         return _prepare_units(documents,owner,identifier,old)if old['state']=='preparing'else documents.get(owner,identifier)
     analyses=frozen_context_analyses(documents,owner,document)
     value=packet(documents,owner,document,analyses,writer_purpose)
@@ -471,6 +472,9 @@ def prepare(documents,owner,identifier,payload=None):
         'units':[{'unit':u,'packet':scoped_packet(value,plan,u)if u['dispatch_eligible']else None,'prepared':None,
             'state':'pending'if u['dispatch_eligible']else'unavailable_dispatch_limit',
             'family_id':None,'job_id':None,'run_id':None}for u in plan['units']]}
+    if writer_purpose==explanations.PURPOSE:
+        stage['representation_policy']=explanations.REPRESENTATION
+        for unit in stage['units']:unit['representation_policy']=explanations.REPRESENTATION
     with documents.store.tx()as db:
         row=documents.owned(db,owner,identifier);options=json.loads(row['options'])
         if old:options.setdefault('ai_history',[]).append({**old,'decisions':deepcopy(options.get('ai_decisions',{})),'decision_history':deepcopy(options.get('ai_decision_history',[]))})
@@ -483,7 +487,8 @@ def _save_stage(documents,owner,identifier,stage):
     with documents.store.tx()as db:
         row=documents.owned(db,owner,identifier);options=json.loads(row['options']);current=options['ai_review']
         if (current['packet']['packet_sha256']!=stage['packet']['packet_sha256']
-                or current.get('plan',{}).get('plan_sha256')!=stage['plan']['plan_sha256']):invalid()
+                or current.get('plan',{}).get('plan_sha256')!=stage['plan']['plan_sha256']
+                or current.get('representation_policy')!=stage.get('representation_policy')):invalid()
         if current.get('cancel_requested')and not stage.get('cancel_requested'):invalid()
         options['ai_review']=deepcopy(stage)
         db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(canonical(options),identifier))
@@ -543,6 +548,7 @@ def _preparation_pending(stage):
 
 def _start_units(documents,owner,identifier,document,stage):
     if stage['plan']!=advice_plan(stage['packet']):invalid()
+    if stage['packet'].get('writer_purpose')==explanations.PURPOSE and stage.get('representation_policy')!=explanations.REPRESENTATION:invalid()
     if stage.get('cancel_requested'):return documents.get(owner,identifier)
     # A partial preparation pass must settle before any job is submitted, so
     # Start cannot replace the state that exposes no-retry preparation recovery.
@@ -577,7 +583,14 @@ def _start_units(documents,owner,identifier,document,stage):
     _save_stage(documents,owner,identifier,stage);return documents.get(owner,identifier)
 
 
-def _unit_key(identifier,unit):return 'document-ai-'+identifier+'-'+unit['packet']['packet_sha256'][:32]
+def _unit_key(identifier,unit):
+    prepared=unit.get('prepared')or{}
+    if unit['packet'].get('writer_purpose')==explanations.PURPOSE and unit.get('representation_policy'):
+        identity=digest({'packet':unit['packet']['packet_sha256'],'representation':unit['representation_policy'],
+            'request':prepared.get('request_sha256')})
+        return 'document-ai-'+identifier+'-'+identity[:32]
+    # Historical stages keep their exact durable key for cancellation/readers.
+    return 'document-ai-'+identifier+'-'+unit['packet']['packet_sha256'][:32]
 
 
 def advance_units(documents):

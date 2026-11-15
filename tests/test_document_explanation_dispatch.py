@@ -76,3 +76,43 @@ def no_evidence_public():
         'units':[{'unit_id':'MECHANICAL-NO-EVIDENCE','state':e.NO_EVIDENCE,'section_index':0,
             'original_span':{'start':0,'end':len('Potrdilo o vpisu'),'text':'Potrdilo o vpisu'},'attempted':False,'inference_performed':False}]}
     public['presentation']=presentation(public);return public
+
+
+def test_old_explanation_representation_is_archived_then_rebuilt_without_reusing_cache(rig):
+    _,client,documents,gateway,headers,identifier,evidence=setup(rig)
+    root='/api/pilot/documents/'+identifier;assert client.post(root+'/ai/prepare',headers=headers,json={'purpose':e.PURPOSE}).status_code==200
+    owner,options=owner_and_options(documents,identifier)
+    old=options['ai_review'];old.pop('representation_policy')
+    for unit in old['units']:unit.pop('representation_policy')
+    def store(value):
+        with documents.store.tx()as db:
+            db.execute('UPDATE uploaded_documents SET options=?WHERE id=?',(json.dumps(value),identifier))
+    store(options);before=deepcopy(options);counts=jobs(documents);report=client.get(root+'/export/txt').text
+    response=client.post(root+'/ai/prepare',headers=headers,json={'purpose':e.PURPOSE});assert response.status_code==200,response.text
+    _,after=owner_and_options(documents,identifier)
+    assert after['ai_history'][-1]=={**before['ai_review'],'decisions':before.get('ai_decisions',{}),'decision_history':before.get('ai_decision_history',[])}
+    assert after['ai_review']['representation_policy']==e.REPRESENTATION
+    assert all(u['representation_policy']==e.REPRESENTATION for u in after['ai_review']['units'])
+    assert after['ai_review']['packet']==old['packet']and gateway.calls==[]and jobs(documents)==counts
+    assert client.get(root+'/export/txt').text==report and client.get(root).json()['sections']==evidence['sections']
+    # A stale, active stage cannot be replaced or dispatched under a new
+    # renderer. Its exact old data stays available for normal cancellation.
+    active=deepcopy(before);active['ai_review']['state']='prepared'
+    active['ai_review']['units'][0]['state']='prepared';store(active)
+    assert client.post(root+'/ai/prepare',headers=headers,json={'purpose':e.PURPOSE}).status_code==409
+    assert client.post(root+'/ai/start',headers=headers,json={}).status_code==409
+    assert owner_and_options(documents,identifier)[1]==active and gateway.calls==[]and jobs(documents)==counts
+
+
+def test_explanation_job_key_binds_new_request_and_preserves_historical_keys():
+    packet={'writer_purpose':e.PURPOSE,'packet_sha256':'a'*64}
+    historical={'packet':packet,'prepared':{'request_sha256':'b'*64}}
+    old=ai._unit_key('document',historical);assert old=='document-ai-document-'+'a'*32
+    current={**historical,'representation_policy':e.REPRESENTATION};key=ai._unit_key('document',current)
+    assert key!=old and ai._unit_key('document',current)==key
+    changed={**current,'prepared':{'request_sha256':'c'*64}}
+    assert ai._unit_key('document',changed)!=key
+    pending={**current,'prepared':None}
+    assert ai._unit_key('document',pending)not in {old,key}
+    independent={**current,'packet':{'packet_sha256':'a'*64}}
+    assert ai._unit_key('document',independent)==old

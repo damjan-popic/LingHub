@@ -30,7 +30,7 @@ def label_coordinates(value):
                 if finding.get('included_in_draft')else'historical_evidence_not_applied')
     return value
 
-CONTEXT_POLICY='document-qualified-model-context-v7'
+CONTEXT_POLICY='document-qualified-model-context-v8'
 
 
 def _context_words(projection,bundle,text):
@@ -170,7 +170,7 @@ def _optional_constructions(record,nomination,text,words):
     return spans
 
 
-def optional_context_selection(by_id,decisions,finding_sources,findings,text,words):
+def optional_context_selection(by_id,decisions,finding_sources,findings,text,words,lexical=None):
     """Select additional whole useful records; keep every other identity in trace.
 
     Required finding evidence is handled independently. Optional attestations
@@ -179,26 +179,65 @@ def optional_context_selection(by_id,decisions,finding_sources,findings,text,wor
     it has different source facts, sense IDs, status or qualifications. This
     comparison is about delivered information, never native-record equivalence.
     """
-    choices={};ranked=[];covered=[]
+    choices={};ranked=[];covered=[];lexical_members={}
+    options=(lexical or{}).get('options',[])
+    def construction_key(option):
+        c=option['construction']
+        return (c['kind'],tuple(sorted((w['start'],w['end'])for w in c['witnesses'])))
+    phrase_choices={construction_key(o)for o in options if o['kind']=='collocations'}
+    attested=[]
+    for eid,nomination in decisions.items():
+        if nomination.get('eligible')and nomination.get('reason')in {
+                'recorded_whole_collocation_in_original','native_component_lemmas_in_original_sentence'}:
+            attested.extend(_optional_constructions(by_id[eid],nomination,text,words))
+    for option in options:
+        c=option['construction'];witnesses=c['witnesses'];observed=c['observed']
+        object_rename=(option['kind']=='synonyms'and c['kind']=='verb_object'
+            and witnesses[0].get('upos')in {'NOUN','PROPN'}and witnesses[0].get('deprel')=='obj')
+        independent=not(object_rename and(construction_key(option)in phrase_choices
+            or any(s['start']<=observed['start']<observed['end']<=s['end']for s in attested)))
+        reason=('source_specific_construction_choice'if independent else
+            'object_head_renaming_adds_no_independent_guidance_to_recorded_phrase')
+        for alternative in option['alternatives']:
+            lexical_members.setdefault(alternative['evidence_id'],[]).append({
+                'option_id':option['option_id'],'selected':independent,'reason':reason,
+                'occurrence':deepcopy(observed)})
     for finding in findings:
         observed=(finding.get('match')or{}).get('observed')or{}
         if type(observed.get('start'))is int and type(observed.get('end'))is int:covered.append(observed)
     for eid,record in by_id.items():
-        if eid in finding_sources:continue
+        if eid in finding_sources:
+            if eid in lexical_members:choices[eid]={'eligible':True,'selected':True,
+                'reason':'required_finding_source','lexical_options':deepcopy(lexical_members[eid])}
+            continue
         nomination=decisions[eid]
+        members=lexical_members.get(eid,[]);active=[m for m in members if m['selected']]
+        if active:
+            nomination={'eligible':True,'reason':'original_bound_source_construction_choice',
+                'occurrences':[deepcopy(m['occurrence'])for m in active],
+                'applicability_not_established':True}
         choice={'eligible':nomination['eligible'],'selected':False,'reason':nomination['reason']}
+        if members:
+            choice['lexical_options']=deepcopy(members)
+            if not active and not nomination['eligible']:choice['reason']=members[0]['reason']
         choices[eid]=choice
         if not nomination['eligible']:continue
         spans=_optional_constructions(record,nomination,text,words)
         collocation=record.get('capture_kind')=='ordinary_context_unit'and record['native_passage'].get('tool_kind')=='collocations'
         if collocation and not spans:
             choice['reason']='eligible_sentence_lemma_candidate_without_located_ordered_construction';continue
-        if collocation:
+        if collocation and not active:
             spans=[s for s in spans if not any(o['start']<=s['start']<s['end']<=o['end']for o in covered)]
             if not spans:
                 choice['reason']='optional_attestation_inside_required_finding_without_independent_construction';continue
         choice.update(occurrences=spans,nomination=deepcopy(nomination),
             applicability_not_established=True)
+        if active:
+            # A whole qualified choice can supply alternatives absent from the
+            # original. Eligibility does not make every lookup sense mandatory.
+            # Keep competing records in a selected group; do not merge owners.
+            choice.update(selected=True,reason='additional_source_construction_choice')
+            continue
         # Prefer a literal original expression, then located lemma candidates.
         # Retrieval order and frequency do not decide linguistic correctness.
         strength=1 if nomination['reason']=='native_component_lemmas_in_original_sentence'else 2
@@ -294,18 +333,6 @@ def packet(documents,owner,document,contextual_analyses=None):
             lexical=deepcopy(review.get('lexical_context'));lexical_source_ids=set()
             if lexical:
                 if lexical.get('version')!='recorded-contextual-lexical-choices-v1':invalid()
-                for option in lexical['options']:
-                    for alternative in option['alternatives']:
-                        record=by_id.get(alternative['evidence_id'])
-                        if (not record or record['capture_sha256']!=alternative['capture_sha256']
-                                or not record.get('model_context_eligible')
-                                or record.get('rights_mode')in {'linked_only','metadata_only','unknown'}):invalid()
-                        alternative['source_refs']=[retain(record,section['family_id'],'contextual_lexical_choice_not_edit_authority')]
-                        lexical_source_ids.add(record['evidence_id'])
-                        # The complete ordinary unit is already supplied once.
-                        # A pointer keeps its ownership without duplicating it.
-                        alternative.pop('source_facts',None)
-                        alternative['source_facts_ref']='/sources/'+alternative['source_refs'][0]+'/original_text'
             task={'source_text':section['text'],'mode':'review','source_language':document['options']['source_language']}
             words=_context_words((contextual_analyses or{}).get(section['index']),bundle,section['text'])
             decisions={eid:context_nomination(record,task,words)for eid,record in by_id.items()}
@@ -337,7 +364,35 @@ def packet(documents,owner,document,contextual_analyses=None):
                 kept={k:deepcopy(finding[k])for k in ('finding_id','type','applicability','match','notice','proposed_edit','included_in_draft','remaining_conditions','alternatives')if k in finding}
                 kept.update(source_refs=refs,source_focus=deepcopy(source['focus']),source_qualifications=deepcopy(source['qualifications']))
                 findings.append(kept)
-            selections=optional_context_selection(by_id,decisions,finding_sources,findings,section['text'],words)
+            selections=optional_context_selection(by_id,decisions,finding_sources,findings,section['text'],words,lexical)
+            if lexical:
+                selected_options=[];omitted_options=[]
+                for option in lexical['options']:
+                    members=[m for a in option['alternatives']for m in selections.get(a['evidence_id'],{}).get('lexical_options',[])
+                        if m['option_id']==option['option_id']]
+                    selected=bool(members)and all(m['selected']for m in members)
+                    if not selected:
+                        omitted_options.append({'option_id':option['option_id'],'kind':option['kind'],
+                            'observed':deepcopy(option['construction']['observed']),
+                            'reason':members[0]['reason']if members else'no_additional_source_construction_delivery',
+                            'sources':[{'evidence_id':a['evidence_id'],'capture_sha256':a['capture_sha256'],'identity':deepcopy(a['identity'])}for a in option['alternatives']],
+                            'meaning_ruled_out':False,'retained_in':'original_frozen_review.lexical_context'})
+                        continue
+                    for alternative in option['alternatives']:
+                        record=by_id.get(alternative['evidence_id'])
+                        if (not record or record['capture_sha256']!=alternative['capture_sha256']
+                                or not record.get('model_context_eligible')
+                                or record.get('rights_mode')in {'linked_only','metadata_only','unknown'}):invalid()
+                        alternative['source_refs']=[retain(record,section['family_id'],'contextual_lexical_choice_not_edit_authority')]
+                        lexical_source_ids.add(record['evidence_id'])
+                        alternative.pop('source_facts',None)
+                        alternative['source_facts_ref']='/sources/'+alternative['source_refs'][0]+'/original_text'
+                    selected_options.append(option)
+                lexical['nominated_option_count']=len(lexical['options'])
+                lexical['options']=selected_options
+                lexical['displayed_option_count']=len(selected_options)
+                lexical['delivery']={'selected_options':len(selected_options),'omitted_options':omitted_options,
+                    'scope':'whole optional choices selected for additional construction information; omissions do not rule out meanings'}
             for eid,record in by_id.items():
                 if eid in finding_sources or eid in lexical_source_ids:continue
                 nomination=decisions[eid];selection=selections[eid]
@@ -366,7 +421,7 @@ def packet(documents,owner,document,contextual_analyses=None):
             delivery.append({'section_index':section['index'],'finding_source_count':len(finding_sources),
                 'lexical_choice_source_count':len(lexical_source_ids),
                 'lexical_choice_option_count':len(lexical['options'])if lexical else 0,
-                'eligible_additional_context_count':sum(s['eligible']for s in selections.values()),
+                'eligible_additional_context_count':sum(s['eligible']for eid,s in selections.items()if eid not in finding_sources),
                 'additional_context_count':len(retained),'omitted':omitted,'omitted_findings':omitted_findings,
                 'original_finding_count':len(review['findings']),'provided_finding_count':len(findings),
                 'contextual_analysis_projection_sha256':((contextual_analyses or{}).get(section['index'])or{}).get('projection_sha256'),

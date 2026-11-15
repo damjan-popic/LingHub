@@ -140,7 +140,10 @@ def report_blocks(review,locale='sl',*,include_common=True):
             yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
         for alternative in finding.get('alternatives',[]):
             yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+({'singular':('singolare','ednina'),'dual':('duale','dvojina'),'plural':('plurale','množina')}.get(alternative.get('number'),('',''))[0 if it else 1])+')'
-        if (source.get('native_source_unit')or{}).get('tool_kind')or (source.get('body_binding')or{}).get('capture_kind')=='terminology_record':
+        if (source.get('recorded_table_projection')or{}).get('native_rows')is not None:
+            if previous is None:
+                yield 'body',('Le tabelle originali complete, comprese le parti non analizzate, sono nella fonte congelata collegata nell’elenco delle fonti.'if it else'Celotne izvirne preglednice, tudi nerazčlenjeni deli, so v zamrznjenem viru, povezanem v seznamu virov.')
+        elif (source.get('native_source_unit')or{}).get('tool_kind')or (source.get('body_binding')or{}).get('capture_kind')=='terminology_record':
             pass # Whole native data stay in the source reader; no repeated warning or raw JSON.
         elif previous is None and source['focus']['text']not in finding['notice']:
             yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'

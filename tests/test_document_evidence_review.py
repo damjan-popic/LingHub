@@ -140,3 +140,17 @@ def test_report_reuses_only_identical_complete_advice_and_keeps_occurrence_ident
     second['source']['capture_sha256']='9'*64
     text='\n'.join(value for kind,value in report_blocks(review))
     assert text.count(first['notice'])==2
+
+
+def test_shared_native_rows_display_uses_complete_reader_without_repeating_raw_parent():
+    from pilot_backend.evidence_review import report_blocks
+    task,doc,rows=sample();review=deepcopy(doc['review']);finding=review['findings'][0]
+    finding['notice']='Publisher-native rows; the document slot remains unresolved.'
+    finding['source']['recorded_table_projection']={'native_rows':{'rows':[],'unsupported_tables':[1]}}
+    before=deepcopy(review);blocks=list(report_blocks(review))
+    assert ('body',finding['notice'])in blocks
+    assert any('nerazčlenjeni deli'in value for kind,value in blocks)
+    assert not any(kind=='quote'and value==finding['source']['focus']['text']for kind,value in blocks)
+    assert review==before
+    finding['source'].pop('recorded_table_projection')
+    assert ('quote',finding['source']['focus']['text'])in list(report_blocks(review))

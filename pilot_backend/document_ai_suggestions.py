@@ -27,7 +27,7 @@ def label_coordinates(value):
                 if finding.get('included_in_draft')else'historical_evidence_not_applied')
     return value
 
-CONTEXT_POLICY='document-qualified-model-context-v4'
+CONTEXT_POLICY='document-qualified-model-context-v5'
 
 
 def _context_words(projection,bundle,text):

@@ -335,6 +335,9 @@ def _report_blocks(report):
     yield 'body',('Il rapporto usa una propria impaginazione. La bozza Word è un file separato.'if it else'Poročilo uporablja svojo postavitev. Wordov osnutek je ločena datoteka.')
     if mode=='review':
         yield 'body',('La bozza parziale di revisione, se scaricata, contiene le proposte disponibili e conserva invariato l’originale dove manca una proposta. Non costituisce una revisione completa; richiede un controllo umano.'if it else'Delni osnutek pregleda, če ga prenesete, vsebuje razpoložljive predloge; kjer predloga ni, ohrani izvirnik brez sprememb. To ni popoln jezikovni pregled; zahteva človeški pregled.')
+    if any((section.get('document_result')or{}).get('review')for section in report.get('sections',[])):
+        from .evidence_review import common_report_notice
+        yield 'body',common_report_notice(report.get('locale','sl'))
     if report.get('saved_result_url'):
         yield 'body',('Risultato salvato sul servizio KLIKai originale; richiede l’accesso con lo stesso account.'if it else'Shranjeni rezultat na izvornem primerku KLIKai; potrebna je prijava z istim računom.')
         yield 'link',('Apri documento salvato'if it else'Odpri shranjeni dokument',report['saved_result_url'])
@@ -389,7 +392,7 @@ def _report_blocks(report):
         elif state=='complete'and result.get('status')=='draft':
             status=('Bozza di traduzione preparata.'if it else'Prevodni osnutek je pripravljen.')if mode=='translate'else(
                 'Modifiche proposte nel testo della bozza.'if it else'Spremembe so vključene v predlagano besedilo.')if result.get('edits')else(
-                'Nessuna modifica proposta nell’ambito supportato; non è una conferma dell’assenza di errori.'if it else'V podprtem obsegu ni predlaganih sprememb; to ni potrditev, da besedilo nima napak.')
+                'Nessuna modifica proposta nell’ambito supportato.'if it else'V podprtem obsegu ni predlaganih sprememb.')
         else:status=({'complete':('Elaborazione terminata.','Obdelava je zaključena.'),'failed':('Elaborazione non riuscita.','Obdelava ni uspela.'),
             'cancelled':('Elaborazione interrotta.','Obdelava je ustavljena.'),'queued':('In attesa.','Čaka na obdelavo.'),
             'running':('Elaborazione in corso.','Obdelava poteka.')} .get(state,('Non elaborato.','Ni obdelano.')))[0 if it else 1]
@@ -404,13 +407,14 @@ def _report_blocks(report):
             yield 'body',('La consegna delle fonti non dimostra il loro rispetto. Le modifiche citano il supporto dichiarato; la verifica linguistica indipendente resta distinta.'if it else'Posredovanje virov ne dokazuje njihovega upoštevanja. Pri spremembah je navedena zatrjevana podpora; neodvisno jezikovno preverjanje ostaja ločeno.')
         if mode=='review':
             available=section.get('state')=='complete'and result.get('status')=='draft'and isinstance(result.get('proposed_text'),str)
-            yield 'body',(('Nella bozza parziale: proposta disponibile; controlla le modifiche.'if available else'Nella bozza parziale: originale conservato senza modifiche.')if it else(
+            if not available:yield 'body',(('Nella bozza parziale: proposta disponibile; controlla le modifiche.'if available else'Nella bozza parziale: originale conservato senza modifiche.')if it else(
                 'V delnem osnutku: razpoložljivi predlog; preverite spremembe.'if available else'V delnem osnutku: izvirnik ohranjen brez sprememb.'))
         yield 'subheading','Originale'if it else'Izvirnik'
         yield 'body',str(section.get('text',''))
         yield 'subheading','Proposta'if it else'Predlagano besedilo'
         yield 'body',str(result.get('proposed_text',section.get('output','')))
         for note in dict.fromkeys(result.get('notes',[])):
+            if result.get('review')and note=='Pregled vsebuje navedene ugotovitve iz virov in opravljena preverjanja. V osnutek so vključeni samo predlogi z navedenim dokazom uporabe; celovita jezikovna pravilnost ni potrjena.':continue
             known={'evidence_excluded_from_writer':('Parte delle fonti trovate non è stata inclusa per limiti di spazio; la copertura è quindi parziale.','Del najdenih virov zaradi omejenega prostora ni bil uporabljen; obseg obdelave je zato delen.'),
                 'source_support_unavailable':('Nessuna fonte ammessa disponibile per verificare questa sezione.','Za preverjanje tega odseka ni na voljo dovoljenih virov.'),
                 'private_translation_candidate':('Traduzione privata sperimentale; controlla integralmente significato e stile.','Zasebni preizkus prevoda; preverite celoten pomen in slog.'),
@@ -420,7 +424,7 @@ def _report_blocks(report):
             yield 'body',known.get(note,(note,note))[0 if it else 1]
         if result.get('review'):
             from .evidence_review import report_blocks
-            yield from report_blocks(result['review'],report.get('locale','sl'))
+            yield from report_blocks(result['review'],report.get('locale','sl'),include_common=False)
         sources=section.get('sources')or[]
         if section.get('writer_input_selection')=='unknown':
             yield 'body',('La selezione delle fonti inviate al modello non è ricostruibile dai dati conservati. Non viene dedotta dall’elenco dei risultati trovati.'if it else'Iz shranjenih podatkov ni mogoče ugotoviti izbora virov, poslanih modelu. Izbora ne sklepamo iz seznama najdenih zadetkov.')

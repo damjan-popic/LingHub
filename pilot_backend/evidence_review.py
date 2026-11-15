@@ -105,21 +105,26 @@ def checked(review,text=None,task=None,matches=None):
     return deepcopy(review)
 
 
-def overview(review,locale='sl'):
+def overview(review,locale='sl',*,include_notice=True):
     counts=review['overview']['counts']
     if locale=='it':
         return (f"Revisione delle fonti: {counts['qualified_advice']} indicazioni qualificate, "
             f"{counts['recorded_contrast']} confronti registrati, {counts['recorded_form_context']} riferimenti contestuali, {counts['executable_application']} proposte incluse, {counts.get('application_proposal',0)} applicazioni condizionate. "
-            'Le indicazioni non sono correzioni automatiche. Controllare ambito e condizioni; non è una certificazione linguistica completa.')
+            +('Le indicazioni non sono correzioni automatiche. Controllare ambito e condizioni; non è una certificazione linguistica completa.'if include_notice else''))
     return (f"Pregled iz virov: {counts['qualified_advice']} kvalificiranih priporočil, "
         f"{counts['recorded_contrast']} zapisanih primerjav, {counts['recorded_form_context']} kontekstnih zapisov, {counts['executable_application']} vključenih predlogov, {counts.get('application_proposal',0)} pogojnih uporab. "
-        'Nasveti niso samodejni popravki. Preverite obseg in pogoje; celovita jezikovna pravilnost ni potrjena.')
+        +('Nasveti niso samodejni popravki. Preverite obseg in pogoje; celovita jezikovna pravilnost ni potrjena.'if include_notice else''))
 
 
-def report_blocks(review,locale='sl'):
+def common_report_notice(locale='sl'):
+    return ('Le indicazioni e i confronti non autorizzano sostituzioni automatiche. Solo le proposte con prova di applicabilità sono incluse nella bozza; altrimenti l’originale è conservato. Verificare sensi, alternative, condizioni e stato di ogni fonte. La ricerca e i controlli hanno ambito limitato e non certificano la correttezza complessiva.'if locale=='it'else
+        'Nasveti in primerjave niso samodejne zamenjave. V osnutek so vključeni samo predlogi z dokazom uporabe; sicer je izvirnik ohranjen. Preverite pomene, možnosti, pogoje in status vsakega vira. Iskanje in preverjanja imajo omejen obseg in ne potrjujejo celovite jezikovne pravilnosti.')
+
+def report_blocks(review,locale='sl',*,include_common=True):
     it=locale=='it'
     yield 'subheading','Revisione delle fonti senza autore generativo'if it else'Pregled iz virov brez generativnega pisca'
-    yield 'body',overview(review,locale)
+    yield 'body',overview(review,locale,include_notice=False)
+    if include_common:yield 'body',common_report_notice(locale)
     rendered_advice={}
     for number,finding in enumerate(review['findings'],1):
         span=finding['match']['observed'];source=finding['source'];advice=source.get('recorded_advice')or{}
@@ -130,13 +135,13 @@ def report_blocks(review,locale='sl'):
         yield 'body',f"{span['start']}–{span['end']}: {span['text']}"
         if previous is None:yield 'body',finding['notice']
         else:yield 'body',('Lo stesso testo integrale e le condizioni della fonte sono riportati nell’indicazione '+str(previous)+'.'if it else'Enako celotno pojasnilo in pogoji istega vira so navedeni pri ugotovitvi '+str(previous)+'.')
-        yield 'body',(('Proposta con prova di applicabilità inclusa nella bozza; da verificare.'if it else'Predlog z dokazom uporabe je vključen v osnutek; potreben je pregled.')if finding['included_in_draft']else('Originale conservato. Nessuna correzione eseguibile autorizzata.'if it else'Izvirnik je ohranjen. Izvedljivi popravek ni bil dovoljen.'))
+        if finding['included_in_draft']:yield 'body','Proposta inclusa nella bozza.'if it else'Predlog je vključen v osnutek.'
         if finding.get('proposed_edit'):
             yield 'body',finding['proposed_edit']['original']+' → '+finding['proposed_edit']['replacement']
         for alternative in finding.get('alternatives',[]):
             yield 'body',('Alternativa condizionata: 'if it else'Pogojna možnost: ')+alternative['form']+' ('+({'singular':('singolare','ednina'),'dual':('duale','dvojina'),'plural':('plurale','množina')}.get(alternative.get('number'),('',''))[0 if it else 1])+')'
         if (source.get('native_source_unit')or{}).get('tool_kind')or (source.get('body_binding')or{}).get('capture_kind')=='terminology_record':
-            yield 'body','Letture, sensi, alternative e misure originali sono conservati nella fonte acquisita; non sono sostituzioni automatiche.'if it else'Izvirne razlage, pomeni, možnosti in mere so ohranjeni v zajetem viru; to niso samodejne zamenjave.'
+            pass # Whole native data stay in the source reader; no repeated warning or raw JSON.
         elif previous is None and source['focus']['text']not in finding['notice']:
             yield 'subheading','Materiale pertinente della fonte'if it else'Ustrezno gradivo iz vira'
             yield 'quote',source['focus']['text']
@@ -149,13 +154,13 @@ def report_blocks(review,locale='sl'):
                     'proposed_needs_review':('Associazione editoriale proposta; ancora da revisionare','Predlagana uredniška povezava; še ni pregledana')}
                 value=labels.get(str(advice[key]))
                 yield 'body',label+': '+(value[0 if it else 1]if value else str(advice[key]))
-        if source.get('untyped_context_limit'):yield 'body',('Il confronto registrato non è una regola eseguibile. Controlla il contesto completo nella fonte.'if it else'Zapisana primerjava ni izvedljivo pravilo. Preverite celotno sobesedilo v viru.')
+
     coverage=review.get('resource_coverage')
     if coverage:
         labels={'jezikovna_svetovalnica':'Jezikovna svetovalnica','epravopis':'ePravopis','cjvt-thesaurus':'Sopomenke','cjvt-ksss':'Kolokacije','sloleks':'Sloleks','loris':'LORIS','morph-it':'Morph-it!'}
         names=[labels.get(name,name)for name in coverage.get('captured_families',[])]
         if names:yield 'body',('Materiale acquisito: 'if it else'Zajeto gradivo: ')+', '.join(names)+'.'
-        if coverage.get('bounded_or_partial'):yield 'body','La ricerca ha un ambito limitato; i risultati non certificano la correttezza del testo.'if it else'Iskanje ima omejen obseg; rezultat ne potrjuje pravilnosti besedila.'
+        if include_common and coverage.get('bounded_or_partial'):yield 'body','La ricerca ha un ambito limitato; i risultati non certificano la correttezza del testo.'if it else'Iskanje ima omejen obseg; rezultat ne potrjuje pravilnosti besedila.'
     yield 'subheading','Controlli e limiti'if it else'Preverjanja in omejitve'
     names={'application_analysis':('Analisi contestuale dedicata','Namenska skladenjska analiza'),
         'application_paradigms':('Paradigmi registrati per le proposte','Zapisane paradigme za predloge'),
@@ -172,5 +177,5 @@ def report_blocks(review,locale='sl'):
         'outside_coverage':('Fuori copertura','Zunaj obsega'),'partial':('Copertura parziale','Delni obseg')}
     for check in review['checks']:
         yield 'body',names[check['check_id']][0 if it else 1]+': '+states[check['status']][0 if it else 1]
-    yield 'body',('La ricerca è limitata alle fonti acquisite. Candidati lessicali e confronti non risolvono il senso o l’applicabilità. Le condizioni e i dettagli completi sono conservati con le fonti.'if it else
+    if include_common:yield 'body',('La ricerca è limitata alle fonti acquisite. Candidati lessicali e confronti non risolvono il senso o l’applicabilità. Le condizioni e i dettagli completi sono conservati con le fonti.'if it else
         'Iskanje je omejeno na zajete vire. Leksikalni kandidati in primerjave ne razrešijo pomena ali uporabnosti. Pogoji in podrobnosti so ohranjeni ob virih.')

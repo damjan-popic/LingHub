@@ -261,9 +261,9 @@ class Documents:
         return result
 
     @serialized
-    def prepare_ai(self,owner,identifier):
+    def prepare_ai(self,owner,identifier,payload=None):
         from .document_ai_suggestions import prepare
-        return prepare(self,owner,identifier)
+        return prepare(self,owner,identifier,payload)
 
     @serialized
     def start_ai(self,owner,identifier):

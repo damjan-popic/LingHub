@@ -253,7 +253,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         u=document_user(request);return await run_in_threadpool(documents.start,u['id'],identifier,await payload(request))
     @app.post(api+'/documents/{identifier}/ai/prepare')
     async def prepare_document_ai(identifier:str,request:Request):
-        u=document_user(request);return await run_in_threadpool(documents.prepare_ai,u['id'],identifier)
+        u=document_user(request);return await run_in_threadpool(documents.prepare_ai,u['id'],identifier,await payload(request))
     @app.post(api+'/documents/{identifier}/ai/start')
     async def start_document_ai(identifier:str,request:Request):
         u=document_user(request);return await run_in_threadpool(documents.start_ai,u['id'],identifier)

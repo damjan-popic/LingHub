@@ -42,11 +42,13 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  function renderAI(panel){
   if(!aiSuggestions&&!current.ai_suggestions)return;
   const group=el('section',undefined,{'data-ai-suggestions-group':''});panel.append(group);
-  group.append(el('h3',aiLabel()),el('p',locale()==='it'?'Opzione sperimentale: suggerimenti IA non verificati.':'Poskusna možnost: nepreverjeni AI predlogi.',{class:'small muted'}),el('p',aiWarning(),{class:'qualified-note','data-ai-warning':''}));
   const ai=current.ai_suggestions;
+  const explains=ai?.writer_purpose==='evidence_explanation';
+  group.append(el('h3',explains||!ai?(locale()==='it'?'Spiegazioni delle prove':'Razlage dokazov'):aiLabel()));
+  if(ai&&!explains)group.append(el('p',locale()==='it'?'Opzione sperimentale: suggerimenti IA non verificati.':'Poskusna možnost: nepreverjeni AI predlogi.',{class:'small muted'}),el('p',aiWarning(),{class:'qualified-note','data-ai-warning':''}));
   if(!ai){
    group.append(el('p',locale()==='it'?'Passaggio facoltativo, successivo alla revisione delle fonti.':'Neobvezen korak po shranjenem pregledu iz virov.'));
-   if(aiSuggestions&&current.state==='complete'&&current.review_manifest)button(group,locale()==='it'?'Prepara suggerimenti IA':'Pripravi predloge umetne inteligence',()=>aiAction('prepare'));
+   if(aiSuggestions&&current.state==='complete'&&current.review_manifest)button(group,locale()==='it'?'Prepara spiegazioni IA':'Pripravi razlage AI',()=>aiAction('prepare',{purpose:'evidence_explanation'}));
    return;
   }
   if(ai.stale){group.append(el('p',locale()==='it'?'Risultato storico: non applicabile alla revisione attuale.':'Zgodovinski rezultat: ne velja za sedanjo revizijo.'));return;}
@@ -75,11 +77,11 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
     }
    }
   }
-  if(aiSuggestions&&ai.can_prepare)button(group,locale()==='it'?'Completa la preparazione delle parti rimanenti':'Dokončaj pripravo preostalih delov',()=>aiAction('prepare'));
-  if(aiSuggestions&&(ai.can_start??ai.state==='prepared'))button(group,locale()==='it'?'Richiedi suggerimenti IA':'Pridobi predloge umetne inteligence',()=>aiAction('start'));
+  if(aiSuggestions&&ai.can_prepare)button(group,locale()==='it'?'Completa la preparazione delle parti rimanenti':'Dokončaj pripravo preostalih delov',()=>aiAction('prepare',explains?{purpose:'evidence_explanation'}:{}));
+  if(aiSuggestions&&(ai.can_start??ai.state==='prepared'))button(group,explains?(locale()==='it'?'Richiedi spiegazioni IA':'Pridobi razlage AI'):(locale()==='it'?'Richiedi suggerimenti IA':'Pridobi predloge umetne inteligence'),()=>aiAction('start'));
   if(ai.can_cancel??active.has(ai.state))button(group,locale()==='it'?'Interrompi solo IA':'Ustavi samo AI obdelavo',()=>aiAction('cancel'));
   if(ai.state==='available'&&!ai.items.length)group.append(el('p',locale()==='it'?'Nessun suggerimento restituito. Non è una certificazione della correttezza del testo.':'AI ni vrnila predlogov. To ni potrdilo o pravilnosti besedila.'));
-  for(const item of ai.items){
+  for(const item of ai.items.filter(i=>i.writer_purpose!=='evidence_explanation')){
    const detail=el('details',undefined,{'data-ai-suggestion-id':item.suggestion_id});group.append(detail);
    const action=ai.decisions[item.suggestion_id]?.action||'undecided';
    const display=presentation?.items[item.suggestion_id],kind=display?.kind||(item.mechanical_issues.length?'rejected_item':item.replacement===null?'valid_comment':item.eligible_for_accept?'eligible_change':'rejected_item');
@@ -103,6 +105,18 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    const complete=!ai.selected_revision.partial_advice&&current.state==='complete'&&!current.sections.some(s=>s.limitations?.some(l=>l.code==='document_transform_failed'));
    if(complete){button(group,locale()==='it'?'Scarica Word con modifiche IA selezionate':'Prenesi Word z izbranimi AI spremembami',()=>selectedDownload('docx'));button(group,locale()==='it'?'Scarica TXT con modifiche IA selezionate':'Prenesi TXT z izbranimi AI spremembami',()=>selectedDownload('txt'));}
    else button(group,locale()==='it'?'Scarica Word parziale con modifiche IA selezionate':'Prenesi delni Word z izbranimi AI spremembami',()=>selectedDownload('docx',true));
+  }
+ }
+ function renderExplanations(parent,section){
+  const ai=current.ai_suggestions;if(ai?.writer_purpose!=='evidence_explanation'||ai.stale)return;
+  for(const comment of ai.items.filter(i=>i.section_index===section.index&&i.writer_purpose==='evidence_explanation')){
+   const anchor=ai.explanation_anchors.find(a=>a.anchor_id===comment.anchor_id);
+   const box=el('div',undefined,{'data-ai-explanation':comment.anchor_id});
+   box.append(el('h4',locale()==='it'?'Spiegazione IA':'Razlaga AI'));
+   if(anchor)box.append(el('blockquote',anchor.original_span.text));
+   box.append(el('p',comment.explanation));if(comment.uncertainty)box.append(el('p',comment.uncertainty));
+   for(const ref of comment.source_refs){const source=ai.source_references[ref];if(source)button(box,source.title||(locale()==='it'?'Apri fonte':'Odpri vir'),()=>openFamily(source.family_id,{sourceId:source.evidence_id}));}
+   parent.append(box);
   }
  }
  async function download(fmt,draft=false,partial=false){const token=epoch,id=current.document_id;const blob=await api('/documents/'+id+(draft?'/draft/':'/export/')+fmt+(partial?'?partial=true':''),{response:'blob'});if(token!==epoch)return;const url=URL.createObjectURL(blob),a=el('a',undefined,{href:url,download:(partial?'klikai-partial-draft.':draft?'klikai-draft.':'klikai-report.')+fmt});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -194,6 +208,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
     for(const check of review.checks)checks.append(el('p',reviewCheckLabel(check)));
     item.append(checks);
    }
+   renderExplanations(item,section);
    if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));
    if(section.family_id)button(item,'view',()=>openFamily(section.family_id));evidencePanel.append(item);
   }

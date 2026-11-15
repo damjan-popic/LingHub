@@ -50,7 +50,7 @@ def item_display(item):
     for locale in ('sl','it'):
         reasons=[{'code':code,'text':localized(REASONS.get(code,(
             'Drug zabeležen razlog mehanske zavrnitve.','Altro motivo registrato di rifiuto meccanico.')),locale)}for code in codes]
-        labels[locale]={'title':localized(TITLES[kind],locale),'reasons':reasons}
+        labels[locale]={'title':('Spiegazione IA'if locale=='it'else'Razlaga AI')if item.get('writer_purpose')=='evidence_explanation'else localized(TITLES[kind],locale),'reasons':reasons}
     return {'kind':kind,'labels':labels}
 
 

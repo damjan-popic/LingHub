@@ -5,6 +5,7 @@ from .store import canonical,digest,stamp
 from .document_source_body import source_body,body_binding
 from .security import Failure
 from .document_ai_outcomes import presentation as outcome_presentation
+from . import document_evidence_explanations as explanations
 from .document_ai_contract import (VERSION,PACKET,AI_LABEL,EVIDENCE_LABEL,WARNING,checked_packet,checked_output,selected_sections,
     SCOPES,advice_plan,scoped_packet)
 
@@ -289,12 +290,12 @@ def frozen_context_analyses(documents,owner,document):
     return result
 
 
-def packet(documents,owner,document,contextual_analyses=None):
+def packet(documents,owner,document,contextual_analyses=None,writer_purpose=None):
     if (document['state']!='complete'or document['options'].get('review_strategy')!='evidence_review_v1'
             or not document.get('review_manifest')):invalid()
     from .document_resource_context import records as ordinary_records
     from .document_transform import _documentary_review_occurrences,_native_review_cue
-    sections=[];sources={};delivery=[]
+    sections=[];sources={};delivery=[];relationship_captures={}
     def retain(record,family,role):
         raw=record['capture'];body=source_body(record)
         if not body:invalid()
@@ -324,6 +325,9 @@ def packet(documents,owner,document,contextual_analyses=None):
         linked={'evidence_id':record['evidence_id'],'capture_sha256':record['capture_sha256']}
         if linked not in sources[key]['related_captures']:sources[key]['related_captures'].append(linked)
         if role not in sources[key]['admission_roles']:sources[key]['admission_roles'].append(role)
+        if writer_purpose==explanations.PURPOSE:
+            from .document_evidence_relationships import capture_relationships
+            relationship_captures[key]=capture_relationships(record)
         return key
     with documents.store.connect()as db:
         for section in document['sections']:
@@ -366,6 +370,10 @@ def packet(documents,owner,document,contextual_analyses=None):
                 if advice is not None and advice not in sources[key]['recorded_advice']:sources[key]['recorded_advice'].append(deepcopy(advice))
                 kept={k:deepcopy(finding[k])for k in ('finding_id','type','applicability','match','notice','proposed_edit','included_in_draft','remaining_conditions','alternatives')if k in finding}
                 kept.update(source_refs=refs,source_focus=deepcopy(source['focus']),source_qualifications=deepcopy(source['qualifications']))
+                if writer_purpose==explanations.PURPOSE:
+                    for field in ('application_proof',):
+                        if field in finding:kept[field]=deepcopy(finding[field])
+                    if source.get('application_interpretation'):kept['application_interpretation']=deepcopy(source['application_interpretation'])
                 findings.append(kept)
             selections=optional_context_selection(by_id,decisions,finding_sources,findings,section['text'],words,lexical)
             if lexical:
@@ -438,17 +446,24 @@ def packet(documents,owner,document,contextual_analyses=None):
         'authority':'AI comments/suggestions only; original source findings and evidence draft remain unchanged'}
     value['context_selection_policy']=CONTEXT_POLICY
     value['authoring_policy']=AUTHORING_POLICY
+    if writer_purpose==explanations.PURPOSE:
+        from .document_evidence_relationships import snapshot
+        value.update(writer_purpose=writer_purpose,source_relationships=snapshot(sources,sections,relationship_captures))
     label_coordinates(value);value['packet_sha256']=digest(value);return checked_packet(value)
 
-def prepare(documents,owner,identifier):
+def prepare(documents,owner,identifier,payload=None):
     if not documents.ai_suggestions:invalid()
+    payload=payload or{}
+    if set(payload)-{'purpose'}or payload.get('purpose')not in (None,explanations.PURPOSE):invalid()
+    writer_purpose=payload.get('purpose')
     document=documents.get(owner,identifier,internal=True);old=document['options'].get('ai_review')
     if (old and old['packet']['evidence_manifest_sha256']==document['review_manifest']['manifest_sha256']
             and old['packet'].get('context_selection_policy')==CONTEXT_POLICY and old.get('plan',{}).get('version')==SCOPES
-            and old['packet'].get('authoring_policy')==AUTHORING_POLICY):
+            and old['packet'].get('authoring_policy')==AUTHORING_POLICY
+            and old['packet'].get('writer_purpose')==writer_purpose):
         return _prepare_units(documents,owner,identifier,old)if old['state']=='preparing'else documents.get(owner,identifier)
     analyses=frozen_context_analyses(documents,owner,document)
-    value=packet(documents,owner,document,analyses)
+    value=packet(documents,owner,document,analyses,writer_purpose)
     plan=advice_plan(value)
     stage={'packet':value,'plan':plan,'prepared':{'preparation_sha256':None},'state':'preparing','created':stamp(),
         'family_id':None,'job_id':None,'run_id':None,'cancel_requested':False,
@@ -587,6 +602,10 @@ def validate_result(result,packet,prepared=None):
 
 def public_review(documents,owner,document,options):
     public=_public_review(documents,owner,document,options)
+    stage=options.get('ai_review')or{}
+    if public is not None and stage.get('packet',{}).get('writer_purpose')==explanations.PURPOSE:
+        public['writer_purpose']=explanations.PURPOSE
+        public['explanation_anchors']=explanations.anchors(stage['packet'])
     if public is not None and 'presentation'not in public:public['presentation']=outcome_presentation(public)
     return public
 
@@ -777,6 +796,7 @@ def generate(gateway,bundle,tier,model,parent=None):
     locale=packet['locale'];label='Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso'if locale=='it'else AI_LABEL
     warning='I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if locale=='it'else WARNING
     text=label+'\n'+warning+'\n'+outcome['labels'][locale]['counts']
+    if packet.get('writer_purpose')==explanations.PURPOSE:text=explanations.LABELS[locale]+'\n'+outcome['labels'][locale]['counts']
     if outcome['counts']['invalid_responses']:text+='\n'+outcome['labels'][locale]['invalid_responses']
     return {'status':'ok','short_answer':text,'answer_md':text,'answer_kind':'ai_suggestions','generation_status':'generated'if response.get('inference_performed')is True else'uncertain_dispatch'if response.get('attempted')else'not_generated',
         'document_ai_suggestions':response,'evidence':[],'source_badges':[],'blocks':[{'block_id':'ai-suggestions-label','text':text}],
@@ -785,9 +805,11 @@ def generate(gateway,bundle,tier,model,parent=None):
 
 def report_blocks(ai,locale='sl',api_root='/api/pilot'):
     it=locale=='it'
-    yield 'subheading','Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso'if it else AI_LABEL
-    yield 'body','Opzione sperimentale: suggerimenti IA non verificati.'if it else'Poskusna možnost: nepreverjeni AI predlogi.'
-    yield 'body','I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if it else WARNING
+    explains=bool(ai and ai.get('writer_purpose')==explanations.PURPOSE)
+    yield 'subheading',('Spiegazioni delle prove'if it else'Razlage dokazov')if explains else('Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso'if it else AI_LABEL)
+    if not explains:
+        yield 'body','Opzione sperimentale: suggerimenti IA non verificati.'if it else'Poskusna možnost: nepreverjeni AI predlogi.'
+        yield 'body','I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.'if it else WARNING
     if not ai:
         yield 'body','Non richiesti.'if it else'Niso bili zahtevani.';return
     states={'prepared':('Pripravljeno za zahtevo','Pronto per la richiesta'),'queued':('Čaka na AI obdelavo','In attesa di elaborazione IA'),
@@ -822,6 +844,17 @@ def report_blocks(ai,locale='sl',api_root='/api/pilot'):
                     yield 'body',display['raw_content']
     if ai.get('stale'):yield 'body','Risultato precedente; non applicabile alla revisione attuale.'if it else'Zgodovinski rezultat; ni uporaben za sedanjo revizijo.'
     for item in ai['items']:
+        if item.get('writer_purpose')==explanations.PURPOSE:
+            yield 'subheading',explanations.LABELS[locale]
+            anchor=next(a for a in ai['explanation_anchors']if a['anchor_id']==item['anchor_id'])
+            yield 'body',anchor['original_span']['text']
+            yield 'body',item['explanation']
+            if item['uncertainty']:yield 'body',item['uncertainty']
+            for ref in item['source_refs']:
+                source=ai['source_references'][ref]
+                from urllib.parse import quote
+                yield 'link',(source.get('title')or('Fonte'if it else'Vir'),api_root+'/families/'+quote(source['family_id'],safe='')+'/sources/'+quote(source['evidence_id'],safe='')+'?tier=answer')
+            continue
         action=ai['decisions'].get(item['suggestion_id'],{}).get('action','undecided')
         labels={'accept':('Accettato dall’utente; IA non verificata','Sprejel uporabnik; nepreverjen AI predlog'),
             'dismiss':('Scartato','Zavrnjen'),'undecided':('Da decidere','Neodločen')}

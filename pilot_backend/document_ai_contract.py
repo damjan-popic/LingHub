@@ -6,6 +6,7 @@ from copy import deepcopy
 from collections import Counter
 import hashlib,json,re
 from .document_protection import protected
+from . import document_evidence_explanations as explanations
 VERSION='klikai.document-ai-suggestions.v1'
 PACKET='klikai.document-ai-packet.v1'
 SCOPES='klikai.document-advice-scopes.v1'
@@ -24,6 +25,7 @@ def checked_packet(packet):
             or not isinstance(packet.get('sections'),list)or not 1<=len(packet['sections'])<=100
             or not isinstance(packet.get('sources'),dict)):
         raise ValueError('AI packet identity differs')
+    if packet.get('writer_purpose')not in (None,explanations.PURPOSE):raise ValueError('Unknown document writer purpose')
     ids=set()
     for section in packet['sections']:
         if (type(section.get('index'))is not int or section['index']in ids
@@ -43,6 +45,10 @@ def checked_packet(packet):
     for section in packet['sections']:
         _checked_lexical_context(section,packet['sources'])
     if packet.get('coverage',{}).get('provided_sections')!=[s['index']for s in packet['sections']]:raise ValueError('Coverage differs')
+    relationships=packet.get('source_relationships')
+    if relationships is not None and(relationships.get('version')!='document-evidence-relationships-v1'
+            or relationships.get('snapshot_sha256')!=digest({k:v for k,v in relationships.items()if k!='snapshot_sha256'})
+            or set(relationships.get('by_source',{}))!=set(packet['sources'])):raise ValueError('Frozen source relationships differ')
     if 'review_scope'in packet:_checked_review_scope(packet)
     return packet
 
@@ -118,6 +124,9 @@ def original_span(section,start,end):
 
 def checked_output(raw,packet):
     checked_packet(packet)
+    explanation=packet.get('writer_purpose')==explanations.PURPOSE
+    anchors=[r['anchor_id']for r in raw.get('items',[])]if explanation and isinstance(raw,dict)and isinstance(raw.get('items'),list)and all(isinstance(r,dict)and 'anchor_id'in r for r in raw['items'])else[]
+    if explanation:raw={'items':explanations.comment_rows(raw,packet)}
     scope=packet.get('review_scope');limit=scope['unit']['item_limit']if scope else MAX_DOCUMENT_ITEMS
     if not isinstance(raw,dict)or set(raw)!={'items'}or not isinstance(raw['items'],list)or len(raw['items'])>limit:
         raise ValueError('AI output shape differs')
@@ -127,7 +136,7 @@ def checked_output(raw,packet):
     for position,row in enumerate(raw['items']):
         if (not isinstance(row,dict)or set(row)!=fields or row['kind']not in {'finding_comment','additional_suggestion'}
                 or type(row['section_index'])is not int or type(row['start'])is not int or type(row['end'])is not int
-                or not isinstance(row['observed_text'],str)or len(row['observed_text'])>3000
+                or not isinstance(row['observed_text'],str)or not explanation and len(row['observed_text'])>3000
                 or row['replacement']is not None and(not isinstance(row['replacement'],str)or len(row['replacement'])>3000)
                 or not isinstance(row['explanation'],str)or not 1<=len(row['explanation'].strip())<=2000
                 or not isinstance(row['uncertainty'],str)or len(row['uncertainty'])>1000
@@ -168,6 +177,7 @@ def checked_output(raw,packet):
             'origin':'ai_generated','authority':'not_source_authorized','draft_sha256':section['draft_sha256']if section else None,
             'mechanical_issues':list(dict.fromkeys(flags)),'eligible_for_accept':row['replacement']is not None and not flags,
             'original_span':{'start':mapped[0],'end':mapped[1]}if mapped is not None else None}
+        if explanation:item.update(writer_purpose=explanations.PURPOSE,anchor_id=anchors[position])
         result.append(item)
     return result
 
@@ -247,6 +257,8 @@ def scoped_packet(parent,plan,unit):
     if plan!=advice_plan(parent)or unit not in plan['units']:raise ValueError('Frozen review plan differs')
     value=deepcopy(parent);value.pop('packet_sha256')
     value['sources']={r:deepcopy(parent['sources'][r])for r in unit['source_refs']}
+    if 'source_relationships'in value:
+        relations=value['source_relationships'];relations['by_source']={r:relations['by_source'][r]for r in unit['source_refs']}
     for section in value['sections']:
         owned=section['index']==unit['section_index'];section['context_only']=not owned
         section['findings']=[f for f in section['findings']if owned and f['finding_id']in unit['finding_ids']]
@@ -260,6 +272,13 @@ def scoped_packet(parent,plan,unit):
                 lexical['parent_lexical_context_ref']='/sections/'+str(section['index'])+'/lexical_context'
                 lexical['delivery']={'selected_options':len(lexical['options']),'omitted_options':[],
                     'scope':'Complete choices owned by this responsibility. Other selected choices and original omission reasons stay in the bound parent packet; no meaning is ruled out.'}
+    if 'source_relationships'in value:
+        relations=value['source_relationships']
+        for ref,data in relations['by_source'].items():
+            hashes={f.get('source_focus',{}).get('text_sha256')for s in value['sections']for f in s['findings']if ref in f['source_refs']}
+            data['recorded_facts']=[f for f in data['recorded_facts']if f['role']!='bounded_project_application_policy_not_linguistic_certification'
+                or f['value']['row_sha256']in hashes]
+        relations['snapshot_sha256']=digest({k:v for k,v in relations.items()if k!='snapshot_sha256'})
     value['coverage'].pop('resource_context_delivery',None)
     value['coverage'].update(scope='All section texts are read-only context except the explicit assigned draft span. Only owned complete selected sources are delivered.',
         parent_coverage_ref='full_parent_packet.coverage',review_complete=False)

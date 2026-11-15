@@ -6,6 +6,35 @@ from urllib.parse import quote
 from .store import digest,canonical
 
 
+def bundled_reference_path(value):
+    """Portable local destinations created by the report exporter, not uploads."""
+    return (isinstance(value,str)and value.startswith('sources/')
+        and all(part not in {'','.','..'}for part in value.split('/'))
+        and re.fullmatch(r'[A-Za-z0-9_./-]+',value)is not None)
+
+
+def captured_qualifications(record,locale='sl'):
+    """Concise source-owned qualifiers, with multilingual form ownership."""
+    from .source_reader import content,TERM_FIELDS
+    raw=record.get('capture')or{};it=locale=='it';rows=[]
+    for key,label in [('source_status',('Stato della fonte','Status vira')),
+            ('normative_status',('Stato normativo','Normativni status')),
+            ('categories',('Ambito','Področje')),('subcategories',('Sottoambito','Podpodročje')),
+            ('geographical_scope',('Area','Območje')),('jurisdiction',('Giurisdizione','Jurisdikcija'))]:
+        value=content(raw.get(key))
+        if value:rows.append(label[0 if it else 1]+': '+value)
+    for entry in raw.get('term_entries',[]):
+        if not isinstance(entry,dict):continue
+        owner=' — '.join(str(entry[k])for k in ('lang','language','term')if entry.get(k))
+        qualifiers=[]
+        for key in ('status','normativeStatus','administrativeStatus','usage','geographicalUsage',
+                'definitionSource','contextSource','motivationSource'):
+            value=content(entry.get(key))
+            if value:qualifiers.append(TERM_FIELDS[key][it]+': '+value)
+        if qualifiers:rows.append(owner+' · '+' · '.join(qualifiers))
+    return rows
+
+
 def retained_writer_ids(snapshot, source_text):
     generation=(snapshot or {}).get('stages',{}).get('generation')or{}
     native=(generation.get('writer')or{}).get('native_translation')

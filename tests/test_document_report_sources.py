@@ -47,3 +47,33 @@ def test_native_receipt_explicitly_records_no_admitted_source_without_fake_json_
     result=report_section(section,{},receipt,'/api/pilot')
     assert result['writer_input_selection']=='retained'
     assert result['sources'][0]['report_role']=='retrieval_context'
+
+
+def test_bundled_reports_keep_portable_relationships_and_form_owned_qualifications():
+    from io import BytesIO
+    from zipfile import ZipFile
+    from xml.etree import ElementTree as ET
+    from pilot_backend.document_report_sources import captured_qualifications,bundled_reference_path
+    from pilot_backend.document_files import report_text,report_docx
+    record={'capture':{'categories':['source-owned domain'],'term_entries':[
+        {'lang':'it','term':'termine','geographicalUsage':['Italia'],'definitionSource':[{'label':'AI','url':None}]},
+        {'lang':'sl','term':'izraz','geographicalUsage':['Slovenija']}]}}
+    qualifiers=captured_qualifications(record)
+    assert qualifiers==['Področje: source-owned domain',
+        'it — termine · Območje rabe: Italia · Vir razlage: AI','sl — izraz · Območje rabe: Slovenija']
+    assert bundled_reference_path('sources/exact-frozen-record.txt')
+    for unsafe in ['sources/../secret.txt','sources//record.txt','sources/record.txt#javascript:foo',
+            'sources/./record.txt','file:///tmp/record.txt','sources\\record.txt']:
+        assert not bundled_reference_path(unsafe)
+    report={'name':'Offline fixture','mode':'review','locale':'sl','state':'offline_replay','sections':[
+        {'index':0,'location':'text@0:4','text':'Text','state':'complete','output':'Text',
+         'document_result':{'status':'draft','proposed_text':'Text','edits':[]},
+         'sources':[{'evidence_id':'retained','title':'Retained source','local_number':1,
+             'bundled_source_path':'sources/exact-frozen-record.txt','captured_qualifications':qualifiers}]}]}
+    txt=report_text(report).decode();assert 'sources/exact-frozen-record.txt'in txt and 'Vir razlage: AI'in txt
+    with ZipFile(BytesIO(report_docx(report)))as docx:
+        rels=ET.fromstring(docx.read('word/_rels/document.xml.rels'))
+        assert any(r.get('Target')=='sources/exact-frozen-record.txt'and r.get('TargetMode')=='External'for r in rels)
+        xml=ET.fromstring(docx.read('word/document.xml'))
+        ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        assert xml.find('.//w:hyperlink',ns)is not None

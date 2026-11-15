@@ -451,6 +451,7 @@ def _report_blocks(report):
                 title=' '.join(str(source.get('title')or source.get('source_label')or'').split())
                 number=source.get('local_number')or next(i+1 for i,s in enumerate(sources)if s is source)
                 yield 'body','['+str(number)+'] '+title
+                for qualification in source.get('captured_qualifications',[]):yield 'body',qualification
                 if rows is contextual:
                     roles={'finding_evidence':('Fonte della specifica indicazione; nessun autore generativo invocato.','Vir navedene ugotovitve; generativni pisec ni bil poklican.'),
                            'review_context':('Contesto trovato nel riesame delle fonti; nessuna conclusione specifica associata.','Kontekst, najden pri pregledu virov; brez povezave s posameznim sklepom.'),
@@ -458,7 +459,12 @@ def _report_blocks(report):
                            'retrieval_context':('Materiale trovato, escluso dall’input conservato del modello.','Najdeno gradivo, ki ni bilo v shranjenem vhodu modela.'),
                            'selection_unknown':('Selezione per l’input del modello sconosciuta.','Izbor za vhod modela ni znan.')}
                     yield 'body',roles.get(source.get('report_role'),roles['selection_unknown'])[0 if it else 1]
-                if source.get('frozen_source_url'):
+                bundled=source.get('bundled_source_path')
+                from .document_report_sources import bundled_reference_path
+                if bundled_reference_path(bundled):
+                    yield 'body',('File completo acquisito, nella cartella sources accanto al rapporto.'if it else'Celotno zajetje je v mapi sources ob tem poročilu.')
+                    yield 'link',('Apri fonte allegata'if it else'Odpri priloženi vir',bundled)
+                elif source.get('frozen_source_url'):
                     yield 'body',('Fonte congelata richiede accesso allo stesso account'if it else'Zamrznjeni vir zahteva prijavo z istim računom')
                     yield 'link',('Apri fonte congelata'if it else'Odpri zamrznjeni vir',source['frozen_source_url'])
                 else:
@@ -511,7 +517,8 @@ def _text_docx(lines,styled=False):
             label,target=line
             # Report references are links; prose from an upload never enters
             # this branch. Unsupported schemes remain visible plain text.
-            if target.startswith(('https://','http://','/')):
+            from .document_report_sources import bundled_reference_path
+            if target.startswith(('https://','http://','/'))or bundled_reference_path(target):
                 rid='link'+str(len(rels))
                 ET.SubElement(rels,'{'+rel_namespace+'}Relationship',{'Id':rid,'Type':reference_namespace+'/hyperlink','Target':target,'TargetMode':'External'})
                 parent=ET.SubElement(paragraph,W+'hyperlink',{'{'+reference_namespace+'}id':rid})

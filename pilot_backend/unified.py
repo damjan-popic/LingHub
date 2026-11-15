@@ -1154,22 +1154,15 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         return tool_capture
 
 
-def collect_native_context_syntax(gateway,family,found,tool_capture):
-    """One optional original-use observation after an already retained contrast.
-
-    The authoritative consultation scope is the gate, not a new classifier.
-    Lexical evidence stays untouched and never supplies dependency links.
-    """
+def _dictionary_context_target(family,found,language):
+    """Existing ePravopis contrast gate; relation eligibility is separate."""
     plan=family.get('request_plan')or{};consult=plan.get('consultation')or{}
-    language=family.get('input_language')
-    if language in {None,'und'}and isinstance(tool_capture,dict)and tool_capture.get('version')=='klikai.lexical-collation.v1':
-        language=(tool_capture.get('captures')or[{}])[0].get('response',{}).get('query',{}).get('lang')
     if (consult.get('requested')is not False or not {'usage','register'}&set(consult.get('supporting_dimensions',[]))
             or plan.get('ambiguities')or plan.get('requested_grammar_slots')
             or plan.get('requested_source')not in {None,'epravopis','epravopis-slovar'}
             or plan.get('requested_edition')is not None or plan.get('translation_language')
             or set(plan.get('requested_facets',[]))&{'orthography','spacing','frequency','synonyms','collocations','morphology','inflection','conjugation','translation'}
-            or language!='sl'):return None,None
+            or language!='sl'):return None
     from .original_projection import checked
     from .document_surface import occurrences
     groups={}
@@ -1185,7 +1178,7 @@ def collect_native_context_syntax(gateway,family,found,tool_capture):
         groups.setdefault(projection['headword'],[]).append(projection)
     heads=[head for head,rows in groups.items()if len({r['homograph_marker']for r in rows})>1
         and len({digest(r['tables'])for r in rows})>1]
-    if not heads:return None,None
+    if not heads:return None
     question=family.get('original_question',family['question']);context=family.get('context','')
     def scope_for(host,a,b,origin):
         if type(a)is not int or type(b)is not int or not 0<=a<b<=len(host):return None
@@ -1207,6 +1200,40 @@ def collect_native_context_syntax(gateway,family,found,tool_capture):
                         shift=len(question)+1
                         target=scope_for(context,span.get('start',0)-shift,span.get('end',0)-shift,'context')
                     else:target=scope_for(question,span.get('start'),span.get('end'),'question')
+    return target
+
+
+def _lexical_context_target(family,tool_capture,language):
+    """Only already captured, primary native relations can nominate analysis."""
+    from .contextual_lexical_scope import lexical_context_scope,RESOURCES
+    from .document_surface import occurrences
+    task=lexical_context_scope(family.get('request_plan'),language)
+    if task is None or not isinstance(tool_capture,dict)or tool_capture.get('version')!='klikai.lexical-collation.v1':return None
+    caps=tool_capture.get('captures')or[]
+    if len(caps)!=1 or digest(caps)!=tool_capture.get('capture_set_sha256')or digest(caps[0].get('response'))!=caps[0].get('response_sha256'):return None
+    target=task['target_scope']
+    for unit in caps[0]['response'].get('evidence',[]):
+        kind=unit.get('kind');fields=unit.get('fields')or{}
+        if (kind not in task['kinds']or unit.get('provenance',{}).get('resource_id')!=RESOURCES[kind]
+                or unit.get('selection',{}).get('state')!='primary'
+                or not isinstance(unit.get('target'),str)or not unit['target']
+                or not any(occurrences(unit['target'],target['text']))):continue
+        if (kind=='synonyms'and fields.get('sense',{}).get('relations')
+                or kind=='collocations'and len(fields.get('components',[]))==2):return target
+    return None
+
+
+def collect_native_context_syntax(gateway,family,found,tool_capture,*,existing_syntax=None):
+    """At most one bounded observation of a faithful original-use scope.
+
+    Primary source facts survive without it. Lexical candidates never supply
+    dependencies; explicit contextual relations and implicit use share the gate.
+    """
+    language=family.get('input_language')
+    if language in {None,'und'}and isinstance(tool_capture,dict)and tool_capture.get('version')=='klikai.lexical-collation.v1':
+        language=(tool_capture.get('captures')or[{}])[0].get('response',{}).get('query',{}).get('lang')
+    target=_lexical_context_target(family,tool_capture,language)
+    if target is None:target=_dictionary_context_target(family,found,language)
     if target is None:return None,None
     status={'family':'native_row_context_syntax','source_label':'Jezikovna analiza','status':'unavailable',
         'returned_count':0,'limit':1,'has_more':False,'requested':False,'routing_kind':'native_row_context_syntax',
@@ -1218,14 +1245,16 @@ def collect_native_context_syntax(gateway,family,found,tool_capture):
                 or observed.get('input_sha256')!=__import__('hashlib').sha256(target['text'].encode()).hexdigest()):
             raise ValueError('syntax_input_binding')
         _analysis(observed.get('analysis'),target['text'])
-    if isinstance(tool_capture,dict)and tool_capture.get('version')=='klikai.syntax-collation.v1':
-        caps=tool_capture.get('captures')or[]
-        if len(caps)!=1 or digest(caps)!=tool_capture.get('capture_set_sha256')or digest(caps[0].get('response'))!=caps[0].get('response_sha256'):
+    reusable=existing_syntax if existing_syntax is not None else tool_capture
+    if isinstance(reusable,dict)and reusable.get('version')=='klikai.syntax-collation.v1':
+        caps=reusable.get('captures')or[]
+        if len(caps)!=1 or digest(caps)!=reusable.get('capture_set_sha256')or digest(caps[0].get('response'))!=caps[0].get('response_sha256'):
             raise ValueError('Existing syntax capture changed')
         observed=caps[0]['response'];existing=observed.get('target_scope')or{}
         if all(existing.get(k)==target[k]for k in ('scope','start','end','text')):
             checked_observation(observed)
-            return None,dict(status,status='not_documentary',tool_outcome='reused',capture_count=1,additional_requests=0)
+            return (deepcopy(reusable)if existing_syntax is not None else None),dict(status,status='not_documentary',
+                tool_outcome='reused',capture_count=1,additional_requests=0)
     if len(target['text'])>MAX_CHARACTERS:
         return None,dict(status,tool_outcome='too_long',reason='selected_text_limit',additional_requests=0)
     config=getattr(gateway,'comma_checker',None)

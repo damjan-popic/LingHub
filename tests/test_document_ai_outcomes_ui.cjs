@@ -44,7 +44,7 @@ try{for(const name of ['remaining','A','fixture_comment','fixture_empty'])for(co
   assert.equal(await raw.locator('pre').textContent(),doc.ai_suggestions.presentation.units.U88a25f89dedd86533b586dfb.raw_content);
   assert.match(await group.textContent(),/ValueError/);
   await group.locator('[data-ai-item-outcome="rejected_item"]').first().locator('summary').click();
-  assert.match(await group.textContent(),locale==='sl'?/enako izvirnemu/:/identico/);
+  assert.match(await group.textContent(),locale==='sl'?/enako obravnavanemu/:/identico/);
   if(preview&&locale==='sl')await page.screenshot({path:path.join(preview,'updated-outcomes-sl-'+width+'.png'),fullPage:true});
  }else if(name==='A'){
   assert.equal(await group.locator('[data-ai-item-outcome="eligible_change"]').count(),1);

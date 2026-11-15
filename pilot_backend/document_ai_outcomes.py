@@ -21,7 +21,7 @@ TITLES={
  'queued':('Čaka na obdelavo AI','In attesa di elaborazione IA'),
  'running':('Obdelava AI poteka','Elaborazione IA in corso')}
 REASONS={
- 'no_op':('Predlagano besedilo je enako izvirnemu; spremembe ni.','Il testo proposto è identico; non c’è alcuna modifica.'),
+ 'no_op':('Predlagano besedilo je enako obravnavanemu besedilu; spremembe ni.','Il testo proposto è identico a quello esaminato; non c’è alcuna modifica.'),
  'span_not_bound':('Vrnjeno besedilo se ne ujema z označenim mestom.','Il testo restituito non coincide con l’intervallo indicato.'),
  'unknown_section':('Vrnjeni odsek ne obstaja v tem pregledu.','La sezione restituita non esiste in questa revisione.'),
  'unknown_reference':('Sklic na vir ali ugotovitev ni veljaven za ta pregled.','Riferimento a fonte o indicazione non valido per questa revisione.'),

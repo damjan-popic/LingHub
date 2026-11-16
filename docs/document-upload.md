@@ -1,4 +1,4 @@
-# Document upload candidate
+# Document upload and private source review
 
 For the separately selected private tester pilot, `evidence_review_only: true`
 requires `document_uploads` and `evidence_review`, with `ai_suggestions`,
@@ -17,7 +17,31 @@ by default; set `document_uploads: true` on a unified-answer WEB configuration
 to enable it. No source corpus, ontology category, model identity or ordinary
 external-client default changes.
 
-## User flow
+## Office-local testing
+
+Use the supplied private test address or launcher on the office computer.
+Sign in with the existing private tester account. Its protected access note
+contains the local instructions; no public document upload is enabled.
+
+1. Open **Pregled besedila z viri**, choose a UTF-8 TXT or DOCX file and press
+   **Naložite in preglejte besedilo**. Uploading saves a preview; it does not
+   start the review.
+2. Inspect the exact **Izvirnik** in every extracted section. Press **Začnite**
+   to request the Slovenian source review. The saved list reopens drafts and
+   results; a review can continue while the browser is closed.
+3. Read the section results and conditional advice. Use **Odpri celotni vir**
+   or **Odprite odgovor in vire** to inspect the frozen sources supporting that
+   section. Unresolved advice retains the original wording.
+4. Download the separate report and proposed draft in TXT or Word. A partial
+   draft is explicitly labelled and retains text from unfinished sections.
+   Check wording and Word formatting before using the draft.
+
+This private configuration supports Slovenian source review. General document
+AI writing, editorial summaries and translation remain disabled. Completion
+records the processed scope; it does not certify complete linguistic correctness.
+The ordinary public instance keeps document upload disabled.
+
+## General document contract
 
 Upload UTF-8 `.txt` or `.docx`, inspect the extracted original, choose linguistic
 review or translation and explicitly select the source language. Translation

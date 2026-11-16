@@ -40,6 +40,10 @@ def config_checked(config):
     c.setdefault('single_answers',c['unified_answers'])
     c.setdefault('document_uploads',False)
     if type(c['document_uploads'])is not bool or c['document_uploads']and not c['unified_answers']:raise ValueError('Document uploads require unified answers')
+    c.setdefault('document_account_ids',None)
+    access=c['document_account_ids']
+    if access is not None and(not isinstance(access,list)or any(not isinstance(value,str)or not 1<=len(value)<=128 for value in access)or len(set(access))!=len(access)):
+        raise ValueError('Document account IDs must be an explicit list of unique account identities')
     c.setdefault('evidence_review',False)
     if type(c['evidence_review'])is not bool or c['evidence_review']and not c['document_uploads']:raise ValueError('Evidence review requires document uploads')
     c.setdefault('document_resources',False)
@@ -129,7 +133,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
             content_type=request.headers.get('content-type','').split(';')[0]
             document_upload=request.url.path==api+'/documents/upload'and config['document_uploads']
             if document_upload:
-                try:user(request)
+                try:document_user(request)
                 except Failure as error:return early(error)
             native_login=request.url.path==api+'/login'and content_type=='application/x-www-form-urlencoded'
             if content_type!=('application/octet-stream'if document_upload else'application/json')and not native_login:return early(Failure('invalid_request',415))
@@ -173,11 +177,13 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         s=user(request)
         if beta(s):raise Failure('forbidden',403)
         return s
+    def document_allowed(s):
+        return config['document_uploads']and(config['document_account_ids']is None or s['id']in config['document_account_ids'])
     def capability_result(s):
         from .comma_tasks import capability
         checker=capability(config.get('comma_checker'))
         extra={'comma_checker':checker}if checker['configured']else{}
-        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl']if config['evidence_review_only']else['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation'],'evidence_review':config['evidence_review'],'evidence_review_only':config['evidence_review_only'],'editorial_summary':config['editorial_summary'],'ai_suggestions':config['ai_suggestions']}
+        if document_allowed(s):extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl']if config['evidence_review_only']else['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation'],'evidence_review':config['evidence_review'],'evidence_review_only':config['evidence_review_only'],'editorial_summary':config['editorial_summary'],'ai_suggestions':config['ai_suggestions']}
         if beta(s):return {**extra,'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':config['single_answers'],'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {**extra,'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'single_answers':config['single_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}
@@ -239,6 +245,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
     def document_user(request):
         u=user(request)
         if not config['document_uploads']:raise Failure('not_found',404)
+        if not document_allowed(u):raise Failure('forbidden',403)
         return u
     @app.post(api+'/documents/upload')
     async def upload_document(request:Request):

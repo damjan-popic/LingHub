@@ -1,45 +1,77 @@
-# Document upload and private source review
+# Document upload and evidence-based source review
 
-For the separately selected private tester pilot, `evidence_review_only: true`
-requires `document_uploads` and `evidence_review`, with `ai_suggestions`,
-`editorial_summary` and `private_translation` disabled. It restricts document
-Start to Slovenian `evidence_review_v1`; legacy review and every translation
-route are rejected before preparation. Its UI label is “Pregled besedila z viri
-— preizkus”. Ordinary public release configuration keeps document uploads off.
-With uploads off, application startup retains the ordinary account-store schema
-without initializing document tables. Existing private stores and historical
-documents are not migrated or removed by this switch. This is limited review
-testing; completion does not certify that every error was found.
+Document review is part of the standard authenticated KLIKai website. It uses
+the same maintained source capture, linguistic processing, account store and
+frozen readers as ordinary consultation. Its availability follows deployment
+configuration and account permission, independently of the hosting machine.
 
-This feature adds an explicit document task alongside the existing question
-workflow. It requires the paired CORE document-transform endpoint. It is off
-by default; set `document_uploads: true` on a unified-answer WEB configuration
-to enable it. No source corpus, ontology category, model identity or ordinary
-external-client default changes.
+## Using the online feature
 
-## Office-local testing
+Sign in at the deployment's normal HTTPS address with an enabled account.
+Open **Pregled besedila z viri**.
 
-Use the supplied private test address or launcher on the office computer.
-Sign in with the existing private tester account. Its protected access note
-contains the local instructions; no public document upload is enabled.
+1. Choose a UTF-8 TXT or DOCX file and press **Naložite in preglejte besedilo**.
+   Uploading saves a preview and does not start a review.
+2. Inspect **Izvirnik** in every extracted section, then press **Začnite**.
+   The saved document list reopens work after the browser is closed.
+3. Read proposals and conditions. **Odpri celotni vir** and
+   **Odprite odgovor in vire** open the saved supporting material.
+4. Download the separate report and proposed draft in TXT or Word. Check
+   wording and formatting before use. Partial drafts are explicitly identified
+   and preserve unfinished sections.
 
-1. Open **Pregled besedila z viri**, choose a UTF-8 TXT or DOCX file and press
-   **Naložite in preglejte besedilo**. Uploading saves a preview; it does not
-   start the review.
-2. Inspect the exact **Izvirnik** in every extracted section. Press **Začnite**
-   to request the Slovenian source review. The saved list reopens drafts and
-   results; a review can continue while the browser is closed.
-3. Read the section results and conditional advice. Use **Odpri celotni vir**
-   or **Odprite odgovor in vire** to inspect the frozen sources supporting that
-   section. Unresolved advice retains the original wording.
-4. Download the separate report and proposed draft in TXT or Word. A partial
-   draft is explicitly labelled and retains text from unfinished sections.
-   Check wording and Word formatting before using the draft.
+This evidence-only mode supports Slovenian review. General document AI
+authoring, editorial summaries and translation remain disabled. Completion
+records the processed scope; it does not certify that every error was found.
 
-This private configuration supports Slovenian source review. General document
-AI writing, editorial summaries and translation remain disabled. Completion
-records the processed scope; it does not certify complete linguistic correctness.
-The ordinary public instance keeps document upload disabled.
+## Deployment and account access
+
+Enable the existing unified-answer application with `document_uploads`,
+`evidence_review`, `document_resources` and `evidence_review_only` true. Keep
+`ai_suggestions`, `editorial_summary` and `private_translation` false. These are
+standard application settings, not a separate local service requirement.
+
+Set `document_account_ids` to the stable IDs of the existing permitted accounts.
+The same check controls advertised capabilities and every document endpoint,
+including the upload boundary before the binary body is accepted. Document
+ownership and CSRF checks still apply. An empty list permits no accounts.
+An omitted/null value preserves the earlier all-authenticated-accounts policy;
+use an explicit list for a restricted online pilot. Administrators are not
+implicitly exempt. Moving the same store preserves these account identities.
+
+Configure `allowed_origins`, `secure_cookies`, optional `base_path`, `store`,
+provider URLs/tokens and source configuration for the target deployment. Keep
+secrets outside the repository. Browser requests and saved-work navigation use
+same-origin application paths. Exported report reader links use the configured
+HTTPS origin and application prefix at download time. No office address or
+loopback URL belongs in user links. The existing authenticated edge/proxy
+serves upload, history and download paths with the same security boundary.
+
+New consultation and document review must use the intended current versioned
+source configuration on the shared application backend. A separate terminology
+edition must be an explicit deployment choice. Existing frozen work keeps its
+original captures, source revisions and retained-code identities.
+
+## Moving an installation
+
+Use the existing protected SQLite backup/restore mechanism and deletion journal
+for accounts, documents, original file packages, section links, frozen answer
+bundles and results. Restore into a new destination, never over live activity.
+Keep the matching versioned source data, database, manifests, retained code and
+gateway retention configuration. Reconfigure host-specific paths and provider
+addresses without rewriting capture bodies or rebinding historical work.
+Sessions are revoked by the backup/restore mechanism; users sign in again.
+
+Before switching traffic, validate configuration and verify an owned historical
+document, original, result, source reader and all downloads, then one new TXT
+and DOCX through the target HTTPS address. Verify private ownership with a
+different account. Hardware can change processing time, while feature and
+source-handling contracts remain the same. An office-local test alone does not
+establish online availability or a completed migration.
+
+Uploads remain off by default. With uploads off, startup retains the ordinary
+account-store schema without initializing document tables. Existing documents
+are neither removed nor migrated away by disabling the feature.
 
 ## General document contract
 

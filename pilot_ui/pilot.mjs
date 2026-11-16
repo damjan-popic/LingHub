@@ -59,7 +59,7 @@ async function restorePendingComposer(pending){
 }
 function newQuestion({push=true,discard=true}={}){
   if(discard)submission.clearDraft(state.user?.id,state.composerSlot);else saveComposer();
-  submissionRequest++;familyRequest++;state.submitting=false;submission.clear();renderCommaSuggestion();state.followup=null;$('followup-context').hidden=true;$('ask-button').disabled=false;clearFeedbackContext();resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=false;clearClarification();restoreComposer();setURL(push);$('question').focus();
+  submissionRequest++;familyRequest++;state.submitting=false;submission.clear();renderCommaSuggestion();state.followup=null;$('followup-context').hidden=true;$('ask-button').disabled=false;clearFeedbackContext();resetMatches();state.family=null;state.comparison=null;state.selection=null;state.longOpen=false;state.requestKeys.clear();for(const stop of state.polling.values())stop();state.polling.clear();$('answer-card').hidden=true;$('comparison').hidden=true;$('new-question').hidden=true;$('job-state').hidden=true;clearClarification();restoreComposer();setURL(push);$('question').focus();
 }
 async function reopenURL(){
   const url=new URL(location.href);saveComposer();setLocale(url.pathname.endsWith('/it/')?'it':'sl',false);
@@ -159,7 +159,7 @@ function renderCommaSuggestion(tier){renderCommaProposal($('comma-proposal'),tie
 async function refreshCapabilities(){state.capabilities={...state.capabilities,...await api('/capabilities')};applyBetaPresentation();modelControls();capacityControls();}
 function clearClarification(){state.clarification=null;$('clarification').hidden=true;$('focus-control').hidden=true;$('ask-button').querySelector('span').dataset.i18n='ask';$('ask-button').querySelector('span').textContent=t('ask');}
 function clarificationText(){textStatus('clarification-message',state.clarification?.code==='input_language_required'?'input_language_required':'focus_required');$('ask-button').querySelector('span').dataset.i18n='continue_question';$('ask-button').querySelector('span').textContent=t('continue_question');}
-function showClarification(value){clearFeedbackContext();resetMatches();state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('empty-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');if(beta()){$('text-language-control').hidden=!value.fields.includes('input_language');}else if(value.fields.includes('input_language')){$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');}clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
+function showClarification(value){clearFeedbackContext();resetMatches();state.clarification=value;state.family=null;state.comparison=null;state.longOpen=false;$('answer-card').hidden=true;$('comparison').hidden=true;$('job-state').hidden=true;$('clarification').hidden=false;$('focus-control').hidden=!value.fields.includes('focus');if(beta()){$('text-language-control').hidden=!value.fields.includes('input_language');}else if(value.fields.includes('input_language')){$('options').hidden=false;$('options-toggle').setAttribute('aria-expanded','true');}clarificationText();setURL();$(value.fields.includes('focus')?'focus':'input-language').focus();}
 async function bootstrap() {
   const boot=state.boot,navigation=submissionRequest;
   const before=new URL(location.href),answer=before.searchParams.get('answer'),comparison=before.searchParams.get('comparison');textStatus('global-status','loading');
@@ -338,7 +338,7 @@ function renderFamily(family,{pushURL=false}={}) {
   if(family.answer_family_id!==familyId()||family.short?.run_id!==state.family?.short?.run_id||family.long?.run_id!==state.family?.long?.run_id)clearFeedbackContext();
   if(['clarification','clarification_required'].includes(family.short?.answer_kind)){const language=family.short?.clarification_code==='input_language_required';showClarification({code:language?'input_language_required':'focus_required',fields:[language?'input_language':'focus']});return;}
   clearClarification();
-  state.family=family;$('answer-model').textContent=modelText(family.short);$('long-model').textContent=modelText(family.long);$('answer-card').hidden=false;$('empty-state').hidden=true;$('new-question').hidden=false;$('revision-notice').hidden=!family.revised&&!family.short?.supersedes_run_id;$('locale-note').hidden=family.locale===state.locale;
+  state.family=family;$('answer-model').textContent=modelText(family.short);$('long-model').textContent=modelText(family.long);$('answer-card').hidden=false;$('new-question').hidden=false;$('revision-notice').hidden=!family.revised&&!family.short?.supersedes_run_id;$('locale-note').hidden=family.locale===state.locale;
   renderGenerationNotice();syncMatches(family);renderLexical(family);renderCommaSuggestion(family.short);$('copy-answer').hidden=!acceptedStates.has(jobState(family.short))||!tierBlocks(family.short).length;
   if(acceptedStates.has(jobState(family.short))||['rejected','failed','cancelled'].includes(jobState(family.short))){renderText(family.short,'short',$('short-answer'));sourceButtons(family.short,'short',$('short-sources'));renderFeedback(family.short,'short',$('short-feedback'));acknowledgeDelivery(family.short,'short');}else{clear($('short-answer'));clear($('short-sources'));clear($('short-feedback'));}
   $('expand-button').disabled=!acceptedStates.has(jobState(family.short))||isCpuTask(family.task)||jobState(family.short)==='no_hit'||(family.short?.historical_evidence&&!family.long);$('compare-button').disabled=$('expand-button').disabled||Boolean(family.short?.historical_evidence)||state.capabilities.comparisons===false;$('compare-button').hidden=state.capabilities.comparisons===false;
@@ -405,7 +405,7 @@ async function submitQuestion(button,overrides={}) {
     const previousKey=submission.read(owner)?.payload.idempotency_key;
     payload=submission.prepare(state.user.id,payload,()=>crypto.randomUUID(),draftFamily,draftSlot,submittedComposer);
     setURL(previousKey!==payload.idempotency_key,previousKey!==payload.idempotency_key);
-    textStatus('job-message','checking_request');$('job-state').hidden=false;$('empty-state').hidden=true;
+    textStatus('job-message','checking_request');$('job-state').hidden=false;
     try{
       const result=await api('/families',{method:'POST',body:payload});
       const draftChanged=JSON.stringify(submission.readDraft(owner,draftSlot))!==JSON.stringify(submittedComposer);
@@ -414,7 +414,7 @@ async function submitQuestion(button,overrides={}) {
       else if(draftChanged)submission.accepted(owner,payload.idempotency_key);
       else if(submission.read(owner)?.payload.idempotency_key===payload.idempotency_key)submission.clear();
       if(!current())return;
-      if(draftChanged){state.job=null;$('job-state').hidden=true;if(originFamily)renderFamily(originFamily);else if(draftFamily)await loadFamily(draftFamily);else{state.composerReady=true;state.composerSlot=draftSlot;state.earlyComposerEdited=false;$('answer-card').hidden=true;$('empty-state').hidden=false;}return;}
+      if(draftChanged){state.job=null;$('job-state').hidden=true;if(originFamily)renderFamily(originFamily);else if(draftFamily)await loadFamily(draftFamily);else{state.composerReady=true;state.composerSlot=draftSlot;state.earlyComposerEdited=false;$('answer-card').hidden=true;}return;}
       if(clarification){showClarification(result.clarification);return;}
       submission.clearDraft(owner,draftSlot);state.followup=null;$('followup-context').hidden=true;
       const family=unwrapFamily(result);restoreComposer(family);renderFamily(family);const job=result.job;const id=job?.job_id||job?.id||state.family?.short?.job_id;if(id)pollJob(id,familyId(),'short');else $('job-state').hidden=true;

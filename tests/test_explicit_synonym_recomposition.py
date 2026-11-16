@@ -124,7 +124,11 @@ def test_incompatible_local_qualifications_and_owner_boundaries_are_not_smoothed
     assert len(result['claims'])==2 and len(result['citations'])==2
     # Different source revision and native parent/conditions retain their frames.
     assert result['answer_md'].count('Za »hiter«')==2
-    if damage in {'head','condition','unknown','edition','relation'}:assert 'MECHANICAL'in result['claims'][1]['text']
+    if damage in {'head','condition','unknown','edition'}:assert 'MECHANICAL'in result['claims'][1]['text']
+    if damage=='relation':
+        assert 'druga vrsta sopomenke v viru'in result['claims'][1]['text']
+        assert 'MECHANICAL related relation'in registry.units[1]['payload']['records'][0]
+        assert registry.units[1]['payload']['groups'][0]['relations'][0]['synonym_type']=='MECHANICAL related relation'
     if damage=='status':assert 'status vira: manual'in result['claims'][1]['text']
     save('mechanical-'+damage,{'contrast':'explicitly synthetic source qualification/identity control, not new source evidence',
                               'answer':web,'registry':registry.model_dump()})

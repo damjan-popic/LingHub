@@ -39,6 +39,9 @@ async function legendAndCopy(width){
  const f=await setup(width),{page,calls}=f;
  try{
   await page.goto(origin+'/');await page.locator('#app-view').waitFor({state:'visible'});
+  assert.equal(await page.locator('#empty-state,.conversation-mark,[data-i18n=start_hint]').count(),0);
+  assert(!(await page.locator('body').innerText()).includes('Od vprašanja do odgovora'));
+  await screenshot(page,'new-question-'+width);
   const label=await page.locator('#public-release').innerText();assert.match(label,/^Različica \d+\.\d+\.\d+ · Posodobljeno \d+\. \d+\. \d{4}$/);assert(!label.includes('UNRELATED'));
   assert.equal(await page.locator('[data-info]').count(),0);
   for(const key of ['about','notices','privacy'])assert.equal(await page.locator('footer [data-i18n='+key+']').evaluate(e=>e.tagName),'SPAN');
@@ -72,6 +75,7 @@ async function legendAndCopy(width){
   await page.locator('#short-answer .citation').first().click();await page.waitForFunction(()=>document.querySelector('#source-content').textContent.includes('Full saved original.'));await page.keyboard.press('Escape');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   assert.equal(calls.filter(c=>c.method==='POST'&&c.api==='/families').length,0);
+  await page.locator('#new-question').click();assert.equal(await page.locator('#answer-card').isVisible(),false);assert.equal(await page.evaluate(()=>document.activeElement.id),'question');
   report.checks.push({case:'legend-copy-release',width,status:'PASS',configured_collections:expected.length,no_query_required:true,clipboard_failure_honest:true,copy_focus_retained_on_success_and_failure:true});
  }finally{await f.context.close();}
 }

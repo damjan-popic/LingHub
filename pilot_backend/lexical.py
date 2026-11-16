@@ -194,6 +194,7 @@ def reader(bundle):
     if relation.get('relation_type')=='antonym':return 'contrario'if it else'protipomenka'
     if relation.get('relation_type')=='synonym':
      if relation.get('synonym_type')in {'near','near-synonym','near_synonym'}:return 'sinonimo vicino'if it else'bližnja sopomenka'
+     if relation.get('synonym_type')not in {None,'core'}:return 'altro tipo di sinonimo nella fonte'if it else'druga vrsta sopomenke v viru'
      return 'sinonimo'if it else'sopomenka'
     return 'relazione di significato'if it else'pomenska povezava'
    synonyms.append({**base,'label':base['label']+' · '+status_label(d.get('head_status')),'title':d['headword']+' · '+('gruppo di significato'if it else'pomenska skupina'),'text':' · '.join(str(r.get('target_headword')or r.get('raw_text')or '')+' ('+relation_label(r)+')'for r in relations),'details':status_details(d.get('head_status'))})

@@ -136,3 +136,15 @@ def test_frequency_availability_note_never_turns_unknown_partial_or_outage_into_
         from pilot_backend.lexical import frequency_availability_notes
         assert frequency_availability_notes(p,'sl')==[]
     else:assert 'availability_notes'not in reader(b)
+
+
+@pytest.mark.parametrize('kind',['near','near-synonym','near_synonym','opaque <source> type'])
+@pytest.mark.parametrize('locale',['sl','it'])
+def test_source_reader_uses_human_subtype_labels_and_retains_exact_native_relation(kind,locale):
+    b=bundle();b['locale']=locale
+    b['analysis']['captures'][0]['response']['evidence'][1]['fields']['sense']['relations'][1]['synonym_type']=kind
+    before=copy.deepcopy(b);text=visible(reader(b))
+    expected=(('sinonimo vicino'if locale=='it'else'bližnja sopomenka')if kind.startswith('near')else
+        ('altro tipo di sinonimo nella fonte'if locale=='it'else'druga vrsta sopomenke v viru'))
+    assert 'prijeten ('+expected+')'in text
+    assert b==before and 'opaque <source>'not in text

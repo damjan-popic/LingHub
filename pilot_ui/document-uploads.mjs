@@ -17,7 +17,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   if(evidenceOnly){
    const it=locale()==='it';
    if(['title','open','review'].includes(key))return it?'Revisione del testo con fonti':'Pregled besedila z viri';
-   if(key==='hint')return it?'Lo strumento mostra proposte e avvertenze sostenute dalle fonti. Verifica le proposte nel contesto; la revisione non garantisce di individuare tutti gli errori.':'Orodje pokaže z viri podprte predloge in opozorila. Predloge preverite v sobesedilu; pregled ne zagotavlja, da so odkrite vse napake.';
+   if(key==='hint')return it?'Carica Word (.docx) o testo UTF-8 (.txt), massimo 2 MB. Controlla il testo estratto e avvia la revisione. Lo strumento mostra proposte e avvertenze sostenute dalle fonti: verificale nel contesto; non garantisce di individuare tutti gli errori.':'Naložite Word (.docx) ali besedilo UTF-8 (.txt), največ 2 MB. Preverite zajeto besedilo in začnite pregled. Orodje pokaže z viri podprte predloge in opozorila: preverite jih v sobesedilu; pregled ne zagotavlja, da so odkrite vse napake.';
   }
   return messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
  };
@@ -35,8 +35,11 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  const el=(tag,text,attrs={})=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;};
  const label=(parent,text,input)=>{const n=el('label',text);n.append(input);parent.append(n);return input;};
  const select=(choices,value)=>{const n=el('select');for(const[v,title]of choices){const option=el('option',title,{value:v});n.append(option);}n.value=value;return n;};
- function status(error){const n=root.querySelector('[data-document-status]');if(n)n.textContent=messages[locale()==='it'?'it':'sl'][error.code]||errorText(error);}
- async function act(fn){if(busy)return;busy=true;root.setAttribute('aria-busy','true');const token=epoch;try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');}}}
+ function status(error){const n=root.querySelector('[data-document-status]');if(n)n.textContent=error?(messages[locale()==='it'?'it':'sl'][error.code]||errorText(error)):'';}
+ async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');const token=epoch;
+  // A delayed poll for the previous document must not replace a new upload,
+  // cancellation or deletion. Polling resumes for the resulting selection.
+  try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');schedule();}}}
  function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain'});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
  async function refresh(){const token=epoch;const response=await api('/documents');if(token!==epoch)return;rows=response.documents;renderList();}
  function renderList(){const select=root.querySelector('[data-document-list]');if(!select)return;select.replaceChildren(el('option',tr(rows.length?'choose':'empty'),{value:''}));for(const row of rows)select.append(el('option',row.name+' · '+stateLabel(row.state),{value:row.document_id}));select.value=current?.document_id||'';}
@@ -154,6 +157,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
    }
   }
   if(current.state==='draft'){
+   panel.append(el('p',locale()==='it'?'Controlla l’originale nelle sezioni qui sotto. L’elaborazione inizia solo premendo Inizia; puoi ritrovare il documento nell’elenco I tuoi documenti.':'Preverite izvirnik v spodnjih odsekih. Obdelava se začne šele z gumbom Začnite; dokument znova odprete v seznamu Vaši dokumenti.',{class:'qualified-note','data-document-preview-note':''}));
    const form=el('form',undefined,{class:'document-options'});
    const mode=label(form,tr('mode'),select(evidenceOnly?[['review',tr('review')]]:[['review',tr('review')],['translate',tr('translate')]],values.mode));
    const source=label(form,tr('source'),select(evidenceOnly?[['sl','Slovenščina']]:[['sl','Slovenščina'],['it','Italiano']],values.source_language));

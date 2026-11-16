@@ -881,8 +881,15 @@ def freeze(gateway, family, policy):
         from .document_application_observations import freeze_morphology
         body['review_observations']['application_morphology']=freeze_morphology(gateway,task,body)
         from .document_resource_collection import collect as collect_ordinary_resources
-        if getattr(gateway,'document_resources',False):body['review_observations']['ordinary_resources']=collect_ordinary_resources(gateway,task,body['retrieval']['input_discovery'])
+        if getattr(gateway,'document_resources',False):
+            try:
+                body['review_observations']['ordinary_resources']=collect_ordinary_resources(
+                    gateway,task,body['retrieval']['input_discovery'],byte_limit=_ordinary_resource_byte_limit(body))
+            except ValueError:
+                raise Failure('unified_capture_too_large',413) from None
         body['snapshot_sha256']=digest(body)
+        if len(canonical(body).encode()) > unified.MAX_FROZEN_BYTES:
+            raise Failure('unified_capture_too_large',413)
         general['identity']['captured_response_sha256']=body['snapshot_sha256']
         return general
     comma, preflight = _freeze_comma_review(gateway, task, policy)
@@ -1268,16 +1275,38 @@ def _checked_guidance_delivery(response, task, matches, unified_evidence):
 
 
 
+def _evidence_payload(bundle):
+    """One exact document-transform request shape for admission and delivery."""
+    task=bundle['document_task']
+    payload={'text':task['source_text'],**{k:task[k]for k in ('mode','source_language','target_language','locale','source_sha256','review_strategy')},
+        'unified_evidence':bundle['unified_evidence'],
+        'review_observations':bundle.get('review_observations',{})}
+    for key in ('document_binding','document_revision','document_location'):
+        if key in task:payload[key]=task[key]
+    return payload
+
+
+def _ordinary_resource_byte_limit(body):
+    """Reserve every mandatory field and both fixed-length snapshot hashes.
+
+    The existing internal request and frozen-family bounds are both8MiB. Null
+    is replaced by the complete context; no record or native response is cut.
+    """
+    base={**body,'snapshot_sha256':'0'*64,
+        'review_observations':{**body['review_observations'],'ordinary_resources':None}}
+    frozen=len(canonical(base).encode())
+    request=len(canonical(_evidence_payload(base)).encode())
+    return min(unified.MAX_FROZEN_BYTES-frozen+4,unified.MAX_FROZEN_BYTES-request+4)
+
+
 def _generate_evidence(gateway,bundle,tier,model,parent=None):
     checked(bundle)
     if tier not in {'short','answer'}or parent is not None:raise Failure('expansion_unavailable',409)
     task=bundle['document_task']
-    payload={'text':task['source_text'],**{k:task[k]for k in ('mode','source_language','target_language','locale','source_sha256','review_strategy')},
-        'unified_evidence':deepcopy(bundle['unified_evidence']),
-        'review_observations':deepcopy(bundle.get('review_observations',{}))}
-    for key in ('document_binding','document_revision','document_location'):
-        if key in task:payload[key]=deepcopy(task[key])
-    response=gateway.request('/internal/pilot/document-transform',payload)
+    payload=_evidence_payload(bundle)
+    if len(canonical(payload).encode()) > unified.MAX_FROZEN_BYTES:
+        raise Failure('unified_capture_too_large',413)
+    response=gateway.request('/internal/pilot/document-transform',deepcopy(payload))
     if (not isinstance(response,dict)or response.get('contract')!=RESPONSE_CONTRACT
             or response.get('provider_attempts')!=[]or response.get('execution',{}).get('inference_performed')is not False):invalid()
     matches={row['evidence_id']:row for row in bundle['source_bundle']['matches']}

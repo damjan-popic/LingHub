@@ -16,7 +16,7 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  const tr=key=>{
   if(evidenceOnly){
    const it=locale()==='it';
-   if(['title','open','review'].includes(key))return it?'Revisione del testo con fonti — prova':'Pregled besedila z viri — preizkus';
+   if(['title','open','review'].includes(key))return it?'Revisione del testo con fonti':'Pregled besedila z viri';
    if(key==='hint')return it?'Lo strumento mostra proposte e avvertenze sostenute dalle fonti. Verifica le proposte nel contesto; la revisione non garantisce di individuare tutti gli errori.':'Orodje pokaže z viri podprte predloge in opozorila. Predloge preverite v sobesedilu; pregled ne zagotavlja, da so odkrite vse napake.';
   }
   return messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;

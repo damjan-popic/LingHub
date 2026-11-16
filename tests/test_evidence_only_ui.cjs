@@ -22,7 +22,7 @@ try{for(const locale of ['sl','it'])for(const width of [390,1280]){
   await route.fulfill({status:200,contentType:name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html',body});
  });
  await page.goto(origin);await page.locator('[data-document-list] option[value="existing-fixture"]').waitFor({state:'attached'});
- const summary=page.locator('#workspace > details > summary');assert.equal(await summary.textContent(),locale==='it'?'Revisione del testo con fonti — prova':'Pregled besedila z viri — preizkus');
+ const summary=page.locator('#workspace > details > summary');assert.equal(await summary.textContent(),locale==='it'?'Revisione del testo con fonti':'Pregled besedila z viri');
  await summary.click();await page.locator('[data-document-list]').selectOption('existing-fixture');
  const form=page.locator('.document-options');await form.waitFor();
  assert.deepEqual(await form.locator('select').nth(0).locator('option').evaluateAll(ns=>ns.map(n=>n.value)),['review']);

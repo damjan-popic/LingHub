@@ -491,7 +491,8 @@ def collect_source(gateway, family, definition, detail_pool=None, *, query_overr
                 rendered = terminology.record_text(hit, locale)
                 source = {'title': hit['title'], 'source_label': label, 'excerpt': rendered,
                           'url': hit.get('url'), 'bibliography': {k: deepcopy(hit[k]) for k in
-                          ('external_id', 'source_date', 'rights_mode', 'references') if k in hit}}
+                          ('external_id', 'source_date', 'rights_mode', 'references',
+                           'record_status', 'record_status_source', 'release_id', 'source_revision') if k in hit}}
                 matches.append(match(hit, 'terminology_record', label, rendered, source, locale, hit.get('score')))
             elif slug in editorial.SOURCES:
                 # Preserve discovery on individual detail failure. It remains

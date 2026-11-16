@@ -41,6 +41,13 @@ def checked(bundle):
 def record_text(hit,locale):
     it=locale=='it';lines=[hit['title']]
     labels=[('categories','Ambito'if it else'Področje'),('subcategories','Sottoambito'if it else'Podpodročje'),('original_terms','Forme originali'if it else'Izvirne oblike'),('standardized_terms','Forme standardizzate'if it else'Standardizirane oblike'),('proposals','Proposte nel record'if it else'Predlogi v zapisu'),('rationale','Motivazione originale'if it else'Izvirna utemeljitev')]
+    if 'record_status' in hit:
+        status=hit['record_status'] if hit['record_status'] is not None else ('non indicato' if it else 'ni naveden')
+        lines.append(('Stato del record nella fonte: ' if it else 'Status zapisa v viru: ')+status)
+    if hit.get('record_status_source'):
+        lines.append(('Fonte dello stato: ' if it else 'Vir statusa: ')+json.dumps(hit['record_status_source'],ensure_ascii=False))
+    if hit.get('recorded_terms'):
+        lines.append(('Forme slovene registrate senza stato confermato:\n' if it else 'Zapisane slovenske oblike brez potrjenega statusa:\n')+'\n'.join(hit['recorded_terms']))
     for key,label in labels:
         if hit[key]:lines.append(label+':\n'+'\n'.join(hit[key]))
     if hit.get('term_entries'):
@@ -72,5 +79,5 @@ def source(bundle,eid,tier):
     if tier!='short':raise Failure('not_found',404)
     for hit,item in zip(bundle['hits'],evidence(bundle)):
         if item['evidence_id']==eid:
-            return {'evidence_id':eid,'source_label':hit['source_display_name'],'title':hit['title'],'excerpt':record_text(hit,bundle['locale']),'bibliography':{'source_date':hit.get('source_date'),'record_id':hit['external_id'],'rights_mode':hit['rights_mode']}}
+            return {'evidence_id':eid,'source_label':hit['source_display_name'],'title':hit['title'],'excerpt':record_text(hit,bundle['locale']),'bibliography':{'source_date':hit.get('source_date'),'record_id':hit['external_id'],'rights_mode':hit['rights_mode'],**{k:deepcopy(hit[k]) for k in ('record_status','record_status_source','release_id','source_revision') if k in hit}}}
     raise Failure('not_found',404)

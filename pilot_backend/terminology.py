@@ -39,6 +39,9 @@ def checked(bundle):
     return bundle
 
 def record_text(hit,locale):
+    if 'record_status' in hit:
+        from .terminology_qualifications import record_text as qualified_record_text
+        return qualified_record_text(hit,locale)
     it=locale=='it';lines=[hit['title']]
     labels=[('categories','Ambito'if it else'Področje'),('subcategories','Sottoambito'if it else'Podpodročje'),('original_terms','Forme originali'if it else'Izvirne oblike'),('standardized_terms','Forme standardizzate'if it else'Standardizirane oblike'),('proposals','Proposte nel record'if it else'Predlogi v zapisu'),('rationale','Motivazione originale'if it else'Izvirna utemeljitev')]
     if 'record_status' in hit:

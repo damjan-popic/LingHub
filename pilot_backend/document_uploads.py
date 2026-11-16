@@ -94,13 +94,14 @@ def task_for(block, options, *, previous_sections=(), document_id=None):
 
 
 class Documents:
-    def __init__(self, store, domain, *, private_translation=False, translation_limits=None, evidence_review=False, editorial_summary=False, ai_suggestions=False):
+    def __init__(self, store, domain, *, private_translation=False, translation_limits=None, evidence_review=False, editorial_summary=False, ai_suggestions=False, evidence_review_only=False):
         self.store, self.domain = store, domain
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
         self.thread = None
         self.ai_suggestions=ai_suggestions
         self.editorial_summary=editorial_summary
+        self.evidence_review_only=evidence_review_only
         self.evidence_review=evidence_review
         self.private_translation=private_translation
         self.translation_limits={**translation.DEFAULT_LIMITS,**(translation_limits or {})}
@@ -149,6 +150,8 @@ class Documents:
         options = {'mode': mode, 'source_language': source, 'target_language': target,
                    'locale': locale, 'model': self.domain.default_model}
         strategy=payload.get('review_strategy')
+        if self.evidence_review_only and (mode!='review'or source!='sl'):
+            raise Failure('document_review_ineligible',422)
         if mode=='review'and self.evidence_review:
             strategy=strategy or'evidence_review_v1'
             if strategy!='evidence_review_v1'or source!='sl':raise Failure('document_review_ineligible',422)

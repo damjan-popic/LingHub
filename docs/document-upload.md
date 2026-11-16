@@ -1,5 +1,16 @@
 # Document upload candidate
 
+For the separately selected private tester pilot, `evidence_review_only: true`
+requires `document_uploads` and `evidence_review`, with `ai_suggestions`,
+`editorial_summary` and `private_translation` disabled. It restricts document
+Start to Slovenian `evidence_review_v1`; legacy review and every translation
+route are rejected before preparation. Its UI label is “Pregled besedila z viri
+— preizkus”. Ordinary public release configuration keeps document uploads off.
+With uploads off, application startup retains the ordinary account-store schema
+without initializing document tables. Existing private stores and historical
+documents are not migrated or removed by this switch. This is limited review
+testing; completion does not certify that every error was found.
+
 This feature adds an explicit document task alongside the existing question
 workflow. It requires the paired CORE document-transform endpoint. It is off
 by default; set `document_uploads: true` on a unified-answer WEB configuration

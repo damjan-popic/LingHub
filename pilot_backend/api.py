@@ -50,6 +50,10 @@ def config_checked(config):
     if type(c['editorial_summary'])is not bool or c['editorial_summary']and not c['evidence_review']:raise ValueError('Editorial summary requires evidence review')
     c.setdefault('private_translation',False)
     if type(c['private_translation'])is not bool or c['private_translation']and not c['document_uploads']:raise ValueError('Private translation requires document uploads')
+    c.setdefault('evidence_review_only',False)
+    if (type(c['evidence_review_only'])is not bool or c['evidence_review_only']and(
+            not c['evidence_review']or c['private_translation']or c['ai_suggestions']or c['editorial_summary'])):
+        raise ValueError('Evidence-only testing requires evidence review without document writers or translation')
     from .private_translation import DEFAULT_LIMITS
     limits=c.setdefault('private_translation_limits',{})
     if (not isinstance(limits,dict) or set(limits)-set(DEFAULT_LIMITS)
@@ -84,10 +88,10 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         try:frequency_reference=Reference(Path(config['frequency_position_reference']))
         except (OSError,ValueError,sqlite3.Error):
             logging.getLogger(__name__).warning('Frequency-position reference unavailable; retaining source counts',exc_info=True)
-    base=config['base_path'];api=base+'/api/pilot';store=Store(config['store']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));adapter.document_resources=config['document_resources'];domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
+    base=config['base_path'];api=base+'/api/pilot';store=Store(config['store'],documents=config['document_uploads']);auth=Auth(store,hasher);adapter=adapter or Gateway(config['gateway_url'],config['gateway_token'],config.get('linghub_url'),config.get('klikai_url'),config['editorial_full_records'],config['editorial_operator_policy_id'],config['unified_answers'],config.get('lexical_profiles',False),config.get('comma_checker'));adapter.document_resources=config['document_resources'];domain=Domain(store,config['tasks'],config['models'],release=config.get('beta_release') or config.get('release_id'),generation_admission=getattr(adapter,'require_generation',None),comparisons_enabled=config['comparisons_enabled'],unified_answers=config['unified_answers'],single_answers=config['single_answers'],request_gateway=adapter if config['unified_answers']else None,frequency_reference=frequency_reference);jobs=Jobs(store,adapter,config['workers'],release=config.get('beta_release')or config.get('release_id'));password_gate=threading.BoundedSemaphore(2)
     adapter.unified_answers=config['unified_answers']
     from .document_uploads import Documents
-    documents=Documents(store,domain,private_translation=config['private_translation'],translation_limits=config['private_translation_limits'],evidence_review=config['evidence_review'],editorial_summary=config['editorial_summary'],ai_suggestions=config['ai_suggestions'])
+    documents=Documents(store,domain,private_translation=config['private_translation'],translation_limits=config['private_translation_limits'],evidence_review=config['evidence_review'],editorial_summary=config['editorial_summary'],ai_suggestions=config['ai_suggestions'],evidence_review_only=config['evidence_review_only'])
     if config.get('human_testing_mode'):
         with store.tx()as db:db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('human_testing_mode','1'))
     cookie='__Host-klikai_session'if config['secure_cookies']and not base else'klikai_session'
@@ -173,7 +177,7 @@ def create_app(config,adapter=None,hasher=None,start_workers=True):
         from .comma_tasks import capability
         checker=capability(config.get('comma_checker'))
         extra={'comma_checker':checker}if checker['configured']else{}
-        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation'],'evidence_review':config['evidence_review'],'editorial_summary':config['editorial_summary'],'ai_suggestions':config['ai_suggestions']}
+        if config['document_uploads']:extra['documents']={'enabled':True,'formats':['txt','docx'],'max_bytes':2*1024*1024,'max_characters':200000,'max_sections':100,'languages':['sl']if config['evidence_review_only']else['sl','it'],'outputs':['report_txt','report_docx','draft_txt','draft_docx'],'private_translation':config['private_translation'],'evidence_review':config['evidence_review'],'evidence_review_only':config['evidence_review_only'],'editorial_summary':config['editorial_summary'],'ai_suggestions':config['ai_suggestions']}
         if beta(s):return {**extra,'project_beta':True,'tasks':['reference'],'unified_answers':True,'single_answers':config['single_answers'],'comparisons':False,'documentary_sources':list(config['documentary_sources']),**({'beta_updated':config['beta_updated']}if config.get('beta_updated')else{})}
         return {**extra,'tasks':list(domain.tasks),'models':list(domain.models),'default_model':domain.default_model,'unified_answers':config['unified_answers'],'single_answers':config['single_answers'],'comparisons':domain.comparisons_enabled and store.meta('human_testing_mode','0')!='1'and set(domain.comparison_models)=={'qwen','gemma'}}
     def session_result(s):return {'authenticated':True,'csrf_token':s['csrf'],'remembered':bool(s['remembered']),'expires_at':s['expires'],'user':{'id':s['id'],'username':s['username'],'role':s['role'],'must_change_password':bool(s['must_change']),'shared_group':shared_group(s),'can_change_password':not shared_group(s)},'capabilities':capability_result(s)}

@@ -30,6 +30,8 @@ def focus_profile(profile):
     """Return a new annotated revision; old saved captures remain untouched."""
     p=copy.deepcopy(profile);plan=p['interpretation'];targets={t['text']:t for t in plan['targets']}
     if plan.get('selection',{}).get('version')==VERSION:return p
+    supporting=(plan.get('supporting_lookups')or{}).get('targets',[])
+    targets.update({t['text']:t for t in supporting})
     translation='translation'in plan['requested_facets'];focus={k:v for k,v in (plan.get('slot_focus')or{}).items()if k!='basis'and v is not None}
     acronym_targets={t for t in targets if t.isupper()and len(t)>1 and any(u['kind']=='terminology'and any(m.get('term')==t for m in u['fields'].get('matched_forms',[]))for u in p['evidence'])}
     lexemes={}
@@ -90,7 +92,14 @@ def focus_profile(profile):
         elif kind=='morphology':
             if ident not in chosen.get(u['target'],set()):state,reason='alternative','different_lexical_identity'
         elif kind in {'synonyms','collocations'}:
-            if u['target']in acronym_targets and f.get('headword')!=u['target']:state,reason='excluded','explicit_acronym_not_folded_word'
+            origin=u.get('supporting_origin')
+            if origin is not None:
+                expected=next((t['supporting_origin']for t in supporting if t['supporting_origin']==origin),None)
+                matches=(origin==expected and kind in origin.get('kinds',[])
+                    and str(f.get('headword','')).casefold()==origin['lemma'].casefold()
+                    and u['match_relation']in {'headword_candidate','headword_collocation'})
+                state,reason=('primary','source_head_matches_supporting_observation')if matches else('alternative','supporting_source_identity_unresolved')
+            elif u['target']in acronym_targets and f.get('headword')!=u['target']:state,reason='excluded','explicit_acronym_not_folded_word'
             elif proper_only and kind not in plan['requested_facets']:state,reason='excluded','personal_name_not_common_noun_profile'
             elif u['match_relation']in {'component_only','alternative_lexical_identity'}:state,reason='excluded','incidental_component_or_reading'
             elif not primary_ids and len(targets)==1 and str(f.get('headword','')).casefold()!=u['target'].casefold() and u['match_relation'] not in {'whole_expression','inflected_equivalent'}:state,reason='alternative','unverified_analyzer_lemma_not_target_identity'
@@ -123,6 +132,7 @@ def focus_profile(profile):
                 (u['provenance'].get('source')or{}).get('archive_sha256'),
                 f.get('frequency_scope','collocation'),f.get('corpus','Gigafida 2.0'),
                 [{k:c.get(k)for k in ('position','text','lemma','msd')}for c in f.get('components',[])]],sort_keys=True)
+            if u.get('supporting_origin')is not None:key+=':support:'+json.dumps(u['supporting_origin'],sort_keys=True)
             if key in groups:
                 rep=groups[key];member={'record_id':u['record_id'],'entry_id':u['entry_id']}
                 if state=='primary'and rep['selection']['state']!='primary':

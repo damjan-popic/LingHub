@@ -200,7 +200,7 @@ def _authenticated_plan_route(family, request_plan):
     return routing
 
 
-def collect(gateway, family, *, automatic=False, source_advice_captures=None):
+def collect(gateway, family, *, automatic=False, source_advice_captures=None,enrichment_only=False):
     question=family.get('original_question',family['question'])
     request_plan=family.get('request_plan')
     # Only a configured opt-in LingHub release advertises the new contract.
@@ -210,6 +210,7 @@ def collect(gateway, family, *, automatic=False, source_advice_captures=None):
             request={'text':question,'context':family.get('context',''),'lang':family.get('input_language','und') if family.get('input_language','und') in {'sl','it','und'} else 'und','profile':'klikai_classla_primary_v1','limit':4,'request_plan':request_plan}
             if source_advice_captures:
                 request['source_advice_captures']=copy.deepcopy(source_advice_captures)
+            if enrichment_only:request['enrichment_only']=True
             before=time.monotonic();response=gateway.request('/v1/lexical/profile',request,gateway.linghub_url)
             if (response.get('request_schema_version')!='linghub.lexical-profile.v1'
                     or response.get('query',{}).get('text')!=question

@@ -97,14 +97,18 @@ def test_source_only_question_with_context_still_never_requests_optional_analysi
     assert calls==[]
 
 
-def paired_delivery(monkeypatch,tmp_path,*,family_override=None,case='COLL-P',observation_factory=None):
+def paired_delivery(monkeypatch,tmp_path,*,family_override=None,case='COLL-P',observation_factory=None,tool_override=None,fit=False):
     from test_native_context_producer import runtime as runtime_fixture
     from test_fulltext_grounded import store
     from test_ordinary_contextual_consultation import selected_output
     runtime=runtime_fixture.__wrapped__(store.__wrapped__(tmp_path))
+    if fit:
+        from test_pilot_cpu_fallback import cpu_client
+        cpu_client(runtime) # synthetic client; existing injected counts, no native request
     runtime.settings['unified_policy']['sources']=['gradivo']
     f=family('Kolokacije besede pogodbo?','   Želimo narediti pogodbo.')if family_override is None else family_override
-    tool=lexical(f,case);before=deepcopy(tool);calls=mock_analysis(monkeypatch,observation_factory=observation_factory)
+    tool=lexical(f,case)if tool_override is None else deepcopy(tool_override)
+    before=deepcopy(tool);calls=mock_analysis(monkeypatch,observation_factory=observation_factory)
     class Gateway:
         klikai_url='mocked-registry'
         comma_checker={'syntax_url':'mock'}
@@ -130,7 +134,8 @@ def paired_delivery(monkeypatch,tmp_path,*,family_override=None,case='COLL-P',ob
     assert calls==[lexical_context_scope(f['request_plan'],'sl')['target_scope']['text']]and tool==before
     assert frozen['bundle']['gateway_bundle']is not None,{'error':getattr(gateway,'failure',None),'retrieval':frozen['bundle']['retrieval']}
     payload=runtime._unpack(frozen['bundle']['gateway_bundle']);registry=runtime._answer_registry(payload,'answer')
-    units=[u for u in registry.units if u.get('payload',{}).get('version')==VERSION]
+    from tools.zrc_reference.pilot_contextual_consultation import IMPLICIT_VERSION
+    units=[u for u in registry.units if u.get('payload',{}).get('version')in {VERSION,IMPLICIT_VERSION}]
     assert units,[(s.get('tool_kind'),s.get('context_eligible'))for s in payload['passages']]
     result=selected_output(payload,runtime,registry,units)
     delivered=web.generate(NS(request=lambda *args:deepcopy(result)),frozen['bundle'],'answer','qwen')

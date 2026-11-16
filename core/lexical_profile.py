@@ -20,6 +20,7 @@ class ProfileRequest(BaseModel):
  limit:int=Field(default=4,ge=1,le=8)
  request_plan:dict|None=None
  source_advice_captures:list[dict]=Field(default_factory=list,max_length=16)
+ enrichment_only:bool=False
 class LexicalProfile(BaseModel):
  request_schema_version:str
  request_id:str
@@ -38,8 +39,9 @@ def aggregate(parts):
  return 'not_applicable'
 
 def facet(status,data=None,**extra):return {'status':status,'data':data,**extra}
-def source_record(kind,entry_id,body,provenance,target,relation='recorded_target'):
+def source_record(kind,entry_id,body,provenance,target,relation='recorded_target',origin=None):
  item=public({'kind':kind,'entry_id':entry_id,'target':target,'match_relation':relation,'fields':body,'provenance':provenance})
+ if origin is not None:item['supporting_origin']=copy.deepcopy(origin)
  occurrence=source_occurrence_key(provenance)if kind=='morphology'else None
  if occurrence:item['source_occurrence_key']=occurrence
  item['record_id']='lexical:'+digest(item);return item
@@ -237,12 +239,30 @@ async def source_advice_morphology(req,request):
 async def make_profile(req,request):
  start=time.monotonic();state=request.app.state
  if not req.text.strip():raise HTTPException(400,'Empty text')
+ if req.enrichment_only:
+  # The original profile already paid for its analysis/native lookups. Only
+  # genuinely new source-nominated morphology runs in this enrichment phase.
+  if req.request_plan is None or not req.source_advice_captures:raise HTTPException(422,'Bound source-advice enrichment required')
+  interpretation=plan(req.text,req.context,req.lang,{},request_plan=req.request_plan)
+  support,units=await source_advice_morphology(req,request)
+  return LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),
+      query=req.model_dump(),interpretation=interpretation,
+      analysis={'status':'not_attempted','reason':'original_profile_reused','raw_engines':{}},
+      facets={'morphology':facet('not_applicable',[]),'source_advice_morphology':support},
+      evidence=units,coverage={'source_advice_morphology':{'status':support['status'],'attempted':support['status']!='not_applicable','matched':support['status']=='matched'}},
+      provenance={'profile':req.profile,'profile_revision':'source-advice-enrichment-only-v1',
+          'resource_editions':{},'writer_required':False,'input_logging':False}).model_dump()
  try:
   from .analysis_profiles import analyze as profile_analysis
   analysis_text=req.text+('\n'+req.context if req.context else'')
   analysis=await profile_analysis(request,AnalyzeRequest(text=analysis_text,lang='it'if req.lang=='it'else'sl',engine=req.profile,include_loris=True))
  except AnalyzerFailure as error:analysis={'status':'unavailable','raw_engines':{},'engines_used':[],'degraded':True,'reason':error.reason}
  interpretation=plan(req.text,req.context,req.lang,analysis,request_plan=req.request_plan);targets=interpretation['targets'];records=[];facets={};coverage={}
+ from pilot_backend.contextual_lexical_scope import supporting_lookups
+ supporting=supporting_lookups(req.request_plan,req.lang,analysis,req.limit)
+ if supporting is not None:interpretation['supporting_lookups']=supporting
+ support_targets=copy.deepcopy(supporting['targets'])if supporting is not None else[]
+ lookup_targets=targets+support_targets
  # Exact surfaces lead; analyzer nominations remain visibly secondary candidates.
  async def morphology_lookup(target):
   surface=target['text'];reader=getattr(state,'sloleks_profiles',None)
@@ -276,6 +296,7 @@ async def make_profile(req,request):
   else:candidates=[]
   candidates=[t['text'],*candidates,*t['lemma_candidates']]
   lookups.append((t,list(dict.fromkeys(candidates))[:8]))
+ for target in support_targets:lookups.append((target,[target['supporting_origin']['lemma']]))
  facets['morphology']=facet(aggregate(morphdata),morphdata)
  italian=[]
  if 'it'in interpretation['lookup_languages']and available(request,'morphology'):
@@ -309,9 +330,16 @@ async def make_profile(req,request):
        if morphology_key(le)in primary and (le.get('matched_by')=='exact_headword'
            or any(row.get('exact_surface')is True for row in le.get('submitted_analyses',[])))))
    if lemmas:collocation_lemmas[part['target']]=lemmas
+ supporting_reads={}
+ async def native_read(resource_kind,t,lemma,method,**options):
+  if 'supporting_origin'not in t:return await run_in_threadpool(method,lemma,**options)
+  key=(resource_kind,lemma.casefold(),digest(options))
+  if key not in supporting_reads:supporting_reads[key]=asyncio.create_task(run_in_threadpool(method,lemma,**options))
+  return await supporting_reads[key]
  async def dictionary(kind,t,candidates):
-  if 'sl'not in interpretation['lookup_languages']:return {'target':t['text'],'status':'not_applicable','lookups':[]}
-  if not available(request,kind):return {'target':t['text'],'status':'unavailable','lookups':[]}
+  origin={'supporting_origin':copy.deepcopy(t['supporting_origin'])}if 'supporting_origin'in t else{}
+  if 'sl'not in interpretation['lookup_languages']:return {'target':t['text'],**origin,'status':'not_applicable','lookups':[]}
+  if not available(request,kind):return {'target':t['text'],**origin,'status':'unavailable','lookups':[]}
   found=[];failures=0;candidate_selection=None;query_memberships={}
   if kind=='collocations'and'collocations'in interpretation['requested_facets']:
    from .compiled_collocations import normalize as source_lookup_key
@@ -328,7 +356,7 @@ async def make_profile(req,request):
   for lemma in candidates:
    try:
     if kind=='synonyms':
-     original=await run_in_threadpool(state.synonyms.lookup_evidence,lemma,normalized=True)
+     original=await native_read(kind,t,lemma,state.synonyms.lookup_evidence,normalized=True)
      data=copy.deepcopy(original)
      requested='synonyms'in interpretation['requested_facets']
      if requested:
@@ -349,7 +377,7 @@ async def make_profile(req,request):
      ordering=(interpretation.get('request_plan')or{}).get('collocation_request')or{}
      options={'min_freq':None,'limit':500 if requested or multi else 8,'kind':'collocation'if requested else'all'}
      if requested:options.update(sort=ordering.get('sort')or'freq',order=ordering.get('order')or'desc')
-     original=await run_in_threadpool(state.collocations.get_collocations_for_lemma,lemma,**options)
+     original=await native_read(kind,t,lemma,state.collocations.get_collocations_for_lemma,**options)
      data=copy.deepcopy(original)
      if requested:data['original_result']=copy.deepcopy(original)
      sequences={s.casefold()for s in t['lemma_sequences']if s};full=[]
@@ -371,9 +399,10 @@ async def make_profile(req,request):
      found.append(item)
    except Exception:failures+=1;continue
    if len(found)>=2:break
-  return {'target':t['text'],'status':'matched'if found else'unavailable'if failures else'no_match','lookups':found,'failed_lookups':failures,'search_scope':'bounded headword candidates; no whole-dictionary absence claim',
+  return {'target':t['text'],**origin,'status':'matched'if found else'unavailable'if failures else'no_match','lookups':found,'failed_lookups':failures,'search_scope':'bounded headword candidates; no whole-dictionary absence claim',
       **({'candidate_selection':candidate_selection}if candidate_selection is not None else{})}
- dict_jobs=[(kind,t,candidates)for t,candidates in lookups for kind in ('synonyms','collocations')]
+ dict_jobs=[(kind,t,candidates)for t,candidates in lookups for kind in ('synonyms','collocations')
+     if 'supporting_origin'not in t or kind in t['supporting_origin']['kinds']]
  results=await asyncio.gather(*(dictionary(*j)for j in dict_jobs))
  for kind in ('synonyms','collocations'):
   ds=[v for j,v in zip(dict_jobs,results)if j[0]==kind];facets[kind]=facet(aggregate(ds),ds)
@@ -384,12 +413,25 @@ async def make_profile(req,request):
     if kind=='synonyms':
      for ent in data['entries']:
       for sense in ent['senses']:
-       target=next(t for t in targets if t['text']==d['target']);relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and ent['headword'][:1].islower()else lookup['match_relation']
-       records.append(source_record(kind,str(sense['sense_id']),synonym_source_fields(ent,sense),prov,d['target'],relation))
+       target=next(t for t in lookup_targets if t['text']==d['target']and t.get('supporting_origin')==d.get('supporting_origin'));relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and ent['headword'][:1].islower()else lookup['match_relation']
+       fields=synonym_source_fields(ent,sense)
+       if target.get('supporting_origin'):
+        fields['coverage']={'selection_kind':'supporting_original_lookup','entries_total':data.get('entries_total',len(data['entries'])),
+            'entries_returned':len(data['entries']),'entries_truncated':data.get('entries_truncated',False),
+            'senses_total_in_returned_source':ent.get('senses_total_in_returned_source'),
+            'senses_returned':len(ent['senses']),'senses_truncated':ent.get('senses_truncated',False),
+            'selection_truncated':bool(data.get('entries_truncated')or ent.get('senses_truncated'))}
+       records.append(source_record(kind,str(sense['sense_id']),fields,prov,d['target'],relation,target.get('supporting_origin')))
     else:
      for rec in data['collocations']:
-      target=next(t for t in targets if t['text']==d['target']);relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and rec['headword'][:1].islower()else rec['match_relation']
-      records.append(source_record(kind,str(rec['occurrence_id']),rec,prov,d['target'],relation))
+      target=next(t for t in lookup_targets if t['text']==d['target']and t.get('supporting_origin')==d.get('supporting_origin'));relation='alternative_lexical_identity'if target.get('resource_identity_preference',{}).get('proper_name_primary')and rec['headword'][:1].islower()else rec['match_relation']
+      fields=copy.deepcopy(rec)
+      if target.get('supporting_origin')and'coverage'not in fields:
+       fields['coverage']={'selection_kind':'supporting_original_lookup','query_headword':lookup['query'],
+           'count_total':data.get('count_total'),'count_returned':data['count_returned'],
+           'source_count_returned':data.get('searched_records'),'truncated':data.get('truncated'),
+           'kind':rec.get('kind')}
+      records.append(source_record(kind,str(rec['occurrence_id']),fields,prov,d['target'],relation,target.get('supporting_origin')))
  loris=[];seen=set()
  for issue in analysis.get('spans',[])+analysis.get('issues',[]):
   a,b=issue.get('start'),issue.get('end');identity=(issue.get('rule_id'),a,b)
@@ -457,14 +499,17 @@ async def make_profile(req,request):
    phrase_analysis.append(body)
    if any(e['tokens']for e in engines.values()):records.append(source_record('analysis','tokens:'+str(target['start'])+':'+str(target['end']),body,{'resource_id':'linguistic-analysis','version':'analysis-layer-v1'},target['text']))
  facets['phrase_analysis']=facet('matched'if phrase_analysis else'not_applicable',phrase_analysis)
- if not targets:
+ if not lookup_targets:
   for key in facets:facets[key]=facet('not_applicable',reason='No lexical subject was resolved for this request; no source lookup absence is established')
  records=requested_synonym_projection(records,facets,interpretation,req.limit)
  records=requested_collocation_projection(records,facets,interpretation)
  coverage={k:{'status':v['status'],'attempted':v['status']not in {'not_attempted','not_applicable'},'matched':v['status']=='matched'}for k,v in facets.items()}
  from .lexical_focus import focus_profile
- query=req.model_dump(exclude=set()if 'source_advice_captures'in req.model_fields_set else{'source_advice_captures'})
+ excluded=set()if 'source_advice_captures'in req.model_fields_set else{'source_advice_captures'}
+ excluded.add('enrichment_only')
+ query=req.model_dump(exclude=excluded)
  value=focus_profile(LexicalProfile(request_schema_version=CONTRACT,request_id=str(uuid.uuid4()),query=query,interpretation=interpretation,analysis=analysis,facets=facets,evidence=records,coverage=coverage,provenance={'profile':req.profile,'profile_revision':'lexical-v4-20261103','resolved_code_release':os.environ.get('LINGHUB_LEXICAL_RELEASE_ID','unpublished-working-tree'),'resource_editions':{'sloleks':getattr(state,'sloleks_profiles',None).manifest if getattr(state,'sloleks_profiles',None)else None,'synonyms':state.synonyms.manifest['fingerprint']if state.synonyms else None,'collocations':state.collocations.manifest['build_id']if state.collocations else None},'total_ms':round((time.monotonic()-start)*1000,3),'writer_required':False,'input_logging':False,'cache':'immutable SQLite indexes; no shared submitted-text cache'}).model_dump())
+ if supporting is not None:value['provenance']['profile_revision']='lexical-v5-implicit-support-20261116'
  support,units=await source_advice_morphology(req,request)
  if support is not None:
   value['facets']['source_advice_morphology']=support

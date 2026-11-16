@@ -41,7 +41,7 @@ def test_wrong_inflection_analysis_retains_web_source_facts_without_an_occurrenc
     units=result['registry']['units']
     assert all(not record['admitted_occurrences']for u in units for record in u['payload']['records'])
     assert all(not u['payload']['nomination']['options']for u in units)
-    assert 'ekspresen'in result['web_result']['answer_md']and 'Zgornji podatki vira ostajajo uporabni'in result['web_result']['answer_md']
+    assert 'ekspresen'in result['web_result']['answer_md']and 'Podatki vira ostajajo uporabni'in result['web_result']['answer_md']
     assert ('syntax_evidence'in result['request'])==(damage!='offset')
 
 

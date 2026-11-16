@@ -1133,8 +1133,14 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
     status={'family':'source_advice_morphology','source_label':'Sloleks',
             'status':'unavailable','returned_count':0,'limit':None,'has_more':None}
     try:
+        original_profile=tool_capture['captures'][0]['response']
+        reuse=original_profile.get('interpretation',{}).get('supporting_lookups')is not None
+        if reuse:
+            from tools.zrc_reference.pilot_answer_plan import source_advice_application_requests
+            if not source_advice_application_requests(family.get('original_question',family['question']),family.get('context',''),[captures[key]for key in sorted(captures)]):
+                return tool_capture
         capture=collation.collect(gateway,family,automatic=True,
-            source_advice_captures=[captures[key]for key in sorted(captures)])
+            source_advice_captures=[captures[key]for key in sorted(captures)],**({'enrichment_only':True}if reuse else{}))
         if not capture or capture.get('version')!='klikai.lexical-collation.v1':
             raise Failure('invalid_answer',502)
         profile=capture['captures'][0]['response']
@@ -1146,7 +1152,18 @@ def supplement_source_advice_morphology(gateway,family,tool_capture,found,covera
         # With no source-nominated units, this response adds only another copy
         # of the CU parents in its request/query. Keep the original authoritative
         # profile; those complete parents remain in the documentary packet.
-        return capture if count else tool_capture
+        if not count:return tool_capture
+        if not reuse:return capture
+        # Keep the original analysis/lookup window and separate new evidence.
+        merged=deepcopy(tool_capture);base=merged['captures'][0]['response']
+        base['facets']['source_advice_morphology']=deepcopy(support)
+        base['coverage']['source_advice_morphology']=deepcopy(profile['coverage']['source_advice_morphology'])
+        base['evidence'].extend(deepcopy(profile['evidence']))
+        base['source_advice_enrichment']=deepcopy(capture['captures'][0])
+        merged['captures'][0]['response_sha256']=digest(base)
+        merged['capture_set_sha256']=digest(merged['captures'])
+        if len(base['evidence'])>256 or len(canonical(merged).encode())>1536*1024:raise Failure('unified_capture_too_large',413)
+        return merged
     except Exception as error:
         status.update(status='timeout'if isinstance(error,Failure)and error.code=='source_timeout'else'unavailable',
             **diagnostic(error,'source_advice_morphology'))
@@ -1215,8 +1232,15 @@ def _lexical_context_target(family,tool_capture,language):
     caps=tool_capture.get('captures')or[]
     if len(caps)!=1 or digest(caps)!=tool_capture.get('capture_set_sha256')or digest(caps[0].get('response'))!=caps[0].get('response_sha256'):return None
     target=task['target_scope']
+    from .contextual_lexical_scope import supporting_lookups
+    profile=caps[0]['response'];support=profile.get('interpretation',{}).get('supporting_lookups')
+    if support is not None:
+        if support!=supporting_lookups(family.get('request_plan'),language,profile.get('analysis'),profile.get('query',{}).get('limit',4)):return None
     for unit in caps[0]['response'].get('evidence',[]):
         kind=unit.get('kind');fields=unit.get('fields')or{}
+        origin=unit.get('supporting_origin')
+        if origin is not None and (support is None or origin not in [t['supporting_origin']for t in support['targets']]or kind not in origin['kinds']):continue
+        if origin is not None and origin['upos']not in {'NOUN','ADJ'}:continue
         if (kind not in task['kinds']or unit.get('provenance',{}).get('resource_id')!=RESOURCES[kind]
                 or unit.get('selection',{}).get('state')!='primary'
                 or not isinstance(unit.get('target'),str)or not unit['target']

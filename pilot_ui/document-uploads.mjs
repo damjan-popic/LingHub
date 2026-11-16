@@ -13,12 +13,14 @@ Object.assign(messages.it,{document_translation_ineligible:'Il traduttore privat
 messages.sl.document_translation_cancel_pending='Prevod je ustavljen za ta dokument. Čakamo še na potrditev ustavitve prevajalnika; pozni rezultat ne bo uporabljen.';
 messages.it.document_translation_cancel_pending='La traduzione del documento è interrotta. Si attende la conferma di arresto del traduttore; un risultato tardivo non sarà utilizzato.';
 export function documentUploads({root,opener=null,api,locale,openFamily,errorText}){
- let current=null,rows=[],timer=null,epoch=0,selection=0,expanded=false,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null,fileInput=null;
+ let current=null,rows=[],timer=null,epoch=0,selection=0,expanded=false,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null,fileInput=null,renderedDocumentId=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
  const tr=key=>{
   if(evidenceOnly){
    const it=locale()==='it';
    if(['title','open','review'].includes(key))return it?'Revisione del testo':'Pregled besedila';
+   if(key==='upload')return it?'Carica documento':'Naložite dokument';
+   if(key==='start')return it?'Avvia revisione':'Začnite pregled';
    if(key==='hint')return it?'Word (.docx) o testo UTF-8 (.txt), massimo 2 MB.':'Word (.docx) ali besedilo UTF-8 (.txt), največ 2 MB.';
   }
   return messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
@@ -51,7 +53,7 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   // A delayed poll for the previous document must not replace a new upload,
   // cancellation or deletion. Polling resumes for the resulting selection.
   try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');schedule();}}}
- function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain'});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
+ function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain','data-document-focus-key':title});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
  async function refresh(){const owner=statusOwner('list');try{const response=await api('/documents');if(!sameOwner(owner,statusOwner('list')))return;rows=response.documents;renderList();clearStatus('list',owner);}catch(error){if(sameOwner(owner,statusOwner('list')))throw error;}}
  function renderList(){const select=root.querySelector('[data-document-list]');if(!select)return;select.replaceChildren(el('option',tr(rows.length?'choose':'empty'),{value:''}));for(const row of rows)select.append(el('option',row.name+' · '+stateLabel(row.state),{value:row.document_id}));select.value=current?.document_id||'';}
  async function load(identifier,manual=true){clearTimeout(timer);if(manual)selection++;const token=epoch,selected=selection,owner=statusOwner('poll',identifier);const doc=await api('/documents/'+encodeURIComponent(identifier));if(token!==epoch||selected!==selection||!manual&&(!enabled||current?.document_id!==identifier))return;current=doc;if(!manual)clearStatus('poll',owner);renderDocument();renderList();schedule();}
@@ -143,7 +145,9 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   }
  }
  async function download(fmt,draft=false,partial=false){const token=epoch,id=current.document_id;const blob=await api('/documents/'+id+(draft?'/draft/':'/export/')+fmt+(partial?'?partial=true':''),{response:'blob'});if(token!==epoch)return;const url=URL.createObjectURL(blob),a=el('a',undefined,{href:url,download:(partial?'klikai-partial-draft.':draft?'klikai-draft.':'klikai-report.')+fmt});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
- function renderDocument(){const panel=root.querySelector('[data-document-detail]');if(!panel)return;panel.replaceChildren();if(!current)return;const native=current.options?.translation_provider==='translategemma_sl_it';panel.append(el('h3',current.name));panel.append(el('p',native&&current.state==='complete'?stateLabel(current.state):tr(current.state)));panel.append(el('p',tr('progress')+': '+current.processed+' / '+current.total,{role:'status','aria-live':'polite'}));
+ function captureDocumentView(panel){if(!panel)return null;const focused=document.activeElement,owner=panel.contains(focused)?focused.closest('[data-document-view-key]'):null;return {documentId:renderedDocumentId,details:new Map([...panel.querySelectorAll('details[data-document-view-key]')].map(node=>[node.dataset.documentViewKey,node.open])),focus:owner&&focused.dataset.documentFocusKey?{owner:owner.dataset.documentViewKey,key:focused.dataset.documentFocusKey}:null};}
+ function restoreDocumentView(panel,view){if(!view||view.documentId!==current.document_id)return;const owners=[...panel.querySelectorAll('[data-document-view-key]')];for(const node of owners)if(node.tagName==='DETAILS'&&view.details.has(node.dataset.documentViewKey))node.open=view.details.get(node.dataset.documentViewKey);if(view.focus){const owner=owners.find(node=>node.dataset.documentViewKey===view.focus.owner),target=owner&&[...owner.querySelectorAll('[data-document-focus-key]')].find(node=>node.dataset.documentFocusKey===view.focus.key&&node.closest('[data-document-view-key]')===owner);target?.focus({preventScroll:true});}}
+ function renderDocument(savedView=null){const panel=root.querySelector('[data-document-detail]');if(!panel)return;const view=savedView||captureDocumentView(panel);panel.replaceChildren();renderedDocumentId=current?.document_id??null;if(!current)return;const native=current.options?.translation_provider==='translategemma_sl_it';panel.append(el('h3',current.name));panel.append(el('p',native&&current.state==='complete'?stateLabel(current.state):tr(current.state)));panel.append(el('p',tr('progress')+': '+current.processed+' / '+current.total,{role:'status','aria-live':'polite'}));
   const evidence=current.options?.review_strategy==='evidence_review_v1';
   if(evidence)panel.append(el('p',locale()==='it'?'Revisione delle fonti senza autore generativo. Le indicazioni richiedono una decisione; solo modifiche giustificate da applicazioni esistenti entrano nella bozza.':'Pregled iz virov brez generativnega pisca. Nasveti zahtevajo presojo; v osnutek se vključijo le spremembe z obstoječo izvedljivo uporabo.',{class:'qualified-note','data-evidence-review-strategy':''}));
   else if(current.state!=='draft'&&current.options?.mode==='review')panel.append(el('p',locale()==='it'?'Risultato storico: revisione con il precedente percorso di generazione.':'Zgodovinski rezultat: pregled po prejšnji generativni poti.',{class:'qualified-note'}));
@@ -168,7 +172,7 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
    }
   }
   if(current.state==='draft'){
-   panel.append(el('p',locale()==='it'?'Controlla l’originale nelle sezioni qui sotto. L’elaborazione inizia solo premendo Inizia; puoi ritrovare il documento nell’elenco I tuoi documenti.':'Preverite izvirnik v spodnjih odsekih. Obdelava se začne šele z gumbom Začnite; dokument znova odprete v seznamu Vaši dokumenti.',{class:'qualified-note','data-document-preview-note':''}));
+   panel.append(el('p',evidenceOnly?(locale()==='it'?'Controlla l’originale nelle sezioni qui sotto. La revisione inizia solo premendo Avvia revisione; puoi ritrovare il documento nell’elenco I tuoi documenti.':'Preverite izvirnik v spodnjih odsekih. Pregled se začne šele z gumbom Začnite pregled; dokument znova odprete v seznamu Vaši dokumenti.'):(locale()==='it'?'Controlla l’originale nelle sezioni qui sotto. L’elaborazione inizia solo premendo Inizia; puoi ritrovare il documento nell’elenco I tuoi documenti.':'Preverite izvirnik v spodnjih odsekih. Obdelava se začne šele z gumbom Začnite; dokument znova odprete v seznamu Vaši dokumenti.'),{class:'qualified-note','data-document-preview-note':''}));
    const form=el('form',undefined,{class:'document-options'});
    const mode=label(form,tr('mode'),select(evidenceOnly?[['review',tr('review')]]:[['review',tr('review')],['translate',tr('translate')]],values.mode));
    const source=label(form,tr('source'),select(evidenceOnly?[['sl','Slovenščina']]:[['sl','Slovenščina'],['it','Italiano']],values.source_language));
@@ -181,7 +185,7 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
    form.append(el('button',tr('start'),{type:'submit',class:'primary'}));
    form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const token=epoch;const result=await api('/documents/'+current.document_id+'/start',{method:'POST',body:{mode:values.mode,source_language:values.source_language,...(values.mode==='translate'?{target_language:values.target_language,...(values.translation_provider?{translation_provider:values.translation_provider}:{})}:{}),...(evidenceReview&&values.mode==='review'?{review_strategy:'evidence_review_v1'}:{}),locale:locale(),idempotency_key:'document-start-'+current.document_id}});if(token!==epoch)return;current=result;renderDocument();await refresh();schedule();});});panel.append(form);
   }
-  const actions=el('div',undefined,{class:'document-actions'});panel.append(actions);
+  const actions=el('div',undefined,{class:'document-actions','data-document-view-key':'actions'});panel.append(actions);
   if(active.has(current.state))button(actions,'cancel',async()=>{const token=epoch;const result=await api('/documents/'+current.document_id+'/cancel',{method:'POST'});if(token!==epoch)return;current=result;renderDocument();await refresh();});
   else button(actions,'remove',async()=>{const token=epoch;await api('/documents/'+current.document_id+'/delete',{method:'POST'});if(token!==epoch)return;current=null;renderDocument();await refresh();});
   button(actions,'txt',()=>download('txt'));button(actions,'docx',()=>download('docx'));
@@ -203,8 +207,8 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   const evidencePanel=el('section',undefined,{'data-evidence-suggestions-group':''});panel.append(evidencePanel);
   if(aiSuggestions||current.ai_suggestions)evidencePanel.append(el('h3',locale()==='it'?'Suggerimenti basati sulle fonti KLIKai':'Predlogi na podlagi virov KLIKai'));
   for(const section of current.sections){
-   const item=el('details',undefined,{class:'document-section'});if(current.total===1)item.open=true;
-   item.append(el('summary',tr('section')+' '+(section.index+1)+' · '+sectionLabel(section)));
+   const item=el('details',undefined,{class:'document-section','data-document-view-key':'section:'+section.index});if(current.total===1)item.open=true;
+   item.append(el('summary',tr('section')+' '+(section.index+1)+' · '+sectionLabel(section),{'data-document-focus-key':'summary'}));
    const resourceCoverage=section.document_result?.review?.resource_coverage;
    if(resourceCoverage){const labels={jezikovna_svetovalnica:'Jezikovna svetovalnica',epravopis:'ePravopis','cjvt-thesaurus':'Sopomenke','cjvt-ksss':'Kolokacije',sloleks:'Sloleks',loris:'LORIS','morph-it':'Morph-it!'},names=resourceCoverage.captured_families.map(name=>labels[name]||name);if(names.length)item.append(el('p',(locale()==='it'?'Materiale acquisito: ':'Zajeto gradivo: ')+names.join(', ')+'.'));if(resourceCoverage.bounded_or_partial)item.append(el('p',locale()==='it'?'La ricerca ha un ambito limitato; non certifica la correttezza del testo.':'Iskanje ima omejen obseg; ne potrjuje pravilnosti besedila.',{class:'small muted'}));}
    item.append(el('h4',tr('original')),el('pre',section.text,{class:'document-text'}));
@@ -217,8 +221,8 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
     const counts=review.overview.counts;
     item.append(el('p',(locale()==='it'?'Indicazioni / confronti / contesto / incluse / condizionate: ':'Priporočila / primerjave / kontekst / vključeni / pogojni: ')+[counts.qualified_advice,counts.recorded_contrast,counts.recorded_form_context,counts.executable_application,counts.application_proposal||0].join(' / '),{'data-review-counts':''}));
     for(const finding of review.findings){
-     const detail=el('details',undefined,{'data-finding-id':finding.finding_id,id:finding.finding_id});
-     detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen'))));
+     const detail=el('details',undefined,{'data-finding-id':finding.finding_id,id:finding.finding_id,'data-document-view-key':'finding:'+section.index+':'+finding.finding_id});
+     detail.append(el('summary',finding.match.observed.text+' · '+(finding.included_in_draft?(locale()==='it'?'proposta inclusa':'vključen predlog'):(locale()==='it'?'indicazione, originale conservato':'nasvet, izvirnik ohranjen')),{'data-document-focus-key':'summary'}));
      detail.append(el('p',(locale()==='it'?'Posizione nella sezione: ':'Mesto v odseku: ')+finding.match.observed.start+'–'+finding.match.observed.end),el('p',finding.notice),el('blockquote',finding.source.focus.text));
      const advice=finding.source.recorded_advice;
      if(advice)for(const key of ['recommendation_force','scope_note','application_scope_note','mapping_status'])if(advice[key])detail.append(el('p',adviceLabel(key,advice[key])));
@@ -228,7 +232,7 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
      if(section.family_id)button(detail,locale()==='it'?'Apri la fonte completa':'Odpri celotni vir',()=>openFamily(section.family_id,{sourceId:finding.source.evidence_id}));
      item.append(detail);
     }
-    const checks=el('details');checks.append(el('summary',locale()==='it'?'Controlli svolti e copertura':'Opravljena preverjanja in obseg'));
+    const checks=el('details',undefined,{'data-document-view-key':'checks:'+section.index});checks.append(el('summary',locale()==='it'?'Controlli svolti e copertura':'Opravljena preverjanja in obseg',{'data-document-focus-key':'summary'}));
     for(const check of review.checks)checks.append(el('p',reviewCheckLabel(check)));
     item.append(checks);
    }
@@ -236,17 +240,17 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
    if(section.error_code)item.append(el('p',tr('failed'),{class:'error'}));
    if(section.family_id)button(item,'view',()=>openFamily(section.family_id));evidencePanel.append(item);
   }
-  if(evidence)renderAI(panel);
+  if(evidence)renderAI(panel);restoreDocumentView(panel,view);
  }
  function paintFileSelection(){const name=root.querySelector('[data-document-file-name]');if(name)name.textContent=fileInput?.files[0]?.name||tr('empty_file');if(fileInput)fileInput.setCustomValidity(fileInput.files.length?'':tr('document_file_required'));}
- function render(){root.replaceChildren();root.hidden=!enabled||Boolean(opener&&!expanded);if(opener){opener.hidden=!enabled;opener.textContent=locale()==='it'?'Revisione del testo (.docx, .txt)':'Pregled besedila (.docx, .txt)';opener.setAttribute('aria-expanded',String(enabled&&expanded));}if(!enabled)return;
+ function render(){const view=captureDocumentView(root.querySelector('[data-document-detail]'));root.replaceChildren();root.hidden=!enabled||Boolean(opener&&!expanded);if(opener){opener.hidden=!enabled;opener.textContent=locale()==='it'?'Revisione del testo (.docx, .txt)':'Pregled besedila (.docx, .txt)';opener.setAttribute('aria-expanded',String(enabled&&expanded));}if(!enabled)return;
   const outer=el(opener?'div':'details');if(!opener)outer.append(el('summary',tr('open')));root.append(outer);outer.append(el('p',tr('hint'),{class:'small muted'}));
   const form=el('form'),fileId=(root.id||'document-workspace')+'-file',nameId=fileId+'-name';
   if(!fileInput){fileInput=el('input',undefined,{id:fileId,type:'file',accept:'.txt,.docx',required:'required',class:'sr-only',tabindex:'-1','aria-hidden':'true'});fileInput.addEventListener('change',()=>{uploadKey=null;paintFileSelection();if(statusState?.error.code==='document_file_required')status(null);});fileInput.addEventListener('invalid',event=>{event.preventDefault();status({code:'document_file_required'});root.querySelector('[data-document-file-choose]')?.focus();});}
   const input=fileInput,field=el('div',undefined,{class:'document-file-field',role:'group','aria-label':tr('file')}),choice=el('div',undefined,{class:'document-file-choice'}),chooser=el('button',tr('choose_file'),{type:'button',class:'secondary','data-document-file-choose':'','aria-controls':fileId,'aria-describedby':nameId});
   input.setAttribute('aria-label',tr('choose_file'));chooser.addEventListener('click',()=>input.click());choice.append(chooser,el('span',undefined,{id:nameId,class:'small muted document-file-name',role:'status','aria-live':'polite','aria-atomic':'true','data-document-file-name':''}));field.append(el('span',tr('file'),{class:'document-file-label'}),input,choice);form.append(field,el('button',tr('upload'),{type:'submit',class:'secondary'}));
   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const file=input.files[0];if(!file)return;if(file.size>2*1024*1024){const error=Error();error.code='document_too_large';throw error;}uploadKey??=crypto.randomUUID();const token=epoch;const result=await api('/documents/upload',{method:'POST',blob:file,headers:{'X-Document-Name':encodeURIComponent(file.name),'X-Upload-Key':uploadKey}});if(token!==epoch)return;current=result;input.value='';uploadKey=null;paintFileSelection();renderDocument();await refresh();});});outer.append(form);paintFileSelection();
-  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument();
+  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument(view);
  }
  if(opener)opener.addEventListener('click',()=>{if(!enabled)return;expanded=!expanded;root.hidden=!expanded;opener.setAttribute('aria-expanded',String(expanded));if(expanded)root.querySelector('[data-document-file-choose]')?.focus();});
  return {

@@ -39,6 +39,15 @@ const listRaceHarness=harness.replace('const api=async(url,options={})=>{','cons
   }
   if(url==='/documents/upload')return structuredClone(second);`);
 
+const expansionHarness=harness.replace('let reads=0,nextTimer=',String.raw`
+first.processed=1;first.total=3;first.sections[0].state='complete';
+first.sections[0].document_result={mode:'review',status:'draft',edits:[],proposed_text:'First original.',review:{overview:{counts:{qualified_advice:1,recorded_contrast:0,recorded_form_context:0,executable_application:0}},findings:[{finding_id:'same-finding',match:{observed:{text:'First',start:0,end:5}},included_in_draft:false,notice:'Fixture finding notice.',source:{evidence_id:'source-first',focus:{text:'Recorded source context.'}},alternatives:[]}],checks:[]}};
+first.sections.push({index:1,state:'pending',text:'Second original.',output:''},{index:2,state:'pending',text:'Third original.',output:''});
+second.state='complete';second.processed=3;second.total=3;second.sections=structuredClone(first.sections).map(section=>({...section,state:'complete'}));
+let reads=0,nextTimer=`).replace('documentUploads({',String.raw`
+window.advancePoll=index=>{const next=structuredClone(first);next.processed=2;next.sections[1].state='complete';next.sections[1].output='Second completed result.';window.polls[index].resolve(next);};
+documentUploads({`);
+
 async function pageFor(browser,locale,width,moduleHarness=harness,selectFirst=true){
  const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -98,6 +107,40 @@ const settle=page=>page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,20)
     assert.equal(await page.locator('[data-document-detail] h3').textContent(),'second.txt');
     assert(!(await page.locator('[data-document-detail]').textContent()).includes('Current completed result.'));
     assert.deepEqual(errors,[]);checks.push({locale,width,case:'late_previous_selection',outcome,old_poll_inert:true});await context.close();
+   }
+   {
+    const {context,page,errors}=await pageFor(browser,locale,width,expansionHarness);
+    await poll(page,0);
+    // Open and focus after the GET was issued: state belongs to the response
+    // commit, rather than the earlier request. The next section progresses.
+    await page.locator('.document-section').first().locator(':scope>summary').click();
+    await page.locator('[data-finding-id="same-finding"]>summary').click();
+    await page.evaluate(()=>window.advancePoll(0));
+    await page.waitForFunction(()=>document.querySelector('[data-document-detail] [role=status]')?.textContent.includes('2 / 3'));
+    assert.equal(await page.locator('.document-section').first().evaluate(node=>node.open),true);
+    assert.equal(await page.locator('[data-finding-id="same-finding"]').evaluate(node=>node.open),true);
+    assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('[data-finding-id="same-finding"]>summary')),true);
+    assert((await page.locator('[data-document-detail]').textContent()).includes('Second completed result.'));
+    // Another document deliberately reuses section/finding keys. Its initial
+    // disclosure state must not inherit the preceding document's open panels.
+    await page.locator('[data-document-list]').focus();
+    await page.locator('[data-document-list]').selectOption('second');
+    await page.waitForFunction(()=>document.querySelector('[data-document-detail] h3')?.textContent==='second.txt');
+    assert.equal(await page.locator('.document-section').first().evaluate(node=>node.open),false);
+    assert.equal(await page.locator('[data-finding-id="same-finding"]').evaluate(node=>node.open),false);
+    assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('[data-document-list]')),true);
+    assert.deepEqual(errors,[]);checks.push({locale,width,case:'same_document_progress_keeps_live_disclosures_and_focus',opened_during_pending_get:true,section_and_finding_retained:true,progress_advanced:true,reused_keys_reset_for_other_document:true});await context.close();
+   }
+   {
+    const {context,page,errors}=await pageFor(browser,locale,width);
+    await poll(page,0);
+    // A user can collapse even the default-open single-section document.
+    await page.locator('.document-section>summary').click();
+    await page.evaluate(()=>window.completePoll(0));
+    await page.waitForFunction(()=>document.querySelector('[data-document-detail] [role=status]')?.textContent.includes('1 / 1'));
+    assert.equal(await page.locator('.document-section').evaluate(node=>node.open),false);
+    assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('.document-section>summary')),true);
+    assert.deepEqual(errors,[]);checks.push({locale,width,case:'single_section_explicitly_closed_state_and_focus',closed_state_retained:true,summary_focus_retained:true});await context.close();
    }
    {
     const {context,page,errors}=await pageFor(browser,locale,width,listRaceHarness,false);

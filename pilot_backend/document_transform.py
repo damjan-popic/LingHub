@@ -23,6 +23,7 @@ LOOKUP_WORDS = 12
 LOOKUP_OVERLAP_WORDS = 5
 MAX_LOOKUP_WINDOWS = 256
 MAX_SOURCE_LOOKUP_SECONDS = 30
+MAX_SOURCE_MATCHES = 256
 LITERAL_WINDOW_STEP = 250
 # Existing terminology adapter's lexical token boundary. Twelve tokens have
 # 57 spans of lengths1..6, within its native morphology cap64 and literal cap18.
@@ -276,15 +277,53 @@ def _merge_document_matches(matches):
     return unified.merge_source_matches(list(grouped.values()))
 
 
-def _collect_document_source(gateway, family, definition, details, discovery):
+def _document_source_record_limits(definitions, task):
+    """Share existing source result bounds across a document's query windows.
+
+    Reserve the complete existing exact-heading lookups before allocating the
+    remaining capture slots. Source order is stable; concurrent response timing
+    never decides which source gets a budget. This is a retrieval work bound,
+    not an editorial preference or an assertion of complete document coverage.
+    """
+    documentary = [row for row in definitions if row.get('source_type') != 'tool'
+                   and row['adapter_key'] not in unified.NON_DOCUMENTARY]
+    heading_source = next((row for row in documentary if row['slug'] == 'sp2001'
+        and row['adapter_key'] == 'official_reference_jsonl'), None)
+    reserved = (len(REVIEW_REFERENCE_HEADINGS) * unified.source_result_limit(heading_source)
+                if task['mode'] == 'review' and heading_source is not None else 0)
+    limits = {row['slug']: 0 for row in definitions}
+    remaining = max(0, MAX_SOURCE_MATCHES - reserved)
+    while remaining:
+        eligible = [row for row in documentary
+                    if limits[row['slug']] < unified.source_result_limit(row)]
+        if not eligible:
+            break
+        for row in eligible:
+            if not remaining:
+                break
+            limits[row['slug']] += 1
+            remaining -= 1
+    return limits
+
+
+def _collect_document_source(gateway, family, definition, details, discovery, record_limit=None):
     found, observations = [], []
     started = time.monotonic()
     unqueried = []
+    if record_limit is None:
+        record_limit = unified.source_result_limit(definition)
+    documentary = (definition.get('source_type') != 'tool'
+                   and definition['adapter_key'] not in unified.NON_DOCUMENTARY)
     for index, window in enumerate(discovery['windows']):
+        remaining = record_limit - len(_merge_document_matches(found))
+        if documentary and remaining <= 0:
+            unqueried = [{**item, 'reason': 'document_source_record_limit'} for item in discovery['windows'][index:]]
+            break
         if time.monotonic() - started >= MAX_SOURCE_LOOKUP_SECONDS:
             unqueried = [{**item, 'reason': 'source_discovery_time_limit'} for item in discovery['windows'][index:]]
             break
-        rows, observed = unified.collect_source(gateway, family, definition, details, query_override=window['query'])
+        rows, observed = unified.collect_source(gateway, family, definition, details, query_override=window['query'],
+            result_limit=min(remaining, unified.source_result_limit(definition)) if documentary else None)
         observed = {k: v for k, v in observed.items() if k not in {'original_question', 'request_plan'}}
         observed['input_span'] = {'start': window['start'], 'end': window['end'], 'query_sha256': window['query_sha256']}
         observed['possible_result_limit'] = (observed.get('has_more') is True or
@@ -314,6 +353,7 @@ def _collect_document_source(gateway, family, definition, details, discovery):
         limit=sum(item.get('limit') or 0 for item in observations), per_query_limit=first.get('limit'),
         has_more=True if limited else None, possible_result_limit=limited, windows=observations,
         unqueried_windows=unqueried, processing_limit_seconds=MAX_SOURCE_LOOKUP_SECONDS,
+        record_limit=record_limit, record_limit_basis='native_source_limit_shared_within_document_capture_capacity',
         query_variants=[item['query'] for item in observations],
         elapsed_ms=sum(item.get('elapsed_ms', 0) for item in observations),
         detail_requests=sum(item.get('detail_requests', 0) for item in observations))
@@ -516,10 +556,11 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
     # uploaded instruction is sent to the linguistic request parser.
     source_family = {'question': task['source_text'], 'locale': task['locale'],
                      'input_language': task['source_language'], 'context': ''}
+    record_limits = _document_source_record_limits(definitions, task)
     with ThreadPoolExecutor(max_workers=unified.DETAIL_WORKERS) as details, \
             ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(_collect_document_source, source_gateway, source_family,
-                   definition, details, discovery) for definition in definitions]
+                   definition, details, discovery, record_limits[definition['slug']]) for definition in definitions]
         for future in as_completed(futures):
             rows, observed = future.result()
             found.extend(rows)
@@ -537,7 +578,7 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
     # Exact source-owned term/advice matches precede generic large headings.
     # Every original remains frozen; this changes fitting order, not authority.
     found.sort(key=lambda row:_writer_source_priority(row,task))
-    if len(found) > 256:
+    if len(found) > MAX_SOURCE_MATCHES:
         raise Failure('unified_capture_too_large', 413)
     lexical_context = _freeze_document_lexical_context(gateway, task, found)
     if lexical_context:
@@ -556,7 +597,7 @@ def _freeze_general(gateway, family, policy, *, comma_preflight=None):
     external = [{k: deepcopy(v) for k, v in row.items() if k not in
                  {'source', 'discovery_captures', 'discovery_windows'}} for row in found]
     packet = {'version': unified.PACKET, 'matches': external, 'retrieval': coverage}
-    if (len(found) > 256 or len(coverage) > 64
+    if (len(found) > MAX_SOURCE_MATCHES or len(coverage) > 64
             or len(canonical(packet).encode()) > unified.MAX_BYTES):
         raise Failure('unified_capture_too_large', 413)
     statuses = {row['status'] for row in coverage}

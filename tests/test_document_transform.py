@@ -391,7 +391,12 @@ def test_translation_does_not_add_review_reference_lookups():
     assert bundle['retrieval']['discovery_basis'] == 'bounded_overlapping_source_windows_v2'
     coverage = bundle['retrieval']['coverage'][0]
     assert coverage['query_variants'] == [window['query'] for window in windows]
-    assert coverage['per_query_limit'] == 10 and coverage['limit'] == 10 * len(windows)
+    assert coverage['per_query_limit'] == 10
+    # All windows are still queried because they nominate one unchanged parent.
+    # Subsequent requests reserve only the nine remaining distinct-record slots.
+    assert coverage['record_limit'] == 10
+    assert coverage['limit'] == 10 + 9 * (len(windows) - 1)
+    assert coverage['unqueried_windows'] == []
     assert bundle['source_bundle']['matches'][0]['capture']['original_text'] == SOURCE
     assert not any(any(heading in path for heading in doc.REVIEW_REFERENCE_HEADINGS)
                    for path, _, _ in gateway.calls)

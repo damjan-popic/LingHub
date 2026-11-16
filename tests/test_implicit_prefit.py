@@ -167,7 +167,7 @@ def test_material_qualification_contrast_is_kept_separate_from_same_relation_ide
     units=[u for u in registry.units if u['payload'].get('version')==consultation.IMPLICIT_VERSION]
     result=selected_output(payload,runtime,registry,units)
     assert 'MECHANICAL scope condition'in result['answer_md']and len(result['citations'])==2
-    assert len(units[0]['payload']['records'])==2
+    assert len(units)==2 and all(len(u['payload']['records'])==1 for u in units)
 
 def test_comparable_head_alternatives_add_original_occurrence_coverage_without_quotas():
     case=retained()[1];_,_,_,profile=prepared(case)

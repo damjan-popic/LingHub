@@ -22,7 +22,7 @@ const api=async(url,options={})=>{
  if(url==='/documents/new/delete'){rows=rows.filter(d=>d.document_id!=='new');return {};}
  throw Error(url);
 };
-const ui=documentUploads({root:document.querySelector('#workspace'),api,locale:()=>document.documentElement.lang,openFamily:()=>{},errorText:e=>e.message});
+const ui=documentUploads({root:document.querySelector('#workspace'),opener:document.querySelector('#document-open'),api,locale:()=>document.documentElement.lang,openFamily:()=>{},errorText:e=>e.message});
 window.reopenSession=()=>{ui.session({documents:{enabled:false}});listReads=0;ui.session({documents:{enabled:true,evidence_review:true,evidence_review_only:true}});};
 ui.session({documents:{enabled:true,evidence_review:true,evidence_review_only:true}});
 `;
@@ -31,12 +31,12 @@ try{for(const locale of ['sl','it'])for(const width of [390,1280])for(const list
  const context=await browser.newContext({viewport:{width,height:1000},acceptDownloads:true}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await context.route('**/*',async route=>{
   const url=new URL(route.request().url());assert.equal(url.origin,origin);
-  const name=url.pathname.slice(1),body=name==='harness.mjs'?harness:['document-uploads.mjs','pilot.css'].includes(name)?fs.readFileSync(path.join(assets,name),'utf8'):`<!doctype html><html lang="${locale}"><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/pilot.css"></head><body><main><section id="workspace"></section></main><script type="module" src="/harness.mjs"></script></body></html>`;
+  const name=url.pathname.slice(1),body=name==='harness.mjs'?harness:['document-uploads.mjs','pilot.css'].includes(name)?fs.readFileSync(path.join(assets,name),'utf8'):`<!doctype html><html lang="${locale}"><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/pilot.css"></head><body><main><button id="document-open" class="primary" type="button" aria-expanded="false" aria-controls="workspace" hidden></button><section id="workspace"></section></main><script type="module" src="/harness.mjs"></script></body></html>`;
   await route.fulfill({status:200,contentType:name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html',body});
  });
- await page.goto(origin);await page.locator('#workspace>details>summary').click();
- const text=await page.locator('#workspace').innerText();assert(text.includes('.docx'));assert(text.includes('UTF-8'));assert(text.includes('2 MB'));
- if(listOutcome==='failure'){await page.evaluate(()=>window.rejectInitialList());await page.waitForFunction(()=>document.querySelector('[data-document-status]').textContent==='Old initial list failure');await page.evaluate(()=>window.reopenSession());await page.locator('#workspace>details>summary').click();}
+ await page.goto(origin);await page.locator('#document-open').click();
+ const text=await page.locator('#workspace').innerText();assert.equal(await page.locator('#document-open').textContent(),locale==='sl'?'Pregled besedila (.docx, .txt)':'Revisione del testo (.docx, .txt)');assert(!text.includes('UTF-8'));assert(!text.includes('2 MB'));assert.equal(await page.locator('#workspace input[type=file]').getAttribute('accept'),'.txt,.docx');
+ if(listOutcome==='failure'){await page.evaluate(()=>window.rejectInitialList());await page.waitForFunction(()=>document.querySelector('[data-document-status]').textContent==='Old initial list failure');await page.evaluate(()=>window.reopenSession());if(await page.locator('#workspace').isHidden())await page.locator('#document-open').click();}
  const file=page.locator('input[type=file]');
  // The initial list request can finish after an upload's refreshed list.
  await file.setInputFiles({name:'new.txt',mimeType:'text/plain',buffer:Buffer.from('initial upload')});await page.locator('#workspace form button[type=submit]').first().click();await page.waitForFunction(()=>document.querySelector('[data-document-detail] h3')?.textContent==='new.txt');
@@ -71,5 +71,5 @@ try{for(const locale of ['sl','it'])for(const width of [390,1280])for(const list
  assert.equal(await page.locator('.document-options select').count(),3);assert.equal(await page.locator('.document-options select').nth(0).inputValue(),'review');assert.equal(await page.locator('.document-options select').nth(1).inputValue(),'sl');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);assert.deepEqual(errors,[]);
  if(process.env.KLIKAI_DOCUMENT_NAV_OUTPUT){fs.mkdirSync(process.env.KLIKAI_DOCUMENT_NAV_OUTPUT,{recursive:true});await page.screenshot({path:path.join(process.env.KLIKAI_DOCUMENT_NAV_OUTPUT,`navigation-${locale}-${width}-${listOutcome}.png`),fullPage:true});}
- checks.push({locale,width,listOutcome,late_initial_list_ignored:true,late_initial_list_error_ignored:listOutcome==='failure',relevant_initial_list_error_visible:listOutcome==='failure',late_previous_complete_poll_ignored:true,stale_status_error_and_draft_controls_ignored:true,new_report_download_identity:true,two_section_preview:true,explicit_start_only:true,error_recovery:true,formats_limits_visible:true,evidence_only_preserved:true});await context.close();
+ checks.push({locale,width,listOutcome,late_initial_list_ignored:true,late_initial_list_error_ignored:listOutcome==='failure',relevant_initial_list_error_visible:listOutcome==='failure',late_previous_complete_poll_ignored:true,stale_status_error_and_draft_controls_ignored:true,new_report_download_identity:true,two_section_preview:true,explicit_start_only:true,error_recovery:true,formats_on_opener_and_entry_hint_absent:true,file_accept_filter_preserved:true,evidence_only_preserved:true});await context.close();
 }console.log(JSON.stringify({status:'PASS',scope:'offline browser protocol fixtures; zero service/model calls',checks}));}finally{await browser.close();}})().catch(e=>{console.error(e.stack);process.exit(1);});

@@ -52,6 +52,48 @@ source configuration on the shared application backend. A separate terminology
 edition must be an explicit deployment choice. Existing frozen work keeps its
 original captures, source revisions and retained-code identities.
 
+## HTTPS proxy upload capacity
+
+The external HTTPS proxy must accept the application's advertised 2 MiB raw
+file body on the exact document-upload endpoint. A smaller proxy limit rejects
+valid documents before document processing can start.
+Preserve the smaller general JSON-request limit; the reference deployment uses
+`64k` for other routes. Apply the larger allowance only to the upload location
+inside the existing KLIKai HTTPS server, leaving other virtual hosts and
+restricted account/admin/comparison routes unchanged.
+
+Resolve the location from the application's configured `base_path`:
+
+| Configured `base_path` | Exact Nginx upload-location matcher |
+| --- | --- |
+| Empty | `= /api/pilot/documents/upload` |
+| `/klikai` | `= /klikai/api/pilot/documents/upload` |
+
+Copy the complete existing KLIKai proxy block to that exact location. Set
+exactly one `client_max_body_size 2m;` directive within it, replacing any copied
+size directive rather than adding a duplicate. Retain its configured upstream, trusted
+Host and boundary-header include, client-IP/forwarded-header handling,
+buffering, timeouts, cache and retry policy. A sibling `location /` block does
+not supply its proxy directives to the new location, so a size-only location
+would be incomplete. Preserve the URI/base prefix expected by the application
+when configuring `proxy_pass`; do not accidentally strip the prefix.
+
+The browser sends the file directly as an `application/octet-stream` body,
+without a multipart envelope. Nginx `2m` and the application limit
+`2*1024*1024` therefore permit the same maximum file bytes. Authentication,
+CSRF, account eligibility, ownership and application-side body limits still
+apply. Keep protected boundary-header values outside repository examples and
+carry their existing include files in the protected deployment configuration.
+
+On the target host, inspect the effective enabled site, preserve its current
+configuration, run `nginx -t`, then gracefully reload the proxy. Through the
+real HTTPS origin, verify a valid exact 2 MiB DOCX produces its saved preview
+and a 2 MiB + 1 byte body is rejected with HTTP 413. These boundary checks do not need to
+start a linguistic review. Verify the smaller general limit and restricted
+routes remain configured. Retain this upload-location rule, configured base
+prefix and trusted proxy includes when moving the installation, alongside the
+application settings and preserved data below.
+
 ## Moving an installation
 
 Use the existing protected SQLite backup/restore mechanism and deletion journal

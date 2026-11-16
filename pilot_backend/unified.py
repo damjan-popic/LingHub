@@ -403,11 +403,17 @@ def fetch_editorial_detail(gateway, slug, rid):
         return None, error, round((time.monotonic() - started) * 1000, 3)
 
 
-def collect_source(gateway, family, definition, detail_pool=None, *, query_override=None, lemma_candidate=None):
+def source_result_limit(definition):
+    """The existing native result bound for one configured documentary source."""
+    return 20 if definition['adapter_key'] in TERM_ADAPTERS else 3 if definition['slug'] in editorial.SOURCES else 10
+
+
+def collect_source(gateway, family, definition, detail_pool=None, *, query_override=None, lemma_candidate=None,
+                   result_limit=None):
     if detail_pool is None:
         with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
             return collect_source(gateway, family, definition, pool, query_override=query_override,
-                                  lemma_candidate=lemma_candidate)
+                                  lemma_candidate=lemma_candidate, result_limit=result_limit)
     started = time.monotonic()
     slug, adapter = definition['slug'], definition['adapter_key']
     query, locale = family['question'] if query_override is None else query_override, family['locale']
@@ -422,7 +428,11 @@ def collect_source(gateway, family, definition, detail_pool=None, *, query_overr
             # expansion. Explicit domain remains visible in the request plan.
             query = target['text']
     variants = list(dict.fromkeys([query, family['question']])) if query_override is None else [query]
-    limit = 20 if adapter in TERM_ADAPTERS else 3 if slug in editorial.SOURCES else 10
+    limit = source_result_limit(definition)
+    if result_limit is not None:
+        if type(result_limit) is not int or not 1 <= result_limit <= limit:
+            raise Failure('invalid_request')
+        limit = result_limit
     coverage = {'family': slug, 'source_label': definition['display_name'], 'status': 'unavailable', 'returned_count': 0,
                 'limit': limit, 'has_more': None, 'elapsed_ms': 0.0,
                 'search_ms': 0.0, 'detail_ms': 0.0, 'detail_requests': 0,

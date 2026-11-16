@@ -11,7 +11,7 @@ Object.assign(messages.it,{document_translation_ineligible:'Il traduttore privat
 messages.sl.document_translation_cancel_pending='Prevod je ustavljen za ta dokument. Čakamo še na potrditev ustavitve prevajalnika; pozni rezultat ne bo uporabljen.';
 messages.it.document_translation_cancel_pending='La traduzione del documento è interrotta. Si attende la conferma di arresto del traduttore; un risultato tardivo non sarà utilizzato.';
 export function documentUploads({root,api,locale,openFamily,errorText}){
- let current=null,rows=[],timer=null,epoch=0,selection=0,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null;
+ let current=null,rows=[],timer=null,epoch=0,selection=0,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
  const tr=key=>{
   if(evidenceOnly){
@@ -35,16 +35,25 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
  const el=(tag,text,attrs={})=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;};
  const label=(parent,text,input)=>{const n=el('label',text);n.append(input);parent.append(n);return input;};
  const select=(choices,value)=>{const n=el('select');for(const[v,title]of choices){const option=el('option',title,{value:v});n.append(option);}n.value=value;return n;};
- function status(error){const n=root.querySelector('[data-document-status]');if(n)n.textContent=error?(messages[locale()==='it'?'it':'sl'][error.code]||errorText(error)):'';}
+ const statusOwner=(origin,documentId=current?.document_id??null)=>({origin,epoch,selection,documentId});
+ const sameOwner=(left,right)=>left.epoch===right.epoch&&left.selection===right.selection&&left.documentId===right.documentId;
+ function paintStatus(){const n=root.querySelector('[data-document-status]');if(n)n.textContent=statusState&&sameOwner(statusState,statusOwner(statusState.origin))?(messages[locale()==='it'?'it':'sl'][statusState.error.code]||errorText(statusState.error)):'';}
+ function status(error,origin='action',owner=statusOwner(origin)){
+  if(error&&!sameOwner(owner,statusOwner(origin)))return;
+  // A background failure must not replace a current action/list error.
+  if(error&&origin==='poll'&&statusState&&statusState.origin!=='poll'&&sameOwner(statusState,owner))return;
+  statusState=error?{...owner,origin,error}:null;paintStatus();
+ }
+ function clearStatus(origin,owner){if(statusState?.origin===origin&&sameOwner(statusState,owner)){statusState=null;paintStatus();}}
  async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');const token=epoch;
   // A delayed poll for the previous document must not replace a new upload,
   // cancellation or deletion. Polling resumes for the resulting selection.
   try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');schedule();}}}
  function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain'});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
- async function refresh(){const token=epoch,selected=selection;try{const response=await api('/documents');if(token!==epoch||selected!==selection)return;rows=response.documents;renderList();}catch(error){if(token===epoch&&selected===selection)throw error;}}
+ async function refresh(){const owner=statusOwner('list');try{const response=await api('/documents');if(!sameOwner(owner,statusOwner('list')))return;rows=response.documents;renderList();clearStatus('list',owner);}catch(error){if(sameOwner(owner,statusOwner('list')))throw error;}}
  function renderList(){const select=root.querySelector('[data-document-list]');if(!select)return;select.replaceChildren(el('option',tr(rows.length?'choose':'empty'),{value:''}));for(const row of rows)select.append(el('option',row.name+' · '+stateLabel(row.state),{value:row.document_id}));select.value=current?.document_id||'';}
- async function load(identifier,manual=true){clearTimeout(timer);if(manual)selection++;const token=epoch,selected=selection;const doc=await api('/documents/'+encodeURIComponent(identifier));if(token!==epoch||selected!==selection)return;current=doc;renderDocument();renderList();schedule();}
- function schedule(){clearTimeout(timer);if(enabled&&current&&(active.has(current.state)||active.has(current.ai_suggestions?.state))){const token=epoch,selected=selection,id=current.document_id;timer=setTimeout(()=>{if(token===epoch&&selected===selection)load(id,false).catch(error=>{if(token===epoch&&selected===selection){status(error);schedule();}});},1500);}}
+ async function load(identifier,manual=true){clearTimeout(timer);if(manual)selection++;const token=epoch,selected=selection,owner=statusOwner('poll',identifier);const doc=await api('/documents/'+encodeURIComponent(identifier));if(token!==epoch||selected!==selection||!manual&&(!enabled||current?.document_id!==identifier))return;current=doc;if(!manual)clearStatus('poll',owner);renderDocument();renderList();schedule();}
+ function schedule(){clearTimeout(timer);if(enabled&&current&&(active.has(current.state)||active.has(current.ai_suggestions?.state))){const owner=statusOwner('poll'),id=current.document_id;timer=setTimeout(()=>{if(enabled&&sameOwner(owner,statusOwner('poll')))load(id,false).catch(error=>{if(enabled&&sameOwner(owner,statusOwner('poll'))){status(error,'poll',owner);schedule();}});},1500);}}
  const aiLabel=()=>locale()==='it'?'Suggerimenti dell’intelligenza artificiale — verificare prima dell’uso':'Predlogi umetne inteligence — preverite pred uporabo';
  const aiWarning=()=>locale()==='it'?'I suggerimenti IA possono contenere errori o cambiare il significato. Verificali prima di usarli. Non sono inseriti automaticamente nel testo.':'Predlogi umetne inteligence lahko vsebujejo napake ali spremenijo pomen. Pred uporabo jih preverite. Predlogi niso samodejno vključeni v besedilo.';
  async function aiAction(action,body={}){current=await api('/documents/'+current.document_id+'/ai/'+action,{method:'POST',body});renderDocument();schedule();}
@@ -231,11 +240,11 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   const outer=el('details');outer.append(el('summary',tr('open')));root.append(outer);outer.append(el('h2',tr('title')),el('p',tr('hint'),{class:'small muted'}));
   const form=el('form');const input=label(form,tr('file'),el('input',undefined,{type:'file',accept:'.txt,.docx',required:'required'}));input.addEventListener('change',()=>{uploadKey=null;});form.append(el('button',tr('upload'),{type:'submit',class:'secondary'}));
   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const file=input.files[0];if(!file)return;if(file.size>2*1024*1024){const error=Error();error.code='document_too_large';throw error;}uploadKey??=crypto.randomUUID();const token=epoch;const result=await api('/documents/upload',{method:'POST',blob:file,headers:{'X-Document-Name':encodeURIComponent(file.name),'X-Upload-Key':uploadKey}});if(token!==epoch)return;current=result;input.value='';uploadKey=null;renderDocument();await refresh();});});outer.append(form);
-  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument();
+  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument();
  }
  return {
-  session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true,review=capabilities.documents?.evidence_review===true,only=capabilities.documents?.evidence_review_only===true,summary=capabilities.documents?.editorial_summary===true,ai=capabilities.documents?.ai_suggestions===true;if(next===enabled&&candidate===privateTranslation&&review===evidenceReview&&only===evidenceOnly&&summary===editorialSummary&&ai===aiSuggestions)return;enabled=next;privateTranslation=candidate;evidenceReview=review;evidenceOnly=only;editorialSummary=summary;aiSuggestions=ai;if(only){values.mode='review';values.source_language='sl';values.translation_provider='';}render();if(enabled)refresh().catch(status);},
+  session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true,review=capabilities.documents?.evidence_review===true,only=capabilities.documents?.evidence_review_only===true,summary=capabilities.documents?.editorial_summary===true,ai=capabilities.documents?.ai_suggestions===true;if(next===enabled&&candidate===privateTranslation&&review===evidenceReview&&only===evidenceOnly&&summary===editorialSummary&&ai===aiSuggestions)return;enabled=next;privateTranslation=candidate;evidenceReview=review;evidenceOnly=only;editorialSummary=summary;aiSuggestions=ai;if(only){values.mode='review';values.source_language='sl';values.translation_provider='';}render();if(enabled){const owner=statusOwner('list');refresh().catch(error=>status(error,'list',owner));}},
   locale(){const opened=root.querySelector('details')?.open;render();if(opened&&root.querySelector('details'))root.querySelector('details').open=true;},
-  reset(){epoch++;selection++;clearTimeout(timer);enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;root.removeAttribute('aria-busy');render();}
+  reset(){epoch++;selection++;clearTimeout(timer);enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;statusState=null;root.removeAttribute('aria-busy');render();}
  };
 }

@@ -12,7 +12,7 @@ import {basePath,localePath,anchorForText,tierBlocks,paragraphGroups,isCpuTask,m
 const $ = id => document.getElementById(id);
 const base = basePath(document.documentElement.dataset.pilotBase);
 const state = {locale:document.documentElement.lang==='it'?'it':'sl',messages:{},csrf:null,user:null,capabilities:{},family:null,comparison:null,job:null,longOpen:false,feedback:new Map(),feedbackDrafts:new Map(),selection:null,feedbackTarget:null,requestKeys:new Map(),polling:new Map(),delivered:new Set(),boot:0,clarification:null,answerLocaleExplicit:false,followup:null,feedbackEvents:new Map(),submitting:false,composerFamily:null,composerSlot:null,composerReady:false,earlyComposerEdited:false};
-const documents=documentUploads({root:document.getElementById('document-workspace'),api,locale:()=>state.locale,openFamily:loadFamily,errorText});
+const documents=documentUploads({root:document.getElementById('document-workspace'),opener:document.getElementById('document-open'),api,locale:()=>state.locale,openFamily:loadFamily,errorText});
 let matches = {family:null,phase:null,items:[],next:null,loaded:false,loading:false,coverage:[],returned:null}, matchesRequest=0, sourceRequest=0, familyRequest=0, submissionRequest=0;
 let registry = {sources:[]};
 let signInResume = null;

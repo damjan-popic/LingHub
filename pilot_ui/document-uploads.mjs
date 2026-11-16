@@ -10,14 +10,14 @@ Object.assign(messages.sl,{document_translation_ineligible:'Zasebni prevajalnik 
 Object.assign(messages.it,{document_translation_ineligible:'Il traduttore privato è disponibile solo dallo sloveno all’italiano.',document_translation_inline_unsupported:'Questa traduzione privata non supporta collegamenti o enfasi nell’originale. L’originale è conservato.',document_translation_section_limit:'La traduzione privata supporta al massimo quattro sezioni.',document_translation_unavailable:'Il traduttore privato non è disponibile.',document_translation_preflight_failed:'La verifica del traduttore privato non è riuscita. La traduzione non è iniziata.',document_translation_input_limit:'Una sezione completa supera il limite del traduttore privato. Il testo non è stato accorciato.',document_translation_expired:'Il tempo della lavorazione privata è scaduto. Il rapporto conserva gli esiti effettivi.'});
 messages.sl.document_translation_cancel_pending='Prevod je ustavljen za ta dokument. Čakamo še na potrditev ustavitve prevajalnika; pozni rezultat ne bo uporabljen.';
 messages.it.document_translation_cancel_pending='La traduzione del documento è interrotta. Si attende la conferma di arresto del traduttore; un risultato tardivo non sarà utilizzato.';
-export function documentUploads({root,api,locale,openFamily,errorText}){
- let current=null,rows=[],timer=null,epoch=0,selection=0,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null;
+export function documentUploads({root,opener=null,api,locale,openFamily,errorText}){
+ let current=null,rows=[],timer=null,epoch=0,selection=0,expanded=false,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
  const tr=key=>{
   if(evidenceOnly){
    const it=locale()==='it';
-   if(['title','open','review'].includes(key))return it?'Revisione del testo con fonti':'Pregled besedila z viri';
-   if(key==='hint')return it?'Carica Word (.docx) o testo UTF-8 (.txt), massimo 2 MB. Controlla il testo estratto e avvia la revisione. Lo strumento mostra proposte e avvertenze sostenute dalle fonti: verificale nel contesto; non garantisce di individuare tutti gli errori.':'Naložite Word (.docx) ali besedilo UTF-8 (.txt), največ 2 MB. Preverite zajeto besedilo in začnite pregled. Orodje pokaže z viri podprte predloge in opozorila: preverite jih v sobesedilu; pregled ne zagotavlja, da so odkrite vse napake.';
+   if(['title','open','review'].includes(key))return it?'Revisione del testo':'Pregled besedila';
+   if(key==='hint')return it?'Word (.docx) o testo UTF-8 (.txt), massimo 2 MB.':'Word (.docx) ali besedilo UTF-8 (.txt), največ 2 MB.';
   }
   return messages[locale()==='it'?'it':'sl'][key]||messages.sl[key]||key;
  };
@@ -236,15 +236,16 @@ export function documentUploads({root,api,locale,openFamily,errorText}){
   }
   if(evidence)renderAI(panel);
  }
- function render(){root.replaceChildren();root.hidden=!enabled;if(!enabled)return;
-  const outer=el('details');outer.append(el('summary',tr('open')));root.append(outer);outer.append(el('h2',tr('title')),el('p',tr('hint'),{class:'small muted'}));
+ function render(){root.replaceChildren();root.hidden=!enabled||Boolean(opener&&!expanded);if(opener){opener.hidden=!enabled;opener.textContent=locale()==='it'?'Revisione del testo':'Pregled besedila';opener.setAttribute('aria-expanded',String(enabled&&expanded));}if(!enabled)return;
+  const outer=el(opener?'div':'details');if(!opener)outer.append(el('summary',tr('open')));root.append(outer);outer.append(el('p',tr('hint'),{class:'small muted'}));
   const form=el('form');const input=label(form,tr('file'),el('input',undefined,{type:'file',accept:'.txt,.docx',required:'required'}));input.addEventListener('change',()=>{uploadKey=null;});form.append(el('button',tr('upload'),{type:'submit',class:'secondary'}));
   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const file=input.files[0];if(!file)return;if(file.size>2*1024*1024){const error=Error();error.code='document_too_large';throw error;}uploadKey??=crypto.randomUUID();const token=epoch;const result=await api('/documents/upload',{method:'POST',blob:file,headers:{'X-Document-Name':encodeURIComponent(file.name),'X-Upload-Key':uploadKey}});if(token!==epoch)return;current=result;input.value='';uploadKey=null;renderDocument();await refresh();});});outer.append(form);
   outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument();
  }
+ if(opener)opener.addEventListener('click',()=>{if(!enabled)return;expanded=!expanded;root.hidden=!expanded;opener.setAttribute('aria-expanded',String(expanded));if(expanded)root.querySelector('input[type=file]')?.focus();});
  return {
   session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true,review=capabilities.documents?.evidence_review===true,only=capabilities.documents?.evidence_review_only===true,summary=capabilities.documents?.editorial_summary===true,ai=capabilities.documents?.ai_suggestions===true;if(next===enabled&&candidate===privateTranslation&&review===evidenceReview&&only===evidenceOnly&&summary===editorialSummary&&ai===aiSuggestions)return;enabled=next;privateTranslation=candidate;evidenceReview=review;evidenceOnly=only;editorialSummary=summary;aiSuggestions=ai;if(only){values.mode='review';values.source_language='sl';values.translation_provider='';}render();if(enabled){const owner=statusOwner('list');refresh().catch(error=>status(error,'list',owner));}},
   locale(){const opened=root.querySelector('details')?.open;render();if(opened&&root.querySelector('details'))root.querySelector('details').open=true;},
-  reset(){epoch++;selection++;clearTimeout(timer);enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;statusState=null;root.removeAttribute('aria-busy');render();}
+  reset(){epoch++;selection++;clearTimeout(timer);expanded=false;enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;statusState=null;root.removeAttribute('aria-busy');render();}
  };
 }

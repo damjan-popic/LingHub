@@ -1,4 +1,5 @@
 import {sourceKey,tierBlocks,blockTextPresentation,answerNotes,pendingStates,jobState} from './core.mjs';
+import {layeredAnswerSections} from './answer-layout.mjs';
 
 export function sourcePresentation(registry,item,locale='sl') {
   const key=sourceKey(item), alias=key==='epravopis-slovar'?key:key.startsWith('epravopis')?'epravopis':key;
@@ -37,7 +38,7 @@ export function legendSources(registry,configured,locale='sl') {
 
 // Use the same rendered citation mapping as the answer, including visible
 // qualification citations. Discovery matches are deliberately not an input.
-export function answerCopyText(visibleText,tier,label,sourcesHeading) {
+export function answerCopyText(visibleText,tier,label,sourcesHeading,translate) {
   const references=tierBlocks(tier).flatMap(block=>{
     const view=blockTextPresentation(tier,block);
     return [...view.parts,view.separateCitation,...(view.separateCitations||[])].filter(part=>part?.evidence);
@@ -56,7 +57,25 @@ export function answerCopyText(visibleText,tier,label,sourcesHeading) {
       credits.set(String(number),'['+number+'] '+name+(title?' — '+title:''));
     }
   }
-  const body=String(visibleText||'').trim();
+  const sections=layeredAnswerSections(tier),blocks=new Map(tierBlocks(tier).map(b=>[b.block_id,b]));
+  const complete=[];
+  const selected=part=>{
+    const block={...blocks.get(part.block_id),text:part.text},view=blockTextPresentation(tier,block);
+    const refs=[view.separateCitation,...(view.separateCitations||[])].filter(Boolean);
+    return part.text+refs.map(ref=>' '+ref.text).join('');
+  };
+  if(sections)for(const section of sections){
+    if(section.block_id){complete.push(selected({...blocks.get(section.block_id)}));continue;}
+    complete.push(section.intro.text,...section.primary.map(selected));
+    if(section.additional.length)complete.push(tier.answer_presentation.additional_label,...section.additional.map(selected));
+    complete.push(section.footer.text);
+  }
+  if(sections)for(const note of answerNotes(tier)){
+    const text=note.text||(translate?translate(note.key,note.values):'');
+    if(text)complete.push(text+note.evidence.map(e=>e.local_number||e.number||e.note_number)
+      .filter(n=>Number.isInteger(n)&&n>0).map(n=>' ['+n+']').join(''));
+  }
+  const body=sections?complete.join('\n\n'):String(visibleText||'').trim();
   return credits.size?body+'\n\n'+sourcesHeading+'\n'+[...credits.values()].join('\n'):body;
 }
 

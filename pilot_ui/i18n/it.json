@@ -467,5 +467,6 @@
   "frequency_position_rank": "posizione {rank} su {total} voci di lessemi con dati di frequenza",
   "frequency_position_range": "Intervallo della posizione: a sinistra voci meno frequenti, a destra più frequenti.",
   "frequency_less": "meno frequenti",
-  "frequency_more": "più frequenti"
+  "frequency_more": "più frequenti",
+  "complete_answer": "Risposta completa"
 }

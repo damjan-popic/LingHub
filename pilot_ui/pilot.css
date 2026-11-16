@@ -79,3 +79,7 @@ dialog{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 44px);overflo
 
 .document-section p,.document-section blockquote,[data-document-detail] p{overflow-wrap:anywhere}
 .document-section blockquote{white-space:pre-wrap;margin:1rem 0}
+.additional-lexical-context,.complete-answer{margin:1rem 0;padding:.75rem;border:1px solid var(--border,#b8bcc4);border-radius:.4rem}
+.additional-lexical-context>summary,.complete-answer>summary{cursor:pointer;font-weight:600;overflow-wrap:anywhere}
+.additional-lexical-context>summary:focus-visible,.complete-answer>summary:focus-visible{outline:2px solid currentColor;outline-offset:4px}
+.complete-answer pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}

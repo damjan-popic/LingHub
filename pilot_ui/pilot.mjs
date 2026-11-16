@@ -1,7 +1,7 @@
 import {submissionJournal,pollDecision} from './submission.mjs';
 import {documentUploads} from './document-uploads.mjs';
 import {publicRelease} from './public-release.mjs';
-import {appendAnswerParts} from './answer-layout.mjs';
+import {appendAnswerParts,appendLayeredAnswer} from './answer-layout.mjs';
 import {appendMorphologyTables,appendFrequencyPosition} from './morphology-tables.mjs';
 import {commaExplanationHeading,renderCommaProposal} from './comma-proposal.mjs';
 import {noAnswerFeedback,canOpenCurrentOriginal,ordinaryFamilyView} from './core.mjs';
@@ -204,7 +204,16 @@ function renderText(tier,kind,node,reference={}) {
   const commaHeading=commaExplanationHeading(tier?.comma_proposal,tier?.citations);
   if(commaHeading)node.append(el('h3',t(commaHeading),{class:'comma-explanation-heading'}));
   const citationButton=part=>{const button=el('button',part.text,{type:'button',class:'citation','aria-label':t('source_number',{number:part.number})});button.addEventListener('click',()=>openSource(tier,evidenceId(part.evidence),kind,reference));return button;};
-  for(const group of paragraphGroups(blocks)){
+  const renderFragment=(parent,block,start,cited)=>{
+    const p=el('p',null),span=el('span',null,{'data-text-start':String(start)});
+    if(block.block_id){span.dataset.blockId=block.block_id;span.dataset.runId=tier.run_id||'';span.dataset.tier=kind;}
+    const presentation=cited?blockTextPresentation(tier,block):{parts:[{text:block.text}]};
+    appendAnswerParts(span,presentation.parts,el,citationButton);p.append(span);
+    if(presentation.separateCitation)p.append(citationButton(presentation.separateCitation));
+    for(const citation of presentation.separateCitations||[])p.append(citationButton(citation));
+    parent.append(p);
+  };
+  if(!appendLayeredAnswer(node,tier,el,renderFragment,t))for(const group of paragraphGroups(blocks)){
     const p=el('p',null);if(group.id)p.dataset.paragraphId=group.id;
     for(const [index,block] of group.blocks.entries()){
       if(index)p.append(document.createTextNode(' '));
@@ -471,7 +480,10 @@ async function openSource(tier,id,kind,reference={}) {
 }
 function captureSelection() {
   const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount)return;const range=selection.getRangeAt(0),start=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement,end=range.endContainer.nodeType===1?range.endContainer:range.endContainer.parentElement,block=start.closest('[data-block-id]');if(!block||end.closest('[data-block-id]')!==block)return;
-  const before=range.cloneRange();before.selectNodeContents(block);before.setEnd(range.startContainer,range.startOffset);const startOffset=before.toString().length;const anchor=anchorForText(block.dataset.blockId,block.textContent,startOffset,startOffset+range.toString().length);if(anchor)state.selection={run_id:block.dataset.runId,tier:block.dataset.tier,anchor};
+  const before=range.cloneRange();before.selectNodeContents(block);before.setEnd(range.startContainer,range.startOffset);
+  const canonical=tierBlocks(state.family?.[block.dataset.tier]).find(item=>item.block_id===block.dataset.blockId)?.text||block.textContent;
+  const prefix=Array.from(canonical).slice(0,Number(block.dataset.textStart||0)).join('').length;
+  const startOffset=prefix+before.toString().length;const anchor=anchorForText(block.dataset.blockId,canonical,startOffset,startOffset+range.toString().length);if(anchor)state.selection={run_id:block.dataset.runId,tier:block.dataset.tier,anchor};
 }
 function openFeedback(tier,kind,target={kind:'answer'}) {
   const selection=target.kind==='answer'&&state.selection?.run_id===tier.run_id?state.selection.anchor:null;state.feedbackTarget={tier,kind,anchor:selection,target,key:crypto.randomUUID()};$('feedback-target').textContent=t(target.kind==='source'?'feedback_source':kind==='long'?'feedback_long':'feedback_short');$('feedback-selection').hidden=!selection;$('feedback-selection').textContent=selection?.quote||'';$('feedback-form').reset();textStatus('feedback-status','');showDialog('feedback-dialog');
@@ -557,7 +569,7 @@ function bind() {
   $('testing-help').addEventListener('click',()=>showDialog('testing-guide'));
   $('expand-button').addEventListener('click',event=>expand(event.currentTarget));$('translate-answer').addEventListener('click',event=>submitQuestion(event.currentTarget,{question:state.family.question,locale:state.locale,model:state.family.model}));
   // Keep the clipboard button enabled so copying does not drop keyboard focus.
-  $('copy-answer').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(answerCopyText($('short-answer').innerText,state.family?.short,item=>sourceLabel(item).label,t('copy_sources')));textStatus('answer-status','copied');}catch{ textStatus('answer-status','copy_failed');}});
+  $('copy-answer').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(answerCopyText($('short-answer').innerText,state.family?.short,item=>sourceLabel(item).label,t('copy_sources'),t));textStatus('answer-status','copied');}catch{ textStatus('answer-status','copy_failed');}});
   $('cancel-job').addEventListener('click',event=>action(event.currentTarget,async()=>{const current=state.job;if(!current?.job_id)return;const result=await api('/jobs/'+encodeURIComponent(current.job_id)+'/cancel',{method:'POST'});if(state.job?.job_id===current.job_id)setJob(result.job||result,current.tier);}));$('retry-job').addEventListener('click',()=>{if(state.job?.job_id)pollJob(state.job.job_id,familyId(),state.job.tier);});
   document.addEventListener('selectionchange',captureSelection);$('feedback-form').addEventListener('submit',event=>{event.preventDefault();saveFeedback(event.submitter);});for(const tag of ['linguistic','missing_context','unsupported','source','accent','language','interface','slow','other']){const label=el('label'),input=el('input',null,{type:'checkbox',value:tag});label.append(input,el('span',t('issue_'+tag),{'data-i18n':'issue_'+tag}));$('feedback-tags').append(label);}
   $('compare-button').addEventListener('click',()=>showDialog('compare-dialog'));$('start-blind').addEventListener('click',event=>startComparison(true,event.currentTarget));$('start-named').addEventListener('click',event=>startComparison(false,event.currentTarget));$('comparison-close').addEventListener('click',()=>{$('comparison').hidden=true;});

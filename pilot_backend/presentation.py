@@ -7,6 +7,98 @@ from pathlib import Path
 import re
 
 
+def checked_answer_presentation(value):
+    """Validate a derivative's complete text ranges and selected lineage.
+
+    The CORE consumer alone assigns roles from its validated registry. This
+    reader validates the received binding, never inferring roles from prose.
+    Missing, stale or malformed views fall back to the full canonical answer.
+    """
+    from .store import digest
+    view=value.get('answer_presentation')
+    if not isinstance(view,dict):return None
+    try:
+        if (set(view)!={'version','registry_sha256','rendered_result_sha256','answer_sha256','locale',
+                       'additional_label','sections','presentation_sha256'}
+                or view['version']!='layered-consultation-presentation-v1'
+                or view['locale']not in {'sl','it'}
+                or view['presentation_sha256']!=digest({k:v for k,v in view.items()if k!='presentation_sha256'})
+                or any(not re.fullmatch('[0-9a-f]{64}',view[k])for k in
+                       ('registry_sha256','rendered_result_sha256','answer_sha256','presentation_sha256'))
+                or view['answer_sha256']!=hashlib.sha256(value.get('answer_md','').encode()).hexdigest()
+                or any(value.get(k,view[k])!=view[k]for k in ('registry_sha256','rendered_result_sha256'))
+                or not isinstance(view['additional_label'],str)or not 0<len(view['additional_label'])<=300
+                or not isinstance(view['sections'],list)or not 0<len(view['sections'])<=100):return None
+        raw=value.get('blocks')or value.get('display_blocks')or[]
+        blocks={b['block_id']:b for b in raw}
+        if len(blocks)!=len(raw)or not blocks:return None
+        claims={c['claim_id']:c for c in value.get('claims',[])}
+        ranges={};ordinary=set();contexts=set();bodies=set()
+        def check(part,roles):
+            if set(part)!={'block_id','unit_id','claim_id','support_ids','text','start','end','role'}:raise ValueError()
+            if part['role']not in roles:raise ValueError()
+            block=blocks[part['block_id']];a,z=part['start'],part['end']
+            if (type(a)is not int or type(z)is not int or not 0<=a<z<=len(block['text'])
+                    or part['text']!=block['text'][a:z]):raise ValueError()
+            if claims:
+                claim=claims[part['claim_id']]
+                if (part['unit_id']!=claim['unit_id']or part['support_ids']!=claim['support_ids']
+                        or claim['text']!=block['text']):raise ValueError()
+            if 'unit_id'in block and any(part[k]!=block[k]for k in ('unit_id','claim_id','support_ids')):raise ValueError()
+            ranges.setdefault(part['block_id'],[]).append((a,z))
+            if part['role']in {'relation','head_context'}:
+                if part['block_id']in bodies:raise ValueError()
+                bodies.add(part['block_id'])
+        for section in view['sections']:
+            if set(section)=={'block_id'}:
+                bid=section['block_id']
+                if bid not in blocks or bid in ordinary:raise ValueError()
+                ordinary.add(bid);continue
+            if set(section)!={'context_key','intro','primary','additional','footer'}:raise ValueError()
+            key=section['context_key']
+            if not re.fullmatch('[0-9a-f]{64}',key)or key in contexts:raise ValueError()
+            contexts.add(key)
+            primary=section['primary'];additional=section['additional']
+            if not isinstance(primary,list)or not primary or not isinstance(additional,list):raise ValueError()
+            relation=any(p['role']=='relation'for p in primary)
+            if (relation and any(p['role']!='relation'for p in primary))or(additional and not relation):raise ValueError()
+            check(section['intro'],{'intro'});check(section['footer'],{'footer'})
+            for part in primary:check(part,{'relation','head_context'})
+            for part in additional:check(part,{'head_context'})
+        if not contexts or set(ranges)!=bodies or ordinary&bodies or ordinary|bodies!=set(blocks):return None
+        for bid,spans in ranges.items():
+            text=blocks[bid]['text'];cursor=0
+            for a,z in sorted(spans):
+                if a<cursor or text[cursor:a]not in {'','\n\n'}:return None
+                cursor=z
+            if cursor!=len(text):return None
+        return view
+    except (KeyError,TypeError,ValueError,AttributeError):return None
+
+
+def complete_answer_text(value):
+    """Complete selected presentation for copy/report exports, never DOM text."""
+    view=checked_answer_presentation(value)
+    if view is None:return value.get('answer_md')or value.get('short_answer')or''
+    blocks={b['block_id']:b for b in value.get('blocks')or value.get('display_blocks')or[]}
+    evidence={e.get('evidence_id',e.get('citation_id')):e.get('local_number',e.get('number'))
+              for e in value.get('evidence',[])}
+    def body(part):
+        numbers=list(dict.fromkeys(evidence.get(c.get('evidence_id',c.get('passage_id')))
+            for c in value.get('citations',[])if c.get('block_id')==part['block_id']))
+        return part['text']+''.join(' ['+str(n)+']'for n in numbers if type(n)is int and n>0)
+    output=[]
+    for section in view['sections']:
+        if 'block_id'in section:output.append(blocks[section['block_id']]['text']);continue
+        output.append(section['intro']['text'])
+        output.extend(body(part)for part in section['primary'])
+        if section['additional']:
+            output.append(view['additional_label'])
+            output.extend(body(part)for part in section['additional'])
+        output.append(section['footer']['text'])
+    return '\n\n'.join(output)
+
+
 def documentary_sources(value):
     """Validate release-pinned public collection identifiers, without a lookup.
 
@@ -227,6 +319,8 @@ def tester_view(value, owner, secret):
     if isinstance(value,list):return [tester_view(v,owner,secret)for v in value]
     if not isinstance(value,dict):return value
     out={k:tester_view(v,owner,secret)for k,v in value.items()if k in SAFE}
+    answer_presentation=checked_answer_presentation(value)
+    if answer_presentation is not None:out['answer_presentation']=answer_presentation
     from .comma_tasks import reader_proposal,reader_execution
     proposal=reader_proposal(value.get('comma_proposal'))
     if proposal is not None:out['comma_proposal']=proposal

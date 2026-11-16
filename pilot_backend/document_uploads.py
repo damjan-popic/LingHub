@@ -224,6 +224,8 @@ class Documents:
         for block in json.loads(row['blocks']):
             link = links.get(block['index'], {})
             result = json.loads(link.get('result') or '{}')
+            from .presentation import checked_answer_presentation,complete_answer_text
+            complete_output=complete_answer_text(result)if checked_answer_presentation(result)is not None else None
             state = link.get('state') or ('cancelled' if row['state'] == 'cancelled' else 'unknown' if row['state']=='failed' else 'pending')
             if state=='complete'and result.get('status')in {'failed','rejected'}:state='failed'
             # A finished job may explicitly abstain. Completion is processing,
@@ -231,6 +233,7 @@ class Documents:
             sections.append({**block, 'state': state, 'family_id': link.get('family_id'),
                 'job_id': link.get('job_id'), 'error_code': link.get('error_code'),
                 'output': result.get('answer_md') or result.get('short_answer') or '',
+                **({'complete_output':complete_output}if complete_output is not None else{}),
                 'answer_support': result.get('answer_support'),
                 'answer_method': result.get('answer_method'),
                 'document_result': result.get('document_result'),

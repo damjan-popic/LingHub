@@ -412,7 +412,7 @@ def _report_blocks(report):
         yield 'subheading','Originale'if it else'Izvirnik'
         yield 'body',str(section.get('text',''))
         yield 'subheading','Proposta'if it else'Predlagano besedilo'
-        yield 'body',str(result.get('proposed_text',section.get('output','')))
+        yield 'body',str(result.get('proposed_text',section.get('complete_output',section.get('output',''))))
         for note in dict.fromkeys(result.get('notes',[])):
             if result.get('review')and note=='Pregled vsebuje navedene ugotovitve iz virov in opravljena preverjanja. V osnutek so vključeni samo predlogi z navedenim dokazom uporabe; celovita jezikovna pravilnost ni potrjena.':continue
             known={'evidence_excluded_from_writer':('Parte delle fonti trovate non è stata inclusa per limiti di spazio; la copertura è quindi parziale.','Del najdenih virov zaradi omejenega prostora ni bil uporabljen; obseg obdelave je zato delen.'),

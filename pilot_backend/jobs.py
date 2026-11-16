@@ -64,6 +64,9 @@ def render_result(value):
         if len({b['block_id']for b in blocks})!=len(blocks):raise Failure('invalid_answer',502)
     else:blocks=[{'block_id':'answer','text':out['answer_md']or out['short_answer']}]
     out['blocks']=blocks
+    from .presentation import checked_answer_presentation
+    presentation=checked_answer_presentation({**value,**out,'answer_presentation':value.get('answer_presentation')})
+    if presentation is not None:out['answer_presentation']=presentation
     display=digest({'blocks':blocks,'comma_proposal':out['comma_proposal']})if isinstance(out.get('comma_proposal'),dict)else digest(blocks)
     return out,display
 

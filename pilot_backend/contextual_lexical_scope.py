@@ -27,7 +27,8 @@ def supporting_lookups(plan,language,analysis,limit=4):
     scope=task['target_scope'];text=plan['original']+('\n'+plan.get('context','')if plan.get('context')else'')
     budget=min(SUPPORT_LIMIT,max(1,min(4,limit))*len(task['kinds']))
     report={'version':SUPPORT_VERSION,'target_scope':deepcopy(scope),'work_limit':budget,
-        'status':'analysis_unavailable','targets':[],'observed_occurrences':[],'omissions':[],'work_ids':[]}
+        'status':'analysis_unavailable','targets':[],'observed_occurrences':[],
+        'context_observations':[],'omissions':[],'work_ids':[]}
     if not isinstance(analysis,dict)or analysis.get('text')!=text:return report
     raw=analysis.get('raw_engines')or{}
     if not raw:return report
@@ -50,7 +51,7 @@ def supporting_lookups(plan,language,analysis,limit=4):
             seen.add(key)
             observations.setdefault(key,[]).append({'engine':engine,'word_id':word['id'],
                 'lemma':word.get('lemma'),'upos':word.get('upos'),'feats':deepcopy(word.get('feats',{}))})
-    groups={}
+    groups={};context_groups={}
     for (a,b,surface),predictions in sorted(observations.items()):
         readings={(p['lemma'],p['upos'])for p in predictions if isinstance(p['lemma'],str)}
         occurrence={'scope':scope['scope'],'start':a-shift,'end':b-shift,'text':surface,
@@ -61,6 +62,13 @@ def supporting_lookups(plan,language,analysis,limit=4):
         if len(readings)!=1 or len(readings)<len({(p['lemma'],p['upos'])for p in predictions}):
             report['omissions'].append({'occurrence':occurrence,'reason':'ambiguous_original_reading'});continue
         lemma,upos=next(iter(readings))
+        if not lemma.strip()or not isinstance(upos,str)or not upos.strip():
+            report['omissions'].append({'occurrence':occurrence,'reason':'ambiguous_original_reading'});continue
+        # Contextual presence includes all unambiguous observed classes.
+        # It neither nominates reader work nor proves grammatical attachment.
+        context_group=context_groups.setdefault((lemma.casefold(),upos),
+            {'lemma':lemma,'upos':upos,'occurrences':[]})
+        context_group['occurrences'].append(occurrence)
         kinds=[kind for kind in task['kinds']if upos in RESOURCE_CLASSES[kind]]
         if not kinds or not re.fullmatch(r"[^\W\d_]+(?:[-’'][^\W\d_]+)*",lemma):
             report['omissions'].append({'occurrence':occurrence,'reason':'no_supported_resource_class'});continue
@@ -70,6 +78,7 @@ def supporting_lookups(plan,language,analysis,limit=4):
     # An observation remains context even when its lookup is outside the work
     # window. It can locate a partner in a source fact without a new lookup.
     report['observed_occurrences']=deepcopy(list(groups.values()))
+    report['context_observations']=deepcopy(list(context_groups.values()))
     for group in groups.values():
         work=[(kind,_identity([SUPPORT_VERSION,analysis_id,kind,group['lemma'].casefold()]))for kind in group['kinds']]
         retained=[];omitted=[]

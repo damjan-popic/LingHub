@@ -262,6 +262,7 @@ class Documents:
         from .document_summary import manifest,public_summary
         result['review_manifest']=manifest(result)
         result['editorial_summary']=public_summary(options.get('editorial_summary'),result['review_manifest'])
+        result['draft_exports']=document_files.review_export_status(result)
         from .document_ai_suggestions import public_review
         if self.ai_suggestions or options.get('ai_review'):result['ai_suggestions']=public_review(self,owner,result,options)
         return result
@@ -447,13 +448,15 @@ class Documents:
         document = self.get(owner, identifier,internal=True)
         if draft:
             if partial:
-                if fmt!='docx':raise Failure('invalid_request')
-                assembled=document_files.partial_review_document(document)
+                # Both formats derive the same source-supported edit subset.
+                document_files.safe_partial_review_document(document)
+                if fmt=='txt':return document_files.partial_review_text(document)
                 with self.store.connect()as db:
                     original=db.execute('SELECT package FROM document_originals WHERE document_id=?',(identifier,)).fetchone()
-                from .document_word import rewrite,label_partial_review
-                data=rewrite(original[0],assembled['sections'])if original else document_files.draft_docx(assembled)
-                return label_partial_review(data,document['options'].get('locale','sl'))
+                from .document_word import rewrite_safe_partial_review,label_partial_review
+                data=(rewrite_safe_partial_review(original[0],document)if original else
+                      document_files._text_docx(document_files.partial_review_blocks(document)))
+                return label_partial_review(data,document['options'].get('locale','sl'),safe_source=True)
             # Validate completeness before consulting any source package.
             document_files.draft_blocks(document)
             if fmt=='docx':

@@ -5,6 +5,7 @@ is a new document and does not claim to preserve the source's Word layout.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import io
 import json
@@ -181,6 +182,26 @@ def _paragraph_text(paragraph):
     return _valid_text(''.join(output))
 
 
+def _preserved_page_footer(root,part):
+    """Recognize only inert cached PAGE fields; never evaluate a Word field."""
+    field_tags={W+'fldSimple',W+'fldChar',W+'instrText'}
+    fields=[node for node in root.iter()if node.tag in field_tags]
+    if not fields or re.fullmatch(r'word/footer[0-9]+\.xml',part)is None:return False
+    for field in fields:
+        if any(node is not field and node.tag in field_tags for node in field.iter()):return False
+        instruction=field.get(W+'instr','')
+        if (field.tag!=W+'fldSimple'or not instruction.isascii()
+                or re.fullmatch(r'[ \t]*PAGE(?:[ \t]+\\\*[ \t]+MERGEFORMAT)?[ \t]*',instruction,re.I)is None
+                or not set(field.attrib)<={W+'instr',W+'dirty',W+'fldLock'}):return False
+        if any(field.get(key)not in {'true','false','1','0'}for key in(W+'dirty',W+'fldLock')if key in field.attrib):return False
+        if not list(field)or any(run.tag!=W+'r'for run in field):return False
+        for run in field:
+            if any(child.tag not in {W+'rPr',W+'t'}for child in run):return False
+        cached=''.join(node.text or''for node in field.iter(W+'t'))
+        if re.fullmatch('[0-9]{1,20}',cached)is None:return False
+    return True
+
+
 def _word_blocks(data):
     blocks, warnings = [], []
     with _package(data) as archive:
@@ -195,10 +216,12 @@ def _word_blocks(data):
             if root.tag != W + expected or (expected == 'document'
                     and len(root.findall(W + 'body')) != 1):
                 _invalid()
+            page_footer=_preserved_page_footer(root,name)
             # Reject constructs whose visible text cannot be captured faithfully.
             bad = {'altChunk', 'txbxContent', 'object', 'subDoc', 'del', 'ins',
                    'moveFrom', 'moveTo', 'fldSimple', 'fldChar', 'instrText', 'sym',
                    'ptab', 'delText'}
+            if page_footer:bad.remove('fldSimple')
             if any(n.tag in {W + tag for tag in bad} for n in root.iter()):
                 _invalid('document_unsupported')
             if any(n.tag.rsplit('}', 1)[-1] in {'oMath', 'oMathPara', 'AlternateContent'}
@@ -210,6 +233,11 @@ def _word_blocks(data):
                 _invalid('document_unsupported')
             if any(n.tag in {W + 'drawing', W + 'pict'} for n in root.iter()):
                 warnings.append('document_images_not_reviewed')
+
+            if page_footer:
+                # Preserve the whole footer unchanged, including its static text.
+                warnings.append('document_page_footer_not_reviewed')
+                continue
 
             def visit(node, path):
                 if node.tag == W + 'p':
@@ -333,8 +361,14 @@ def _report_blocks(report):
     yield 'body',('Il rapporto confronta originale e proposta, indica la copertura e distingue le fonti delle modifiche dal materiale di contesto. Le proposte richiedono una revisione umana.'if it else
         'Poročilo primerja izvirnik in predlog, opiše obseg obdelave ter loči vire sprememb od gradiva za kontekst. Predloge mora preveriti človek.')
     yield 'body',('Il rapporto usa una propria impaginazione. La bozza Word è un file separato.'if it else'Poročilo uporablja svojo postavitev. Wordov osnutek je ločena datoteka.')
+    export_status=review_export_status(report)if mode=='review'else None
     if mode=='review':
-        yield 'body',('La bozza parziale di revisione, se scaricata, contiene le proposte disponibili e conserva invariato l’originale dove manca una proposta. Non costituisce una revisione completa; richiede un controllo umano.'if it else'Delni osnutek pregleda, če ga prenesete, vsebuje razpoložljive predloge; kjer predloga ni, ohrani izvirnik brez sprememb. To ni popoln jezikovni pregled; zahteva človeški pregled.')
+        yield 'body',partial_review_labels(report.get('locale','sl'))[1]
+        safe=export_status['partial_review']
+        if safe['available']:
+            yield 'body',(('Modifiche supportate incluse / proposte non incluse / sezioni incomplete: 'if it else
+                'Vključene podprte spremembe / nevključeni predlogi / nepopolno pregledani odseki: ')
+                +str(safe['applied_edits'])+' / '+str(safe['withheld_edits'])+' / '+str(safe['incomplete_sections']))
     if any((section.get('document_result')or{}).get('review')for section in report.get('sections',[])):
         from .evidence_review import common_report_notice
         yield 'body',common_report_notice(report.get('locale','sl'))
@@ -356,13 +390,14 @@ def _report_blocks(report):
     sections=report.get('sections',[])
     repeated=repeated_translation_sections(sections)
     failed_operations=any(failed_document_operation(s)for s in sections)
-    if mode in {'review','translate'} and (repeated or failed_operations or report.get('state')!='complete' or not sections or any(
+    if mode in {'review','translate'} and (mode=='review'and not export_status['complete_available']or repeated or failed_operations or report.get('state')!='complete' or not sections or any(
             s.get('state')!='complete' or (s.get('document_result')or{}).get('status')!='draft'for s in sections)):
         yield 'body',('Il documento non ha ancora una bozza completa. Il rapporto conserva anche le sezioni non completate o non revisionate.'if it else
             'Dokument še nima popolnega osnutka. Poročilo ohrani tudi odseke, ki niso bili dokončani ali pregledani.')
     if repeated:yield 'body',('Una parte ripete la bozza di un’altra parte dello stesso paragrafo, anche se l’originale è diverso. La bozza Word non è disponibile; controlla il contenuto.'if it else
         'Del odstavka ponovi osnutek drugega dela istega odstavka, čeprav je izvirnik drugačen. Wordov osnutek ni na voljo; preverite vsebino.')
     for warning in report.get('warnings',[]):
+        if warning=='document_page_footer_not_reviewed':yield 'body',('Il piè di pagina con il campo PAGE è conservato senza modifiche; testo e numerazione del piè di pagina non sono stati revisionati né aggiornati.'if it else'Noga s poljem PAGE je ohranjena brez sprememb; besedilo in številčenje noge nista pregledana ali posodobljena.')
         if warning=='document_translation_expired':yield 'body',('Il tempo della traduzione privata è scaduto; le parti non completate restano esplicite.'if it else'Čas zasebnega prevoda je potekel; nedokončani deli ostanejo izrecno označeni.')
         if warning=='document_translation_cancel_pending':yield 'body',('Si attende la conferma di arresto del traduttore. Un risultato tardivo non sarà utilizzato.'if it else'Čakamo na potrditev ustavitve prevajalnika. Pozni rezultat ne bo uporabljen.')
         if warning=='document_images_not_reviewed':yield 'body',('Le immagini sono conservate dove possibile, ma il loro contenuto non è stato revisionato né tradotto.'if it else'Slike se po možnosti ohranijo, njihova vsebina pa ni bila jezikovno pregledana ali prevedena.')
@@ -406,9 +441,16 @@ def _report_blocks(report):
                 yield 'body',states[delivery['delivery_state']][0 if it else 1]
             yield 'body',('La consegna delle fonti non dimostra il loro rispetto. Le modifiche citano il supporto dichiarato; la verifica linguistica indipendente resta distinta.'if it else'Posredovanje virov ne dokazuje njihovega upoštevanja. Pri spremembah je navedena zatrjevana podpora; neodvisno jezikovno preverjanje ostaja ločeno.')
         if mode=='review':
-            available=section.get('state')=='complete'and result.get('status')=='draft'and isinstance(result.get('proposed_text'),str)
-            if not available:yield 'body',(('Nella bozza parziale: proposta disponibile; controlla le modifiche.'if available else'Nella bozza parziale: originale conservato senza modifiche.')if it else(
-                'V delnem osnutku: razpoložljivi predlog; preverite spremembe.'if available else'V delnem osnutku: izvirnik ohranjen brez sprememb.'))
+            safe=next((row for row in export_status['partial_review']['sections']if row['index']==section.get('index')),None)
+            if safe is not None:
+                yield 'body',(('Nella bozza parziale: 'if it else'V delnem osnutku: ')
+                    +str(safe['applied_edits'])+(' modifiche supportate incluse; 'if it else' vključenih podprtih sprememb; ')
+                    +str(safe['withheld_edits'])+(' proposte non incluse.'if it else' nevključenih predlogov.'))
+                if safe['original_preserved']:
+                    yield 'body',('Originale conservato senza modifiche.'if it else'Izvirnik je ohranjen brez sprememb.')
+                if safe['incomplete']:
+                    yield 'body',('Copertura incompleta: le parti irrisolte o non controllate restano da verificare.'if it else
+                        'Pregled je nepopoln: nerazrešene ali nepreverjene dele je treba preveriti.')
         yield 'subheading','Originale'if it else'Izvirnik'
         yield 'body',str(section.get('text',''))
         yield 'subheading','Proposta'if it else'Predlagano besedilo'
@@ -425,6 +467,15 @@ def _report_blocks(report):
         if result.get('review'):
             from .evidence_review import report_blocks
             yield from report_blocks(result['review'],report.get('locale','sl'),include_common=False)
+            for check in result['review'].get('checks',[]):
+                extent=check.get('checked_extent')if isinstance(check,dict)else None
+                if (isinstance(check,dict)and check.get('check_id')=='comma_prediction'and check.get('status')=='partial'
+                        and isinstance(extent,dict)and extent.get('start')==0 and extent.get('complete')is False
+                        and extent.get('offset_convention')=='unicode_codepoint_half_open'
+                        and type(extent.get('end'))is int and 0<=extent['end']<len(section['text'])):
+                    yield 'body',(('Il controllo dedicato ha esaminato il prefisso di 'if it else'Namensko preverjanje je zajelo začetnih ')
+                        +str(extent['end'])+'/'+str(len(section['text']))
+                        +(' caratteri. La coda non controllata conserva l’originale; ogni modifica richiede una giustificazione propria.'if it else' znakov. Nepreverjeni konec ohrani izvirnik; vsaka sprememba potrebuje svojo utemeljitev.'))
         sources=section.get('sources')or[]
         if section.get('writer_input_selection')=='unknown':
             yield 'body',('La selezione delle fonti inviate al modello non è ricostruibile dai dati conservati. Non viene dedotta dall’elenco dei risultati trovati.'if it else'Iz shranjenih podatkov ni mogoče ugotoviti izbora virov, poslanih modelu. Izbora ne sklepamo iz seznama najdenih zadetkov.')
@@ -594,14 +645,16 @@ def draft_section_text(section):
 
 def draft_blocks(report):
     """Return a complete proposed text, only after every section has a draft."""
-    if report.get('state')!='complete' or not report.get('sections'):
+    if (report.get('partial_review_export')or 'document_page_footer_not_reviewed'in report.get('warnings',[])
+            or report.get('state')!='complete' or not report.get('sections')):
         _invalid('document_draft_unavailable',409)
     if repeated_translation_sections(report['sections']):_invalid('document_draft_unavailable',409)
     blocks=[]
     for section in report['sections']:
         result=section.get('document_result')or{}
         if (section.get('state')!='complete'or result.get('status')!='draft'
-                or failed_document_operation(section)or not isinstance(result.get('proposed_text'),str)):
+                or failed_document_operation(section)or result.get('review')and _review_incomplete(section)
+                or not isinstance(result.get('proposed_text'),str)):
             _invalid('document_draft_unavailable',409)
         proposed,_=draft_section_text(section)
         location=section['location'].rsplit('@',1)[0]
@@ -641,3 +694,261 @@ def partial_review_document(report):
 def draft_docx(report):
     """New text-only Word draft; the original layout is never overwritten."""
     return _text_docx(draft_blocks(report))
+
+
+
+PARTIAL_REVIEW_CONTRACT='klikai.safe-partial-review.v1'
+_PARTIAL_COMPLETE_CHECKS={'completed','completed_no_issue','applied_existing_contract','outside_coverage'}
+
+
+def _review_incomplete(section):
+    result=section.get('document_result');result=result if isinstance(result,dict)else{}
+    review=result.get('review');review=review if isinstance(review,dict)else{}
+    return (section.get('state')!='complete'or result.get('status')!='draft'
+        or failed_document_operation(section)
+        or any(not isinstance(check,dict)or not isinstance(check.get('status'),str)or check['status']not in _PARTIAL_COMPLETE_CHECKS
+               for check in review.get('checks',[]))
+        or (review.get('resource_coverage')or{}).get('bounded_or_partial')is True)
+
+
+def _partial_value_hash(value):
+    return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
+def _bound_punctuation_finding(edit,finding,section,proof,source):
+    """Join the stored CORE application and parent observations, without new inference."""
+    result=section['document_result'];review=result.get('review')or{};text=section['text']
+    if (finding.get('applicability')!='existing_contract_applied'
+            or finding.get('remaining_conditions',[])!=[]
+            or proof.get('applicability')!='existing_source_bound_conditions_satisfied'
+            or proof.get('source_capture_set_sha256')!=review.get('source_capture_set_sha256')
+            or not isinstance(review.get('source_capture_set_sha256'),str)
+            or re.fullmatch('[a-f0-9]{64}',review['source_capture_set_sha256'])is None):return False
+    observations={}
+    for name in ('application_analysis','comma_prediction'):
+        checks=[c for c in review.get('checks',[])if isinstance(c,dict)and c.get('check_id')==name]
+        if len(checks)!=1 or not isinstance(checks[0].get('observation'),dict):return False
+        observations[name]=checks[0]['observation']
+    syntax=observations['application_analysis'];checker=observations['comma_prediction']
+    if (proof.get('syntax_capture_sha256')!=_partial_value_hash(syntax)
+            or proof.get('checker_observation_sha256')!=_partial_value_hash(checker)
+            or checker.get('input_sha256')!=result['source_sha256']or checker.get('input_text')!=text):return False
+    unit=proof.get('application_unit');focus=source.get('focus')or{}
+    if (not isinstance(unit,dict)or unit.get('unit_type')!='construction_application'
+            or not isinstance(unit.get('payload'),dict)or not isinstance(unit.get('bindings'),list)
+            or unit.get('signed_profile_sha256')!=proof.get('application_context_sha256')
+            or not isinstance(focus.get('text'),str)
+            or focus.get('text_sha256')!=hashlib.sha256(focus['text'].encode()).hexdigest()):return False
+    record=unit['payload'].get('source_record')or{}
+    if record.get('text')!=focus['text']or record.get('text_sha256')!=focus['text_sha256']:return False
+    for app in(review.get('applications')or{}).get('applications',[]):
+        if not isinstance(app,dict)or app.get('proof')!=proof:continue
+        binding=app.get('primary_source_binding');operations=app.get('observed_edits')
+        if (not isinstance(binding,dict)or binding not in unit['bindings']
+                or binding.get('source_slug')=='linguistic-analysis'
+                or binding.get('passage_id')!=source.get('evidence_id')
+                or binding.get('evidence_id')!=source.get('evidence_id')
+                or binding.get('source_slug')!=source.get('source_slug')
+                or binding.get('text_sha256')!=focus['text_sha256']
+                or not isinstance(operations,list)or not operations or len(operations)>64
+                or finding.get('observed_checker_edits')!=operations
+                or not isinstance(app.get('edit'),dict)):continue
+        accepted=False;parts=[];offset=0;valid=True
+        for operation in sorted(operations,key=lambda e:e.get('start',-1)if isinstance(e,dict)else-1):
+            if not isinstance(operation,dict):valid=False;break
+            a,b=operation.get('start'),operation.get('end');replacement=operation.get('replacement')
+            if (type(a)is not int or type(b)is not int or not offset<=a<=b<=len(text)
+                    or text[a:b]!=operation.get('original')or not isinstance(replacement,str)
+                    or replacement==text[a:b]or replacement.replace(',','')!=text[a:b].replace(',','')
+                    or operation not in checker.get('edits',[])):valid=False;break
+            primitive={**app['edit'],**{key:operation[key]for key in ('start','end','original','replacement')}}
+            accepted=accepted or primitive==edit
+            parts.extend((text[offset:a],replacement));offset=b
+        parts.append(text[offset:])
+        if not valid or not accepted or hashlib.sha256(''.join(parts).encode()).hexdigest()!=proof.get('output_sha256'):continue
+        projection=proof.get('native_sentence_projection');payload=unit['payload']
+        # A missing receipt denotes only the actual original whole-parent unit.
+        # A projected response cannot acquire legacy authority by dropping its receipt.
+        start,end=(projection.get('start'),projection.get('end'))if isinstance(projection,dict)else(0,len(text))
+        if (type(start)is not int or type(end)is not int or not 0<=start<=end<=len(text)
+                or payload.get('construction')!='finite_subordinate_clause_boundary'
+                or payload.get('analysis_basis')!='original' or payload.get('input_text')!=text[start:end]
+                or not isinstance(payload.get('output_text'),str)
+                or text[:start]+payload['output_text']+text[end:]!=''.join(parts)):continue
+        sr=payload.get('syntax_record')or{}
+        if not isinstance(sr.get('text'),str)or hashlib.sha256(sr['text'].encode()).hexdigest()!=sr.get('text_sha256'):continue
+        try:response=json.loads(sr['text'])
+        except(ValueError,TypeError):continue
+        if projection is None:
+            captures=syntax.get('captures')
+            if (checker.get('status')!='ok' or not isinstance(captures,list)or not captures
+                    or not isinstance(captures[0],dict)or response!=captures[0].get('response')):continue
+        else:
+            keys={'version','parent_syntax_sha256','parent_input_sha256','sentence_id','start','end','word_ids','projected_syntax_sha256'}
+            if (not isinstance(projection,dict)or set(projection)!=keys
+                    or projection['version']!='document-native-sentence-projection.v1'
+                    or projection['parent_syntax_sha256']!=proof['syntax_capture_sha256']
+                    or projection['parent_input_sha256']!=result['source_sha256']
+                    or type(projection['sentence_id'])is not int
+                    or type(projection['start'])is not int or type(projection['end'])is not int
+                    or not 0<=projection['start']<=edit['start']<=edit['end']<=projection['end']<=len(text)
+                    or not isinstance(projection['word_ids'],list)or not projection['word_ids']
+                    or any(type(i)is not int for i in projection['word_ids'])
+                    or len(set(projection['word_ids']))!=len(projection['word_ids'])):continue
+            if (not isinstance(response,dict)
+                    or response.get('document_sentence_projection')!={k:v for k,v in projection.items()if k!='projected_syntax_sha256'}
+                    or response.get('execution')!={'projection_only':True,'inference_performed':False}
+                    or response.get('input_text')!=text[projection['start']:projection['end']]):continue
+            cap={'operation':'syntax','request':{'text':response['input_text']},'response':response,
+                'response_sha256':_partial_value_hash(response),'duration_ms':0}
+            child={'version':'klikai.syntax-collation.v1','plan':{'status':'ready',
+                'routing_kind':'comma_explanation_syntax','focus':response['input_text']},
+                'captures':[cap],'capture_set_sha256':_partial_value_hash([cap])}
+            if _partial_value_hash(child)!=projection['projected_syntax_sha256']:continue
+        return True
+    return False
+
+
+def _bound_partial_finding(edit,section,revision):
+    """Reuse a stored executable application; never infer one from a citation."""
+    if not isinstance(revision,str)or re.fullmatch('[a-f0-9]{64}',revision)is None:return False
+    result=section.get('document_result')or{}
+    known={row.get('evidence_id')for row in section.get('sources',[])if isinstance(row,dict)}
+    ids=edit.get('evidence_ids')
+    if (not isinstance(ids,list)or not ids or any(not isinstance(x,str)or not x for x in ids)
+            or len(ids)!=len(set(ids))or not set(ids)<=known):return False
+    for finding in(result.get('review')or{}).get('findings',[]):
+        if (not isinstance(finding,dict)or finding.get('included_in_draft')is not True
+                or finding.get('type')!='executable_application'
+                or finding.get('document_revision')!=revision
+                or finding.get('document_location')!=section.get('location')
+                or finding.get('proposed_edit')!=edit):continue
+        proof=finding.get('application_proof');source=finding.get('source')or{}
+        captures=finding.get('related_source_captures')
+        if not isinstance(proof,dict)or not isinstance(captures,list)or not isinstance(source,dict):continue
+        bound={};conflict=False
+        for row in captures:
+            if (isinstance(row,dict)and isinstance(row.get('evidence_id'),str)
+                    and isinstance(row.get('capture_sha256'),str)
+                    and re.fullmatch('[a-f0-9]{64}',row['capture_sha256'])):
+                if row['evidence_id']in bound and bound[row['evidence_id']]!=row['capture_sha256']:conflict=True
+                bound[row['evidence_id']]=row['capture_sha256']
+        if (conflict or not set(ids)<=set(bound)or source.get('evidence_id')not in ids
+                or bound[source['evidence_id']]!=source.get('capture_sha256')
+                or proof.get('input_sha256')!=result.get('source_sha256')
+                or proof.get('writer_inference_performed')is not False):continue
+        body={key:value for key,value in proof.items()if key!='proof_sha256'}
+        try:
+            if proof.get('proof_sha256')!=_partial_value_hash(body):continue
+            if proof.get('adapter_version')=='document-existing-applications.v1':
+                if _bound_punctuation_finding(edit,finding,section,proof,source):return True
+                continue
+        except(TypeError,ValueError,KeyError,AttributeError):continue
+        focus=source.get('focus');focus=focus.get('text')if isinstance(focus,dict)else None
+        if (finding.get('application_version')=='document-source-applications.v1'
+                and proof.get('adapter_version')==finding['application_version']
+                and finding.get('remaining_conditions')==[]
+                and proof.get('edit_binding_sha256')==_partial_value_hash({
+                    'version':'document-application-edit-binding.v1','input_sha256':result['source_sha256'],
+                    'edit':{key:edit[key]for key in ('start','end','original','replacement')}})
+                and proof.get('source_capture_sha256')==source.get('capture_sha256')
+                and isinstance(focus,str)
+                and proof.get('source_focus_sha256')==hashlib.sha256(focus.encode()).hexdigest()):return True
+    return False
+
+
+def _safe_partial_section(section,revision):
+    source=_valid_text(section['text']);result=section.get('document_result')or{}
+    reasons=[];edits=result.get('edits',[]);candidates=[]
+    valid=(section.get('state')=='complete'and result.get('status')=='draft'
+        and result.get('mode')=='review'and result.get('source_sha256')==hashlib.sha256(source.encode()).hexdigest())
+    if not valid:reasons.append('saved_review_unbound')
+    elif not isinstance(edits,list)or len(edits)>64:reasons.append('invalid_edit_list');valid=False
+    if valid:
+        for edit in edits:
+            if not isinstance(edit,dict):reasons.append('invalid_edit');continue
+            a,b,value=edit.get('start'),edit.get('end'),edit.get('replacement')
+            if (type(a)is not int or type(b)is not int or not 0<=a<=b<=len(source)
+                    or source[a:b]!=edit.get('original')or not isinstance(value,str)
+                    or len(value)>MAX_SECTION*4 or value==source[a:b]):
+                reasons.append('invalid_edit');continue
+            try:_valid_text(value)
+            except Failure:reasons.append('invalid_edit');continue
+            if not _bound_partial_finding(edit,section,revision):reasons.append('unbound_edit_support');continue
+            candidates.append(dict(edit))
+    # A conflicting component is withheld in full; unrelated supported edits survive.
+    conflicting=set()
+    for i,left in enumerate(candidates):
+        for j,right in enumerate(candidates[:i]):
+            a,b=left['start'],left['end'];x,y=right['start'],right['end']
+            if max(a,x)<min(b,y)or a==b and x<=a<=y or x==y and a<=x<=b:
+                conflicting.update((i,j))
+    if conflicting:reasons.append('overlapping_edits')
+    accepted=sorted((e for i,e in enumerate(candidates)if i not in conflicting),key=lambda e:(e['start'],e['end']))
+    pieces=[];offset=0
+    for edit in accepted:pieces.extend([source[offset:edit['start']],edit['replacement']]);offset=edit['end']
+    pieces.append(source[offset:]);proposed=''.join(pieces)
+    withheld=(len(edits)if isinstance(edits,list)else 0)-len(accepted)
+    status={'index':section.get('index'),'applied_edits':len(accepted),
+        'applied_edit_indexes':[next(i for i,e in enumerate(edits)if e==edit)for edit in accepted],
+        'withheld_edits':max(0,withheld),
+        'original_preserved':proposed==source,'incomplete':_review_incomplete(section)or bool(reasons),
+        'reasons':sorted(set(reasons)),'saved_state':section.get('state')if section.get('state')in {'complete','failed','cancelled','queued','running','pending','unknown'}else'unknown'}
+    # This is a derived partial-export view. Retain failure/coverage history.
+    copy=deepcopy(section);copy['state']='complete'
+    copy['document_result']={**deepcopy(result),'mode':'review','status':'draft','proposed_text':proposed,
+        'source_sha256':hashlib.sha256(source.encode()).hexdigest(),'edits':accepted,'inline_mappings':[]}
+    copy['partial_review_export']=status
+    return copy,status
+
+
+def safe_partial_review_document(report):
+    """Derive only bound supported edit splices; original saved data stays exact."""
+    mode=report.get('mode',(report.get('options')or{}).get('mode'));sections=report.get('sections')or[]
+    if (mode!='review'or report.get('state')not in {'complete','failed','cancelled'}or not sections
+            or len(sections)>MAX_BLOCKS or any(s.get('state')in {'queued','running','pending'}for s in sections)):
+        _invalid('document_draft_unavailable',409)
+    copies=[];statuses=[];size=0
+    for section in sections:
+        if (not isinstance(section,dict)or not isinstance(section.get('text'),str)
+                or not isinstance(section.get('location'),str)):_invalid('document_draft_unavailable',409)
+        copy,status=_safe_partial_section(section,report.get('source_sha256'))
+        size+=len(copy['document_result']['proposed_text'])
+        if size>MAX_TEXT*4:_invalid('document_draft_unavailable',409)
+        copies.append(copy);statuses.append(status)
+    summary={'contract':PARTIAL_REVIEW_CONTRACT,'available':True,'partial':True,
+        'applied_edits':sum(s['applied_edits']for s in statuses),
+        'withheld_edits':sum(s['withheld_edits']for s in statuses),
+        'original_sections_preserved':sum(s['original_preserved']for s in statuses),
+        'incomplete_sections':sum(s['incomplete']for s in statuses),
+        'unreviewed_page_footer':'document_page_footer_not_reviewed'in report.get('warnings',[]),'sections':statuses}
+    return {**report,'state':'complete','sections':copies,'partial_review_export':summary}
+
+
+def partial_review_blocks(report):
+    assembled=safe_partial_review_document(report);blocks=[]
+    for section in assembled['sections']:
+        base=section['location'].rsplit('@',1)[0];text=section['document_result']['proposed_text']
+        if blocks and blocks[-1][0]==base:blocks[-1]=(base,blocks[-1][1]+text)
+        else:blocks.append((base,text))
+    return [text for _,text in blocks]
+
+
+def partial_review_labels(locale='sl'):
+    return (('Bozza parziale di revisione','Contiene solo modifiche supportate e precisamente localizzate. Le parti irrisolte o non controllate conservano il testo originale. Non è una revisione completa; controlla le modifiche e il rapporto con limiti e fonti.')if locale=='it'else
+        ('Delni osnutek jezikovnega pregleda','Vsebuje samo podprte in natančno umeščene spremembe. Nerazrešeni ali nepreverjeni deli ohranijo izvirno besedilo. To ni popoln pregled; preverite spremembe in poročilo z omejitvami in viri.'))
+
+
+def partial_review_text(report):
+    title,note=partial_review_labels((report.get('options')or{}).get('locale',report.get('locale','sl')))
+    return (title+'\n'+note+'\n\n'+'\n\n'.join(partial_review_blocks(report))).encode('utf-8')
+
+
+def review_export_status(report):
+    try:
+        draft_blocks(report);complete=True
+    except(Failure,KeyError,TypeError,ValueError):complete=False
+    try:partial=safe_partial_review_document(report)['partial_review_export']
+    except(Failure,KeyError,TypeError,ValueError):partial={'contract':PARTIAL_REVIEW_CONTRACT,'available':False,'partial':True,
+        'applied_edits':0,'withheld_edits':0,'original_sections_preserved':0,'incomplete_sections':0,'sections':[]}
+    return {'complete_available':complete,'partial_review':partial}

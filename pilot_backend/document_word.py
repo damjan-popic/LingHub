@@ -371,7 +371,7 @@ def _replacement(data, node, value):
     return node['start'], node['close_start'], tag + _xml_text(value)
 
 
-def _rewrite(original_docx_bytes, sections):
+def _rewrite(original_docx_bytes, sections, *, partial_review=False):
     """Return an edited DOCX only when every source section has a bound draft.
 
     The input bytes are never modified. Unsupported structural changes fail
@@ -385,7 +385,8 @@ def _rewrite(original_docx_bytes, sections):
     if not isinstance(sections,list)or not 1<=len(sections)<=files.MAX_BLOCKS:
         _unavailable()
     if files.repeated_translation_sections(sections):_unavailable()
-    if any(files.failed_document_operation(s)for s in sections):_unavailable()
+    if not partial_review and any(files.failed_document_operation(s)for s in sections):_unavailable()
+    if partial_review and any((s.get('document_result')or{}).get('mode')!='review'for s in sections):_unavailable()
     proposals = {}
     paragraph_mappings={};paragraph_modes={};paragraph_edits={}
     output_size = 0
@@ -526,7 +527,7 @@ def rewrite(original_docx_bytes, sections):
         _unavailable()
 
 
-def _label_partial_review(data, locale='sl', ai=False):
+def _label_partial_review(data, locale='sl', ai=False, safe_source=False):
     """Add a visible partial-review label without rewriting existing markup."""
     label=('Bozza parziale di revisione'if locale=='it'else'Delni osnutek jezikovnega pregleda')
     note=('Contiene soltanto le proposte disponibili. Le altre parti conservano il testo originale. Non è una revisione completa; controlla le modifiche e il rapporto con limiti e fonti.'if locale=='it'else
@@ -534,6 +535,7 @@ def _label_partial_review(data, locale='sl', ai=False):
     if ai:
         note=('Revisione IA parziale: contiene la bozza basata sulle fonti e le modifiche IA selezionate dall’utente. Le altre parti conservano la bozza delle fonti. Controlla le modifiche e le parti senza risultato nel rapporto.'if locale=='it'else
             'Delni AI pregled: vsebuje osnutek na podlagi virov in AI spremembe po izboru uporabnika. Drugi deli ohranijo osnutek iz virov. Preverite spremembe in dele brez rezultata v poročilu.')
+    if safe_source and not ai:label,note=files.partial_review_labels(locale)
     namespace=files.W[1:-1]
     def paragraph(text,bold=False):
         return ('<kp:p xmlns:kp="'+namespace+'">'+('<kp:pPr><kp:pStyle kp:val="Title"/><kp:pBdr><kp:top kp:val="nil"/><kp:left kp:val="nil"/><kp:bottom kp:val="nil"/><kp:right kp:val="nil"/><kp:between kp:val="nil"/></kp:pBdr></kp:pPr>'if bold else'')+'<kp:r>'+
@@ -557,7 +559,15 @@ def _label_partial_review(data, locale='sl', ai=False):
     return output.getvalue()
 
 
-def label_partial_review(data,locale='sl',ai=False):
-    try:return _label_partial_review(data,locale,ai)
+def label_partial_review(data,locale='sl',ai=False,safe_source=False):
+    try:return _label_partial_review(data,locale,ai,safe_source)
+    except Failure:raise
+    except(BadZipFile,OSError,RuntimeError,ValueError,KeyError,TypeError,expat.ExpatError):_unavailable()
+
+
+def rewrite_safe_partial_review(original_docx_bytes,report):
+    """Only the strict source-bound partial assembler may waive full-job coverage."""
+    assembled=files.safe_partial_review_document(report)
+    try:return _rewrite(original_docx_bytes,assembled['sections'],partial_review=True)
     except Failure:raise
     except(BadZipFile,OSError,RuntimeError,ValueError,KeyError,TypeError,expat.ExpatError):_unavailable()

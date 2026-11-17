@@ -17,6 +17,7 @@ import math
 from pathlib import Path
 import re
 import stat
+import unicodedata
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -118,7 +119,7 @@ def _tokens(raw: dict, name: str, *, identifiers: bool) -> list[dict]:
     return values
 
 
-def _source_positions(text: str, tokens: list[dict]) -> dict[str, dict]:
+def _source_positions(text: str, tokens: list[dict], *, allow_partial=False, allow_source_whitespace=False) -> dict[str, dict]:
     """Align in order, crossing only whitespace, never searching past a word.
 
     Token-boundary whitespace can be normalized by this API. The exact input
@@ -135,13 +136,34 @@ def _source_positions(text: str, tokens: list[dict]) -> dict[str, dict]:
             continue
         while cursor < len(text) and text[cursor].isspace():
             cursor += 1
-        if not text.startswith(core, cursor):
+        start = cursor
+        exact = text.startswith(core, cursor)
+        if exact:
+            cursor += len(core)
+        elif allow_source_whitespace:
+            # The provider may normalize whitespace inside an untouched token.
+            # Match every nonwhitespace character in order; never search ahead.
+            for char in core:
+                if char.isspace():
+                    continue
+                while cursor < len(text) and text[cursor].isspace():
+                    cursor += 1
+                if cursor >= len(text) or text[cursor] != char:
+                    raise AlignmentFailure('Source tokens differ from the exact input')
+                cursor += 1
+            if _signature(text[start:cursor]) != _signature(core):
+                raise AlignmentFailure('Source token whitespace changes a lexical boundary')
+        else:
             raise AlignmentFailure('Source tokens differ from the exact input')
-        result[token['id']] = {'start': cursor, 'end': cursor+len(core),
-                              'core': core, 'raw': token['text']}
-        cursor += len(core)
+        result[token['id']] = {'start': start, 'end': cursor,
+                              'core': core, 'raw': token['text'], 'source_exact': exact}
     if text[cursor:].strip():
-        raise AlignmentFailure('Source tokens do not cover the exact input')
+        if not allow_partial or cursor == 0:
+            raise AlignmentFailure('Source tokens do not cover the exact input')
+        def lexical(char):
+            return char.isalnum() or char == '_' or unicodedata.category(char).startswith('M')
+        if cursor < len(text) and lexical(text[cursor-1]) and lexical(text[cursor]):
+            raise AlignmentFailure('Partial source tokens end inside a lexical unit')
     return result
 
 
@@ -203,11 +225,14 @@ def _apply(text: str, edits: list[dict]) -> str:
     return ''.join(pieces) + text[cursor:]
 
 
-def align(text: str, raw: dict, *, protected_spans=()) -> tuple[str, list[dict]]:
-    """Use source token identities and verify the complete target token stream."""
+def _align(text: str, raw: dict, *, protected_spans=(), allow_partial=False, allow_source_whitespace=False):
+    """Verify the whole returned stream against its exact ordered input prefix."""
     source = _tokens(raw, 'source_tokens', identifiers=True)
     target = _tokens(raw, 'target_tokens', identifiers=False)
-    positions = _source_positions(text, source)
+    positions = _source_positions(text, source, allow_partial=allow_partial,
+                                  allow_source_whitespace=allow_source_whitespace)
+    covered = max((row['end'] for row in positions.values()), default=0)
+    checked_end = covered if text[covered:].strip() else len(text)
     corrections = raw.get('corrections')
     if not isinstance(corrections, (dict, list)):
         raise MalformedResponse('Missing correction groups')
@@ -239,6 +264,8 @@ def align(text: str, raw: dict, *, protected_spans=()) -> tuple[str, list[dict]]
             if proposed:
                 raise AlignmentFailure('A whitespace token cannot anchor a comma proposal')
             continue
+        if not original.get('source_exact', True) and proposed != original['core']:
+            raise AlignmentFailure('Correction targets an internally normalized source token')
         edits.extend(_edits(original['start'], original['core'], proposed))
     edits.sort(key=lambda edit: (edit['start'], edit['end']))
     protected = _protected(text, protected_spans)
@@ -262,8 +289,15 @@ def align(text: str, raw: dict, *, protected_spans=()) -> tuple[str, list[dict]]
     # Comparing token streams, rather than concatenating unspaced API words,
     # preserves word boundaries and detects changed words, case and punctuation.
     expected = [piece for token in target for piece in _signature(token['text'])]
-    if _signature(proposal) != expected:
+    checked_proposal = _apply(text[:checked_end], edits)
+    if _signature(checked_proposal) != expected:
         raise AlignmentFailure('Comma corrections do not reproduce the target token stream')
+    return proposal, edits, checked_end
+
+
+def align(text: str, raw: dict, *, protected_spans=()) -> tuple[str, list[dict]]:
+    """Legacy strict alignment: every nonwhitespace input token must be covered."""
+    proposal, edits, unused = _align(text, raw, protected_spans=protected_spans)
     return proposal, edits
 
 
@@ -350,9 +384,16 @@ async def check(text: str, config: CommaCheckerConfig | Mapping[str, Any]) -> di
         raw = _json(bytes(data))
         result['raw_result'] = raw  # Private owner-controlled result only.
         result.update(_metadata(raw))
-        proposal, edits = align(text, raw, protected_spans=config.protected_spans)
-        result.update(status='ok', proposed_text=proposal, edits=edits, reason=None)
-        result['checked_extent']['complete'] = True
+        proposal, edits, checked_end = _align(text, raw,
+            protected_spans=config.protected_spans, allow_partial=True, allow_source_whitespace=True)
+        source_map = _source_positions(text, _tokens(raw, 'source_tokens', identifiers=True),
+            allow_partial=True, allow_source_whitespace=True)
+        result['source_alignment'] = {'method': 'ordered_codepoints_with_untouched_whitespace',
+            'normalized_unchanged_tokens': sum(not row.get('source_exact', True) for row in source_map.values())}
+        complete = checked_end == len(text)
+        result.update(status='ok' if complete else 'partial', proposed_text=proposal,
+            edits=edits, reason=None if complete else 'provider_partial_coverage')
+        result['checked_extent'].update(end=checked_end, complete=complete)
         result['execution']['neural_prediction_received'] = True
         if type(raw.get('inference_performed')) is bool:
             result['execution']['inference_performed'] = raw['inference_performed']
@@ -371,7 +412,7 @@ async def check(text: str, config: CommaCheckerConfig | Mapping[str, Any]) -> di
 
 def public_proposal(observation: dict) -> dict:
     """Closed reader projection; raw provider material and endpoint stay private."""
-    statuses = {'ok', 'too_long', 'unavailable', 'timeout', 'alignment_failed', 'malformed_response'}
+    statuses = {'ok', 'partial', 'too_long', 'unavailable', 'timeout', 'alignment_failed', 'malformed_response'}
     if (not isinstance(observation, dict) or observation.get('schema') != SCHEMA
             or observation.get('status') not in statuses
             or observation.get('provider') != 'cjvt_vejice'
@@ -382,7 +423,10 @@ def public_proposal(observation: dict) -> dict:
         raise ValueError('Comma prediction input identity differs')
     extent = observation.get('checked_extent')
     if (not isinstance(extent, dict) or set(extent) != {'start', 'end', 'offset_convention', 'complete'}
-            or extent['start'] != 0 or extent['end'] != len(text)
+            or type(extent['start']) is not int or extent['start'] != 0
+            or type(extent['end']) is not int
+            or (not 0 < extent['end'] < len(text) if observation['status'] == 'partial'
+                else extent['end'] != len(text))
             or extent['offset_convention'] != OFFSET_CONVENTION
             or type(extent['complete']) is not bool
             or extent['complete'] != (observation['status'] == 'ok')):
@@ -393,11 +437,11 @@ def public_proposal(observation: dict) -> dict:
     for edit in edits:
         if (not isinstance(edit, dict) or set(edit) != {'start', 'end', 'original', 'replacement', 'kind'}
                 or type(edit['start']) is not int or type(edit['end']) is not int
-                or not 0 <= edit['start'] <= edit['end'] <= len(text)
+                or not 0 <= edit['start'] <= edit['end'] <= extent['end']
                 or not isinstance(edit['original'], str) or not isinstance(edit['replacement'], str)
                 or edit['kind'] not in {'comma_addition', 'comma_removal', 'comma_and_spacing'}):
             raise ValueError('Invalid comma prediction edit')
-    if observation['status'] == 'ok':
+    if observation['status'] in {'ok', 'partial'}:
         if _apply(text, edits) != observation.get('proposed_text'):
             raise ValueError('Comma prediction edits differ from the saved proposal')
     elif observation.get('proposed_text') is not None or edits:
@@ -415,6 +459,14 @@ def public_proposal(observation: dict) -> dict:
         'reported_model_version', 'reported_api_version', 'reported_confidence',
         'proposed_text', 'edits', 'checked_extent', 'execution',
         'truncated', 'application_limit_characters')}
+    alignment = observation.get('source_alignment')
+    if alignment is not None:
+        if (not isinstance(alignment, dict) or set(alignment) != {'method', 'normalized_unchanged_tokens'}
+                or alignment.get('method') != 'ordered_codepoints_with_untouched_whitespace'
+                or type(alignment.get('normalized_unchanged_tokens')) is not int
+                or not 0 <= alignment['normalized_unchanged_tokens'] <= 20000):
+            raise ValueError('Invalid comma source alignment metadata')
+        result['source_alignment'] = copy.deepcopy(alignment)
     result.update(schema='linghub.comma-proposal.v1', label='Predlog postavitve vejic · CJVT Vejice',
                   original_text=text, original_sha256=observation['input_sha256'])
     return result

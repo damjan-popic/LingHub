@@ -7,6 +7,10 @@ import {documentUploads} from '/document-uploads.mjs';
 const fixture=(id,name,state='complete')=>({document_id:id,name,state,options:{mode:'review'},warnings:[],processed:state==='complete'?1:0,total:1,sections:[{index:0,state:state==='complete'?'complete':'pending',text:'Fixture original.',output:state==='complete'?'Fixture result.':'',...(state==='complete'?{document_result:{mode:'review',status:'draft',proposed_text:'Fixture original.',edits:[]}}:{})}]});
 let rows=[fixture('first','first.txt'),fixture('second','second.txt')];
 window.calls=[];window.pending=[];window.chooserOpens=0;
+const focusWatches=new Set(),nativeAdd=document.addEventListener.bind(document),nativeRemove=document.removeEventListener.bind(document);
+document.addEventListener=(type,listener,options)=>{if(type==='focusin')focusWatches.add(listener);return nativeAdd(type,listener,options);};
+document.removeEventListener=(type,listener,options)=>{if(type==='focusin')focusWatches.delete(listener);return nativeRemove(type,listener,options);};
+window.focusWatchCount=()=>focusWatches.size;
 const api=async(url,options={})=>{
  window.calls.push({url,method:options.method||'GET'});
  if(url==='/documents')return {documents:rows.map(({document_id,name,state})=>({document_id,name,state}))};
@@ -29,6 +33,8 @@ window.observeChooser=()=>{document.querySelector('input[type=file]').click=()=>
 ui.session({documents:{enabled:true,evidence_review:true,evidence_review_only:true}});
 `;
 const controls=['input[type=file]','[data-document-file-choose]','#workspace>div>form button[type=submit]','[data-document-list]'];
+const locales=process.env.KLIKAI_DOCUMENT_BUSY_LOCALE?[process.env.KLIKAI_DOCUMENT_BUSY_LOCALE]:['sl','it'];
+assert(locales.every(locale=>['sl','it'].includes(locale)));
 async function pageFor(browser,locale){
  const context=await browser.newContext({acceptDownloads:true,serviceWorkers:'block'}),page=await context.newPage(),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -52,6 +58,7 @@ async function locked(page){
 }
 async function unlocked(page,{uploadDisabled=false}={}){
  await page.waitForFunction(()=>!document.querySelector('#workspace').hasAttribute('aria-busy'));
+ assert.equal(await page.evaluate(()=>window.focusWatchCount()),0,'Completed action must remove its focus observer');
  for(const selector of controls)assert.equal(await page.locator(selector).isDisabled(),selector==='#workspace>div>form button[type=submit]'&&uploadDisabled,selector+' must restore its intended state');
 }
 async function upload(page,name){
@@ -62,7 +69,7 @@ async function pending(page,count){await page.waitForFunction(count=>window.pend
 (async()=>{
  const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage']}),checks=[];
  try{
-  for(const locale of ['sl','it'])for(const outcome of ['resolve','reject']){
+  for(const locale of locales)for(const outcome of ['resolve','reject']){
    const {context,page,errors}=await pageFor(browser,locale),nextLocale=locale==='sl'?'it':'sl';
    await page.evaluate(()=>window.observeChooser());await upload(page,'first-upload.txt');await pending(page,1);await locked(page);
    assert.equal(await page.locator('input[type=file]').evaluate(node=>node.files[0].name),'first-upload.txt');
@@ -85,7 +92,7 @@ async function pending(page,count){await page.waitForFunction(count=>window.pend
    }
    assert.deepEqual(errors,[]);checks.push({locale,case:'pending_upload_locale_rerender',outcome,controls_locked:true,selection_preserved_while_pending:true,restored_after_settlement:true,...(outcome==='reject'?{required_validation_focus_preserved:true}:{})});await context.close();
   }
-  for(const locale of ['sl','it'])for(const outcome of ['resolve','reject']){
+  for(const locale of locales)for(const outcome of ['resolve','reject']){
    const {context,page,errors}=await pageFor(browser,locale);
    await page.locator('[data-document-list]').selectOption('first');await page.waitForFunction(()=>document.querySelector('[data-document-detail] h3')?.textContent==='first.txt');
    await page.evaluate(()=>{window.observeChooser();document.querySelector('#workspace>div>form button[type=submit]').disabled=true;});
@@ -100,23 +107,28 @@ async function pending(page,count){await page.waitForFunction(count=>window.pend
    await page.locator('[data-document-list]').selectOption('second');await page.waitForFunction(()=>document.querySelector('[data-document-detail] h3')?.textContent==='second.txt');
    assert.deepEqual(errors,[]);checks.push({locale,case:'pending_download',outcome,selector_stays_consistent:true,preexisting_disabled_state_preserved:true,subsequent_navigation_works:true});await context.close();
   }
-  for(const locale of ['sl','it'])for(const moveFocus of [false,true]){
+  for(const locale of locales)for(const focusHistory of ['unmoved','other','other_then_body']){
    const {context,page,errors}=await pageFor(browser,locale);
    await page.locator('[data-document-list]').focus();await page.evaluate(()=>{window.deferLoad=true;});
    await page.locator('[data-document-list]').selectOption('first');await pending(page,1);await locked(page);
-   if(moveFocus)await page.locator('#document-open').focus();
+   if(focusHistory!=='unmoved')await page.locator('#document-open').focus();
+   if(focusHistory==='other_then_body'){
+    const {width,height}=page.viewportSize();await page.mouse.click(width-20,height-20);
+    assert.equal(await page.evaluate(()=>document.activeElement===document.body),true,'Blank click must return focus to BODY');
+   }
    await page.evaluate(()=>window.pending[0].resolve());await unlocked(page);
-   assert.equal(await page.evaluate(moved=>document.activeElement===document.querySelector(moved?'#document-open':'[data-document-list]'),moveFocus),true);
-   assert.deepEqual(errors,[]);checks.push({locale,case:'pending_load_focus',moveFocus,previous_focus_restored_only_when_unmoved:true});await context.close();
+   const target=focusHistory==='unmoved'?'[data-document-list]':focusHistory==='other'?'#document-open':'body';
+   assert.equal(await page.evaluate(target=>document.activeElement===document.querySelector(target),target),true,'Completion must respect focus history: '+focusHistory);
+   assert.deepEqual(errors,[]);checks.push({locale,case:'pending_load_focus',focusHistory,previous_focus_restored_only_when_unmoved:true});await context.close();
   }
-  for(const locale of ['sl','it']){
+  for(const locale of locales){
    const {context,page,errors}=await pageFor(browser,locale);
    await upload(page,'old-session.txt');await pending(page,1);await locked(page);
    await page.evaluate(()=>window.reopen());assert.equal(await page.locator('#workspace').isHidden(),true);
    await page.locator('#document-open').click();await page.locator('[data-document-list] option[value=first]').waitFor({state:'attached'});await unlocked(page);
    await upload(page,'new-session.txt');await pending(page,2);await locked(page);
    await page.evaluate(()=>window.pending[0].resolve());await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,20)));
-   await locked(page);assert.equal(await page.locator('input[type=file]').evaluate(node=>node.files[0].name),'new-session.txt');assert.equal(await page.locator('[data-document-detail] h3').count(),0);
+   await locked(page);assert.equal(await page.evaluate(()=>window.focusWatchCount()),1,'Old completion must not clear the new action focus observer');assert.equal(await page.locator('input[type=file]').evaluate(node=>node.files[0].name),'new-session.txt');assert.equal(await page.locator('[data-document-detail] h3').count(),0);
    await page.evaluate(()=>window.pending[1].resolve());await unlocked(page);
    assert.equal(await page.locator('[data-document-detail] h3').textContent(),'new-session.txt');assert.equal(await page.locator('input[type=file]').evaluate(node=>node.files.length),0);
    assert.deepEqual(errors,[]);checks.push({locale,case:'reset_then_new_pending_upload',old_completion_cannot_unlock_new_session:true,new_selection_owned:true});await context.close();

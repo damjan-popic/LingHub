@@ -15,15 +15,26 @@ messages.it.document_translation_cancel_pending='La traduzione del documento è 
 export function documentUploads({root,opener=null,api,locale,openFamily,errorText}){
  let current=null,rows=[],timer=null,epoch=0,selection=0,expanded=false,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null,fileInput=null,renderedDocumentId=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
+ const busyControlSelector='input[type=file], [data-document-file-choose], [data-document-upload-submit], [data-document-list]';
  const busyControls=new WeakMap();let busyFocus=null;
- // Locale renders replace controls while retaining the selected native input.
- // Keep prior disabled states, and do not steal focus moved by the user.
+ function clearBusyFocus(restore=false,owner=busyFocus){
+  if(!owner||busyFocus!==owner)return;
+  busyFocus=null;document.removeEventListener('focusin',owner.onFocus,true);
+  if(restore&&owner.epoch===epoch&&owner.control.isConnected&&!owner.control.disabled&&document.activeElement===document.body)owner.control.focus({preventScroll:true});
+ }
+ function watchBusyFocus(token){
+  clearBusyFocus();const control=document.activeElement;
+  if(!root.contains(control)||!control.matches(busyControlSelector))return;
+  const owner={control,epoch:token,onFocus:null};
+  owner.onFocus=event=>{if(event.target!==control&&event.target!==document.body)clearBusyFocus(false,owner);};
+  busyFocus=owner;document.addEventListener('focusin',owner.onFocus,true);
+ }
+ // Locale renders reapply locks without recapturing a user's later focus.
  function syncBusyControls(){
-  for(const control of root.querySelectorAll('input[type=file], [data-document-file-choose], [data-document-upload-submit], [data-document-list]')){
-   if(busy){if(!busyControls.has(control))busyControls.set(control,control.disabled);if(document.activeElement===control)busyFocus=control;control.disabled=true;}
+  for(const control of root.querySelectorAll(busyControlSelector)){
+   if(busy){if(!busyControls.has(control))busyControls.set(control,control.disabled);control.disabled=true;}
    else if(busyControls.has(control)){control.disabled=busyControls.get(control);busyControls.delete(control);}
   }
-  if(!busy){if(busyFocus?.isConnected&&!busyFocus.disabled&&document.activeElement===document.body)busyFocus.focus({preventScroll:true});busyFocus=null;}
  }
  const tr=key=>{
   if(evidenceOnly){
@@ -59,10 +70,10 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   statusState=error?{...owner,origin,error}:null;paintStatus();
  }
  function clearStatus(origin,owner){if(statusState?.origin===origin&&sameOwner(statusState,owner)){statusState=null;paintStatus();}}
- async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');syncBusyControls();const token=epoch;
+ async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');const token=epoch;watchBusyFocus(token);syncBusyControls();
   // A delayed poll for the previous document must not replace a new upload,
   // cancellation or deletion. Polling resumes for the resulting selection.
-  try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');syncBusyControls();schedule();}}}
+  try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');syncBusyControls();clearBusyFocus(true);schedule();}}}
  function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain','data-document-focus-key':title});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
  async function refresh(){const owner=statusOwner('list');try{const response=await api('/documents');if(!sameOwner(owner,statusOwner('list')))return;rows=response.documents;renderList();clearStatus('list',owner);}catch(error){if(sameOwner(owner,statusOwner('list')))throw error;}}
  function renderList(){const select=root.querySelector('[data-document-list]');if(!select)return;select.replaceChildren(el('option',tr(rows.length?'choose':'empty'),{value:''}));for(const row of rows)select.append(el('option',row.name+' · '+stateLabel(row.state),{value:row.document_id}));select.value=current?.document_id||'';}
@@ -266,6 +277,6 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
  return {
   session(capabilities){const next=capabilities.documents?.enabled===true,candidate=capabilities.documents?.private_translation===true,review=capabilities.documents?.evidence_review===true,only=capabilities.documents?.evidence_review_only===true,summary=capabilities.documents?.editorial_summary===true,ai=capabilities.documents?.ai_suggestions===true;if(next===enabled&&candidate===privateTranslation&&review===evidenceReview&&only===evidenceOnly&&summary===editorialSummary&&ai===aiSuggestions)return;enabled=next;privateTranslation=candidate;evidenceReview=review;evidenceOnly=only;editorialSummary=summary;aiSuggestions=ai;if(only){values.mode='review';values.source_language='sl';values.translation_provider='';}render();if(enabled){const owner=statusOwner('list');refresh().catch(error=>status(error,'list',owner));}},
   locale(){const opened=root.querySelector('details')?.open;render();if(opened&&root.querySelector('details'))root.querySelector('details').open=true;},
-  reset(){epoch++;selection++;clearTimeout(timer);expanded=false;enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;statusState=null;fileInput=null;root.removeAttribute('aria-busy');render();}
+  reset(){epoch++;selection++;clearBusyFocus();clearTimeout(timer);expanded=false;enabled=false;privateTranslation=false;evidenceReview=false;evidenceOnly=false;editorialSummary=false;aiSuggestions=false;values.translation_provider='';busy=false;current=null;rows=[];uploadKey=null;statusState=null;fileInput=null;root.removeAttribute('aria-busy');render();}
  };
 }

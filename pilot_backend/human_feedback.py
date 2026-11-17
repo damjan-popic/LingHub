@@ -381,21 +381,31 @@ def safe_exception(error):
     code=getattr(error,'code',None)
     if isinstance(code,str) and re.fullmatch('[a-zA-Z0-9_]{1,100}',code):value['error_code']=code
     if type(getattr(error,'errno',None)) is int:value['errno']=error.errno
+    status=getattr(error,'http_status',None)
+    if type(status)is int and 100<=status<=599:value['http_status']=status
     cause=error.__cause__ or error.__context__
     if cause is not None and cause is not error:value['cause_type']=type(cause).__name__
     return value
 
 
-def failure_display(state, locale):
+def failure_display(state, locale, code=None):
     message=('Zahteva je preklicana.' if state=='cancelled' else 'Odgovora ni bilo mogoče pripraviti. Poskusite znova.') if locale=='sl' else (
         'La richiesta è stata annullata.' if state=='cancelled' else 'Non è stato possibile preparare la risposta. Riprova.')
+    if state=='failed' and isinstance(code,str):
+        if code=='PILOT_BUSY':
+            message=('Storitev je trenutno zasedena. Poskusite znova čez nekaj trenutkov.'if locale=='sl'else
+                'Il servizio è momentaneamente occupato. Riprova tra poco.')
+        elif code=='PILOT_TIMEOUT':
+            message=('Obdelava je presegla dovoljeni čas. Poskusite znova.'if locale=='sl'else
+                'La lavorazione ha superato il tempo disponibile. Riprova.')
     return {'status':'failed','answer_kind':'failed','answer_md':message,'short_answer':message,
         'blocks':[{'block_id':'attempt-status','text':message}],'evidence':[],'citations':[],'source_badges':[]}
 
 
 def terminal_display(db, run_id, state):
-    locale=db.execute('SELECT f.locale FROM families f JOIN runs r ON r.family_id=f.id WHERE r.id=?',(run_id,)).fetchone()[0]
-    result=failure_display(state,locale)
+    locale,code=db.execute('SELECT f.locale,j.error_code FROM families f JOIN runs r ON r.family_id=f.id '
+        'LEFT JOIN jobs j ON j.run_id=r.id WHERE r.id=? ORDER BY j.created DESC LIMIT 1',(run_id,)).fetchone()
+    result=failure_display(state,locale,code)
     return canonical(result),digest(result['blocks'])
 
 

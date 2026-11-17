@@ -184,6 +184,7 @@ def morphological_records(result,target,focus,construction=None,requested_slots=
  cases=set(construction.get('case_candidates',[]));numbers=set(construction.get('number_candidates',[]))
  for le in result['lexemes']:
   prov=le['evidence'];head={k:le[k]for k in ['source_entry_id','lemma','grammatical_type','grammatical_features','source_status','frequency_observations','submitted_form','submitted_analyses','matched_by','head_source']}
+  if 'language'in le:head['language']=le['language']
   head['paradigm_slot_count']=len(le['slots'])
   out.append(source_record('morphology',le['source_entry_id'],head,prov,target))
   # Keep complete slots; a requested grammatical contrast precedes other slots.
@@ -200,6 +201,7 @@ def morphological_records(result,target,focus,construction=None,requested_slots=
   selected=required+[s for s in slots if s not in required][:max(0,4-len(required))]
   for s in selected:
    body={'lemma':le['lemma'],'grammatical_type':le['grammatical_type'],'grammatical_features':le['grammatical_features'],'source_status':le['source_status'],'slot':s}
+   if 'language'in le:body['language']=le['language']
    out.append(source_record('morphology',le['source_entry_id']+':slot:'+str(s['slot_locator']),body,prov,target))
  return out
 

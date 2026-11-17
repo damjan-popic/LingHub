@@ -3,6 +3,7 @@ from copy import deepcopy
 import re
 from core.lexical_identity import morphology_key,source_occurrence_key
 from core.loris_roles import loris_advice_roles
+from core.lexical_planner import frequency_requested
 from .grammar_presentation import feature_labels,feature_text,pos_label
 
 EXPLICIT_BRIEF=re.compile(r'\b(?:na kratko|kratko prosim|brevemente|in breve|briefly|in short)\b',re.I)
@@ -25,7 +26,7 @@ def profile(bundle):
 def frequency_availability_notes(p,locale):
  """Explain a complete captured no-match, never a missing count or outage."""
  interpretation=p.get('interpretation')or{}
- if 'frequency'not in set(interpretation.get('requested_facets')or[])|set(interpretation.get('inferred_facets')or[]):return []
+ if not frequency_requested(interpretation):return []
  facet=(p.get('facets')or{}).get('morphology')or{}
  if facet.get('status')!='no_match':return []
  notes=[]

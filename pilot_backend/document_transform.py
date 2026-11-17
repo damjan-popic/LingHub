@@ -355,6 +355,7 @@ def _collect_document_source(gateway, family, definition, details, discovery, re
         unqueried_windows=unqueried, processing_limit_seconds=MAX_SOURCE_LOOKUP_SECONDS,
         record_limit=record_limit, record_limit_basis='native_source_limit_shared_within_document_capture_capacity',
         query_variants=[item['query'] for item in observations],
+        search_ms=sum((item['search_ms'] for item in observations), 0.0),
         elapsed_ms=sum(item.get('elapsed_ms', 0) for item in observations),
         detail_requests=sum(item.get('detail_requests', 0) for item in observations))
     return merged, result

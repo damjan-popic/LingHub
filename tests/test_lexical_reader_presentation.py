@@ -82,7 +82,7 @@ def test_inflection_patterns_have_human_titles_without_changing_source_ids():
     assert b==before
 
 
-def no_match_bundle(locale='sl',facets_key='inferred_facets'):
+def no_match_bundle(locale='sl',facets_key='requested_facets'):
     b=bundle();b['locale']=locale;p=b['analysis']['captures'][0]['response']
     p['interpretation'][facets_key]=['frequency'];p['evidence']=[]
     p['facets']['morphology']={'status':'no_match','data':[
@@ -93,7 +93,7 @@ def no_match_bundle(locale='sl',facets_key='inferred_facets'):
 
 
 @pytest.mark.parametrize('locale,facets_key',[
-    ('sl','requested_facets'),('sl','inferred_facets'),('it','requested_facets')])
+    ('sl','requested_facets'),('it','requested_facets')])
 def test_frequency_no_match_explanation_uses_frozen_scope_without_fabricating_an_entry(locale,facets_key):
     b=no_match_bundle(locale,facets_key);before=copy.deepcopy(b);cards=reader(b)
     assert b==before and cards['sections']==[]
@@ -115,7 +115,7 @@ def test_frequency_no_match_explanation_uses_frozen_scope_without_fabricating_an
 def test_frequency_availability_note_never_turns_unknown_partial_or_outage_into_absence(case):
     b=no_match_bundle();p=b['analysis']['captures'][0]['response'];facet=p['facets']['morphology']
     part=facet['data'][0];result=part['result']
-    if case=='unrequested':p['interpretation']['inferred_facets']=[]
+    if case=='unrequested':p['interpretation']['requested_facets']=[]
     elif case=='facet_unavailable':facet['status']='unavailable'
     elif case=='facet_partial':facet['status']='partial'
     elif case=='facet_unknown':facet.pop('status')

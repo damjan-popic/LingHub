@@ -7,6 +7,20 @@ SL_INFLECTION_ACTION=r'sklanj\w*|pregib\w*'
 IT_INFLECTION_ACTION=r'declin\w*|flett\w*'
 INFLECTION_CUE=SL_INFLECTION_ACTION+'|'+IT_INFLECTION_ACTION+r'|flession\w*|coniug\w*'
 FACETS={'synonyms':r'sopomen|sinonim','morphology':INFLECTION_CUE+r'|rodilnik|imenovalnik|dajalnik|tožilnik|mestnik|orodnik|nominativ|genitiv|dativ|accusativ|locativ|strumental|ednin|dvojin|množin|singolar|plural|sklon','collocations':r'kolokacij|besedn\w* zvez|collocaz','frequency':r'pogost|frekvenc','orthography':r'začetnic|pravopis|piš|zapiš','translation':r'prevod|preved|prevaj|italijanščin|slovenščin|ustreznic|traduc|traduz|(?:pove|povemo|reče|rečemo)\s+(?:po\s+)?(?:slovensko|italijansko)','meaning':r'\bkaj\s+(?:je|pomeni)\b'}
+def frequency_requested(interpretation):
+ """User task relevance, separate from default resource lookup availability.
+
+ A supplied request plan owns task scope. Legacy snapshots without that plan
+ retain their explicit requested facets; inferred lookup facets never create
+ a user-facing frequency request. No text or frozen evidence is rewritten.
+ """
+ if not isinstance(interpretation,dict):return False
+ shared=interpretation.get('request_plan')
+ if shared is None:facets=interpretation.get('requested_facets')
+ elif isinstance(shared,dict):facets=shared.get('requested_facets')
+ else:return False
+ return isinstance(facets,list)and all(isinstance(value,str)for value in facets)and'frequency'in facets
+
 GRAMMAR_CASES=(
  ('nominative',r'\b(?:imenovalnik\w*|nominativ\w*)\b'),
  ('genitive',r'\b(?:rodilnik\w*|genitiv\w*)\b'),

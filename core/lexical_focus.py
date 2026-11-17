@@ -7,7 +7,7 @@ import copy,hashlib,json
 from .lexical_identity import morphology_key,source_occurrence_key
 from .loris_roles import loris_advice_roles
 
-VERSION='lexical-focus-v5-20261103'
+VERSION='lexical-focus-v6-20261117'
 
 def editorial(fields):
     key=next((k for k in ('source_status','head_status','status')if fields.get(k)),None)
@@ -25,6 +25,58 @@ def accepted_target_match(match,target):
         and match.get('match_tier') in {'exact','morphology_exact'}
         and match.get('ambiguity_cost',0)==0
         and (match.get('match_tier')=='exact' or bool(match.get('query_signature')and match.get('lexicon_release_id'))))
+
+def compact_morphology_owned(unit, profile, targets, focus, explicit):
+    """A complete native compact record is not a rich Sloleks lexeme.
+
+    Join its original Italian facet, exact submitted analysis and complete
+    recorded whole form. This establishes membership, never an inflection
+    slot, preferred reading or translation equivalent.
+    """
+    if focus or explicit or unit.get('kind')!='morphology':return False
+    plan=profile['interpretation'];request_plan=plan.get('request_plan')or{}
+    if plan.get('requested_grammar_slots') or request_plan.get('requested_grammar_slots'):
+        return False
+    target=unit.get('target');fields=unit.get('fields')or{}
+    if (target not in targets or target not in {row.get('text')for row in plan.get('targets',[])
+            if isinstance(row,dict)} or not isinstance(target,str) or not target
+            or fields.get('lang')!='it' or 'it'not in plan.get('lookup_languages',[])
+            or fields.get('status')!='ok' or fields.get('matched_by')!='exact'
+            or fields.get('truncated')is not False
+            or fields.get('msd_filter')is not None
+            or unit.get('match_relation')!='recorded_target'
+            or unit.get('supporting_origin')is not None):return False
+    if 'term_language_binding_unresolved'in request_plan.get('ambiguities',[]):return False
+    owned=[row for row in request_plan.get('target_spans',[])
+           if isinstance(row,dict) and row.get('text')==target]
+    if any(row.get('term_language')not in {None,'it'} for row in owned):return False
+    forms=fields.get('forms')
+    if (not isinstance(forms,list) or not forms
+            or any(not isinstance(row,dict) or not isinstance(row.get('form'),str)
+                   for row in forms)
+            or not any(row['form']==target for row in forms)):return False
+    provenance=unit.get('provenance')
+    if (not isinstance(provenance,dict) or fields.get('provenance')!=provenance
+            or not all(isinstance(provenance.get(key),str) and provenance[key]
+                       for key in ('resource_id','version','source_identifier','license','fingerprint'))):
+        return False
+    facet=(profile.get('facets')or{}).get('italian_morphology')or{}
+    for part in facet.get('data')or[]:
+        if not isinstance(part,dict) or part.get('target')!=target:continue
+        if fields not in (part.get('paradigms')or[]):continue
+        analysis=part.get('analysis')or{}
+        items=analysis.get('items')or[]
+        if (analysis.get('status')!='ok' or analysis.get('lang')!='it'
+                or analysis.get('truncated')is not False or len(items)!=1
+                or not isinstance(items[0],dict) or items[0].get('input')!=target
+                or items[0].get('status')!='ok' or items[0].get('truncated')is not False):continue
+        if any(isinstance(candidate,dict) and candidate.get('language')=='it'
+               and candidate.get('lemma')==fields.get('lemma')
+               and candidate.get('matched_by')=='exact'
+               for candidate in items[0].get('candidates',[])):
+            return True
+    return False
+
 
 def focus_profile(profile):
     """Return a new annotated revision; old saved captures remain untouched."""
@@ -82,6 +134,8 @@ def focus_profile(profile):
         if matching:ids=matching
         chosen[part['target']]=({morphology_key(le)for le in les if le['lemma']==part['target']}
             if part['target']in acronym_targets else ids if intended else ids or {morphology_key(le)for le in les})
+    compact_ids={u['record_id'] for u in p['evidence']
+        if compact_morphology_owned(u,p,targets,focus,explicit)}
     primary_ids=set().union(*chosen.values())if chosen else set()
     proper_only=bool(primary_ids)and all(lexemes[i]['grammatical_features'].get('type')=='proper'for i in primary_ids)
     groups={}
@@ -90,7 +144,8 @@ def focus_profile(profile):
         status=editorial(f);u['editorial_status']=status
         if translation and kind not in {'terminology','loris'}:state,reason='excluded','translation_whole_target'
         elif kind=='morphology':
-            if ident not in chosen.get(u['target'],set()):state,reason='alternative','different_lexical_identity'
+            if u['record_id']in compact_ids:reason='recorded_compact_whole_form'
+            elif ident not in chosen.get(u['target'],set()):state,reason='alternative','different_lexical_identity'
         elif kind in {'synonyms','collocations'}:
             origin=u.get('supporting_origin')
             if origin is not None:
@@ -154,6 +209,9 @@ def focus_profile(profile):
     p['interpretation']['selection']={'version':VERSION,
         'primary_lexeme_ids':sorted({lexemes[i]['source_entry_id']for i in primary_ids}),
         'primary_occurrence_keys':sorted(primary_ids),
+        'compact_morphology_by_target':{target:sorted(u['record_id'] for u in p['evidence']
+            if u['target']==target and u['captured_unit_id']in compact_ids
+            and u['selection']['state']=='primary')for target in targets},
         'morphology_by_target':{k:sorted({lexemes[i]['source_entry_id']for i in v})for k,v in chosen.items()},
         'morphology_occurrences_by_target':{k:sorted(v)for k,v in chosen.items()},'proper_name':proper_only,
         'policy':'Same annotation consumed by prose and cards; all candidates retained in this capture'}

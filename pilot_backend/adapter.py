@@ -54,6 +54,22 @@ class Gateway:
                                     failure=Failure(code,response.status_code)
                                     failure.http_status=response.status_code
                             except (ValueError,TypeError):pass
+                        if base is None and path=='/internal/pilot/document-transform':
+                            # Only this closed CORE error contract is retained.
+                            # Never keep an upstream body, message or input field.
+                            failure.http_status=response.status_code
+                            raw=bytearray()
+                            try:
+                                for chunk in response.iter_bytes():
+                                    raw.extend(chunk[:1025-len(raw)])
+                                    if len(raw)>1024:break
+                                data=json.loads(raw)if len(raw)<=1024 else{}
+                                detail=(data.get('error')or data.get('detail')or{})if isinstance(data,dict)else{}
+                                code=detail.get('code')if isinstance(detail,dict)else detail
+                                if isinstance(code,str)and code in {'PILOT_BUSY','PILOT_TIMEOUT','PILOT_INVALID_DOCUMENT_REQUEST'}:
+                                    failure=Failure(code,response.status_code)
+                                    failure.http_status=response.status_code
+                            except (ValueError,TypeError,httpx.HTTPError):pass
                         if base is None and path=='/internal/pilot/generate':
                             # Preserve useful classifications without retaining an
                             # upstream response body, URL, credential or traceback.

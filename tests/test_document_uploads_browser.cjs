@@ -43,8 +43,8 @@ ui.session({documents:{enabled:true}});
  try{for(const locale of ['sl','it'])for(const width of [390,1280]){
   const context=await browser.newContext({viewport:{width,height:950},acceptDownloads:true}),page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
-  await context.route(origin+'/**',async route=>{
-   const file=new URL(route.request().url()).pathname.slice(1);
+  await context.route('**/*',async route=>{
+   const url=new URL(route.request().url());assert.equal(url.origin,origin);const file=url.pathname.slice(1);
    const content=file==='harness.mjs'?harness:file==='document-uploads.mjs'?fs.readFileSync(path.join(assets,file),'utf8'):file==='pilot.css'?fs.readFileSync(path.join(assets,file),'utf8'):'<!doctype html><html><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/pilot.css"></head><body><main><section id="workspace" class="subpanel" hidden></section></main><script type="module" src="/harness.mjs"></script></body></html>';
    await route.fulfill({status:200,contentType:file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':'text/html',headers:{'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'"},body:content});
   });

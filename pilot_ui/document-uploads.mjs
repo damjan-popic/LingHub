@@ -15,6 +15,16 @@ messages.it.document_translation_cancel_pending='La traduzione del documento è 
 export function documentUploads({root,opener=null,api,locale,openFamily,errorText}){
  let current=null,rows=[],timer=null,epoch=0,selection=0,expanded=false,enabled=false,privateTranslation=false,evidenceReview=false,evidenceOnly=false,editorialSummary=false,aiSuggestions=false,busy=false,uploadKey=null,statusState=null,fileInput=null,renderedDocumentId=null;
  const values={mode:'review',source_language:'sl',target_language:'it',translation_provider:''};
+ const busyControls=new WeakMap();let busyFocus=null;
+ // Locale renders replace controls while retaining the selected native input.
+ // Keep prior disabled states, and do not steal focus moved by the user.
+ function syncBusyControls(){
+  for(const control of root.querySelectorAll('input[type=file], [data-document-file-choose], [data-document-upload-submit], [data-document-list]')){
+   if(busy){if(!busyControls.has(control))busyControls.set(control,control.disabled);if(document.activeElement===control)busyFocus=control;control.disabled=true;}
+   else if(busyControls.has(control)){control.disabled=busyControls.get(control);busyControls.delete(control);}
+  }
+  if(!busy){if(busyFocus?.isConnected&&!busyFocus.disabled&&document.activeElement===document.body)busyFocus.focus({preventScroll:true});busyFocus=null;}
+ }
  const tr=key=>{
   if(evidenceOnly){
    const it=locale()==='it';
@@ -49,10 +59,10 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   statusState=error?{...owner,origin,error}:null;paintStatus();
  }
  function clearStatus(origin,owner){if(statusState?.origin===origin&&sameOwner(statusState,owner)){statusState=null;paintStatus();}}
- async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');const token=epoch;
+ async function act(fn){if(busy)return;busy=true;clearTimeout(timer);selection++;status(null);root.setAttribute('aria-busy','true');syncBusyControls();const token=epoch;
   // A delayed poll for the previous document must not replace a new upload,
   // cancellation or deletion. Polling resumes for the resulting selection.
-  try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');schedule();}}}
+  try{await fn();}catch(error){if(token===epoch)status(error);}finally{if(token===epoch){busy=false;root.removeAttribute('aria-busy');syncBusyControls();schedule();}}}
  function button(parent,title,fn){const n=el('button',tr(title),{type:'button',class:'plain','data-document-focus-key':title});n.addEventListener('click',()=>act(fn));parent.append(n);return n;}
  async function refresh(){const owner=statusOwner('list');try{const response=await api('/documents');if(!sameOwner(owner,statusOwner('list')))return;rows=response.documents;renderList();clearStatus('list',owner);}catch(error){if(sameOwner(owner,statusOwner('list')))throw error;}}
  function renderList(){const select=root.querySelector('[data-document-list]');if(!select)return;select.replaceChildren(el('option',tr(rows.length?'choose':'empty'),{value:''}));for(const row of rows)select.append(el('option',row.name+' · '+stateLabel(row.state),{value:row.document_id}));select.value=current?.document_id||'';}
@@ -248,9 +258,9 @@ export function documentUploads({root,opener=null,api,locale,openFamily,errorTex
   const form=el('form'),fileId=(root.id||'document-workspace')+'-file',nameId=fileId+'-name';
   if(!fileInput){fileInput=el('input',undefined,{id:fileId,type:'file',accept:'.txt,.docx',required:'required',class:'sr-only',tabindex:'-1','aria-hidden':'true'});fileInput.addEventListener('change',()=>{uploadKey=null;paintFileSelection();if(statusState?.error.code==='document_file_required')status(null);});fileInput.addEventListener('invalid',event=>{event.preventDefault();status({code:'document_file_required'});root.querySelector('[data-document-file-choose]')?.focus();});}
   const input=fileInput,field=el('div',undefined,{class:'document-file-field',role:'group','aria-label':tr('file')}),choice=el('div',undefined,{class:'document-file-choice'}),chooser=el('button',tr('choose_file'),{type:'button',class:'secondary','data-document-file-choose':'','aria-controls':fileId,'aria-describedby':nameId});
-  input.setAttribute('aria-label',tr('choose_file'));chooser.addEventListener('click',()=>input.click());choice.append(chooser,el('span',undefined,{id:nameId,class:'small muted document-file-name',role:'status','aria-live':'polite','aria-atomic':'true','data-document-file-name':''}));field.append(el('span',tr('file'),{class:'document-file-label'}),input,choice);form.append(field,el('button',tr('upload'),{type:'submit',class:'secondary'}));
+  input.setAttribute('aria-label',tr('choose_file'));chooser.addEventListener('click',()=>input.click());choice.append(chooser,el('span',undefined,{id:nameId,class:'small muted document-file-name',role:'status','aria-live':'polite','aria-atomic':'true','data-document-file-name':''}));field.append(el('span',tr('file'),{class:'document-file-label'}),input,choice);form.append(field,el('button',tr('upload'),{type:'submit',class:'secondary','data-document-upload-submit':''}));
   form.addEventListener('submit',event=>{event.preventDefault();act(async()=>{const file=input.files[0];if(!file)return;if(file.size>2*1024*1024){const error=Error();error.code='document_too_large';throw error;}uploadKey??=crypto.randomUUID();const token=epoch;const result=await api('/documents/upload',{method:'POST',blob:file,headers:{'X-Document-Name':encodeURIComponent(file.name),'X-Upload-Key':uploadKey}});if(token!==epoch)return;current=result;input.value='';uploadKey=null;paintFileSelection();renderDocument();await refresh();});});outer.append(form);paintFileSelection();
-  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument(view);
+  outer.append(el('p','',{role:'status','aria-live':'polite','data-document-status':''}));paintStatus();const list=label(outer,tr('saved'),select([],''));list.setAttribute('data-document-list','');list.addEventListener('change',()=>{if(list.value)act(()=>load(list.value));});outer.append(el('div',undefined,{'data-document-detail':''}));renderList();renderDocument(view);syncBusyControls();
  }
  if(opener)opener.addEventListener('click',()=>{if(!enabled)return;expanded=!expanded;root.hidden=!expanded;opener.setAttribute('aria-expanded',String(expanded));if(expanded)root.querySelector('[data-document-file-choose]')?.focus();});
  return {
